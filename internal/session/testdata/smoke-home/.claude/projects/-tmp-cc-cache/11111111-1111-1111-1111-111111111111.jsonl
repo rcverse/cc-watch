@@ -1,0 +1,2 @@
+{"timestamp":"2026-06-03T12:00:00Z","usage":{"cache_creation_input_tokens":100,"cache_read_input_tokens":900,"output_tokens":50,"ephemeral_1h_input_tokens":1},"message":{"role":"user","content":"start"}}
+{"timestamp":"2026-06-03T12:05:00Z","message":{"role":"user","content":"continue"}}

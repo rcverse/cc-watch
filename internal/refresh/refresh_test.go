@@ -1,0 +1,305 @@
+package refresh
+
+import (
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/richardchen/cc-cache/internal/session"
+)
+
+func TestWatcherSetupRegistersRootAndExistingProjectDirectories(t *testing.T) {
+	projectsDir := "/tmp/home/.claude/projects"
+	fs := &fakeWatchFS{
+		dirs: []string{
+			projectsDir,
+			projectsDir + "/-tmp-alpha",
+			projectsDir + "/-tmp-alpha/nested",
+			projectsDir + "/-tmp-beta",
+		},
+	}
+
+	watcher, err := NewWatcher(projectsDir, fs)
+	if err != nil {
+		t.Fatalf("NewWatcher returned error: %v", err)
+	}
+
+	for _, want := range []string{projectsDir, projectsDir + "/-tmp-alpha", projectsDir + "/-tmp-alpha/nested", projectsDir + "/-tmp-beta"} {
+		if !watcher.Watched(want) {
+			t.Fatalf("watcher did not register %q; watched=%#v", want, watcher.WatchedPaths())
+		}
+	}
+	if watcher.State().Status != StatusOK {
+		t.Fatalf("status = %q, want ok: %#v", watcher.State().Status, watcher.State())
+	}
+}
+
+func TestWatcherSetupFailureAndPartialFailureProduceDegradedState(t *testing.T) {
+	projectsDir := "/tmp/home/.claude/projects"
+	fs := &fakeWatchFS{
+		dirs:       []string{projectsDir, projectsDir + "/-tmp-alpha", projectsDir + "/-tmp-denied"},
+		watchErrs:  map[string]error{projectsDir + "/-tmp-denied": errors.New("permission denied")},
+		fatalWatch: map[string]bool{projectsDir: false},
+	}
+
+	watcher, err := NewWatcher(projectsDir, fs)
+	if err != nil {
+		t.Fatalf("NewWatcher returned error for partial failure: %v", err)
+	}
+	state := watcher.State()
+	if state.Status != StatusPartial {
+		t.Fatalf("status = %q, want partial: %#v", state.Status, state)
+	}
+	if !strings.Contains(strings.Join(state.Messages, "\n"), "-tmp-denied") || !strings.Contains(strings.Join(state.Messages, "\n"), "permission denied") {
+		t.Fatalf("messages do not include denied path and reason: %#v", state.Messages)
+	}
+
+	_, err = NewWatcher(projectsDir, &fakeWatchFS{
+		dirs:       []string{projectsDir},
+		watchErrs:  map[string]error{projectsDir: errors.New("root unavailable")},
+		fatalWatch: map[string]bool{projectsDir: true},
+	})
+	if err == nil {
+		t.Fatal("NewWatcher returned nil error for root watch failure")
+	}
+}
+
+func TestWatcherNormalizesEventsAndAddsCreatedDirectories(t *testing.T) {
+	projectsDir := "/tmp/home/.claude/projects"
+	fs := &fakeWatchFS{
+		dirs: []string{projectsDir},
+		isDir: map[string]bool{
+			projectsDir + "/-tmp-new": true,
+		},
+	}
+	watcher, err := NewWatcher(projectsDir, fs)
+	if err != nil {
+		t.Fatalf("NewWatcher returned error: %v", err)
+	}
+
+	events := []RawEvent{
+		{Path: projectsDir + "/-tmp-new", Op: OpCreate},
+		{Path: projectsDir + "/-tmp-new/session.jsonl", Op: OpWrite},
+		{Path: projectsDir + "/-tmp-new/session.jsonl", Op: OpRename},
+		{Path: projectsDir + "/-tmp-new/session.jsonl", Op: OpDelete},
+	}
+	normalized := watcher.Normalize(events)
+
+	if !watcher.Watched(projectsDir + "/-tmp-new") {
+		t.Fatalf("created directory was not watched: %#v", watcher.WatchedPaths())
+	}
+	if len(normalized) != 4 {
+		t.Fatalf("len(normalized) = %d, want 4", len(normalized))
+	}
+	for i, want := range []EventKind{EventCreated, EventWritten, EventRenamed, EventDeleted} {
+		if normalized[i].Kind != want {
+			t.Fatalf("event %d kind = %q, want %q", i, normalized[i].Kind, want)
+		}
+	}
+}
+
+func TestNewDirectoryWatchFailureDegradesWithoutStoppingSafetyRefresh(t *testing.T) {
+	projectsDir := "/tmp/home/.claude/projects"
+	newDir := projectsDir + "/-tmp-new"
+	fs := &fakeWatchFS{
+		dirs:      []string{projectsDir},
+		isDir:     map[string]bool{newDir: true},
+		watchErrs: map[string]error{newDir: errors.New("permission denied")},
+	}
+	watcher, err := NewWatcher(projectsDir, fs)
+	if err != nil {
+		t.Fatalf("NewWatcher returned error: %v", err)
+	}
+
+	_ = watcher.Normalize([]RawEvent{{Path: newDir, Op: OpCreate}})
+	state := watcher.State()
+	if state.Status != StatusPartial {
+		t.Fatalf("status = %q, want partial after new dir failure", state.Status)
+	}
+	if !state.SafetyRefreshActive {
+		t.Fatal("SafetyRefreshActive = false, want true after watcher degradation")
+	}
+}
+
+func TestWatcherCloseOrErrorAfterStartupDegradesState(t *testing.T) {
+	watcher, err := NewWatcher("/tmp/projects", &fakeWatchFS{dirs: []string{"/tmp/projects"}})
+	if err != nil {
+		t.Fatalf("NewWatcher returned error: %v", err)
+	}
+
+	watcher.MarkRuntimeError(errors.New("watcher closed"))
+
+	state := watcher.State()
+	if state.Status != StatusDegraded {
+		t.Fatalf("status = %q, want degraded", state.Status)
+	}
+	if !strings.Contains(strings.Join(state.Messages, "\n"), "watcher closed") {
+		t.Fatalf("messages = %#v, want runtime error", state.Messages)
+	}
+}
+
+func TestCoordinatorDebounceSafetyManualAndGenerationOrdering(t *testing.T) {
+	parser := &fakeParser{
+		results: map[string][]session.Session{
+			"fsnotify": {{SessionID: "debounced"}},
+			"safety":   {{SessionID: "safety"}},
+			"manual":   {{SessionID: "manual"}},
+		},
+	}
+	coordinator := NewCoordinator(Options{
+		Debounce:        200 * time.Millisecond,
+		SafetyInterval:  time.Minute,
+		Parser:          parser.Parse,
+		ProjectsDir:     "/tmp/projects",
+		InitialNow:      time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC),
+		InitialSessions: []session.Session{{SessionID: "old"}},
+	})
+
+	first := coordinator.OnWatcherEvents([]NormalizedEvent{{Kind: EventWritten, Path: "/tmp/a.jsonl"}})
+	second := coordinator.OnWatcherEvents([]NormalizedEvent{{Kind: EventWritten, Path: "/tmp/b.jsonl"}})
+	if first.ShouldRefresh || second.ShouldRefresh {
+		t.Fatalf("debounced watcher events refreshed immediately: first=%#v second=%#v", first, second)
+	}
+	if coordinator.PendingDebounceCount() != 1 {
+		t.Fatalf("pending debounce count = %d, want coalesced 1", coordinator.PendingDebounceCount())
+	}
+
+	debounced := coordinator.OnDebounceElapsed(time.Date(2026, 6, 4, 12, 0, 1, 0, time.UTC))
+	if !debounced.ShouldRefresh || debounced.Source != SourceFsnotify || debounced.Generation != 1 {
+		t.Fatalf("debounced decision = %#v, want fsnotify generation 1", debounced)
+	}
+	safety := coordinator.OnSafetyTick(time.Date(2026, 6, 4, 12, 1, 0, 0, time.UTC))
+	if !safety.ShouldRefresh || safety.Source != SourceSafety || safety.Generation != 2 {
+		t.Fatalf("safety decision = %#v, want safety generation 2", safety)
+	}
+	manual := coordinator.OnManualRefresh()
+	if !manual.ShouldRefresh || manual.Source != SourceManual || manual.Generation != 3 {
+		t.Fatalf("manual decision = %#v, want manual generation 3", manual)
+	}
+	if !manual.BypassedDebounce {
+		t.Fatalf("manual BypassedDebounce = false, want true")
+	}
+
+	coordinator.ApplyResult(Result{Generation: manual.Generation, Sessions: parser.Parse("manual")})
+	coordinator.ApplyResult(Result{Generation: debounced.Generation, Sessions: parser.Parse("fsnotify")})
+	if got := coordinator.Sessions(); len(got) != 1 || got[0].SessionID != "manual" {
+		t.Fatalf("stale debounced result overwrote manual result: %#v", got)
+	}
+}
+
+func TestOlderParseResultCannotResurrectDeletedOrRenamedSession(t *testing.T) {
+	coordinator := NewCoordinator(Options{
+		Parser:          (&fakeParser{}).Parse,
+		ProjectsDir:     "/tmp/projects",
+		InitialSessions: []session.Session{{SessionID: "deleted"}},
+	})
+
+	old := coordinator.NextRefresh(SourceFsnotify)
+	newer := coordinator.NextRefresh(SourceManual)
+	coordinator.ApplyResult(Result{Generation: newer.Generation, Sessions: []session.Session{}})
+	coordinator.ApplyResult(Result{Generation: old.Generation, Sessions: []session.Session{{SessionID: "deleted"}}})
+
+	if got := coordinator.Sessions(); len(got) != 0 {
+		t.Fatalf("older result resurrected deleted session: %#v", got)
+	}
+}
+
+func TestOlderIssuedResultCannotApplyBeforeNewerResultReturns(t *testing.T) {
+	coordinator := NewCoordinator(Options{
+		Parser:          (&fakeParser{}).Parse,
+		ProjectsDir:     "/tmp/projects",
+		InitialSessions: []session.Session{{SessionID: "old"}},
+	})
+
+	fsnotify := coordinator.NextRefresh(SourceFsnotify)
+	manual := coordinator.NextRefresh(SourceManual)
+	coordinator.ApplyResult(Result{Generation: fsnotify.Generation, Sessions: []session.Session{{SessionID: "stale"}}})
+	if got := coordinator.Sessions(); len(got) != 1 || got[0].SessionID != "old" {
+		t.Fatalf("older issued result applied before newer result returned: %#v", got)
+	}
+
+	coordinator.ApplyResult(Result{Generation: manual.Generation, Sessions: []session.Session{{SessionID: "manual"}}})
+	if got := coordinator.Sessions(); len(got) != 1 || got[0].SessionID != "manual" {
+		t.Fatalf("current generation result did not apply: %#v", got)
+	}
+}
+
+func TestWatcherEmitsBubbleteaMessagesFromEventAndErrorStreams(t *testing.T) {
+	projectsDir := "/tmp/home/.claude/projects"
+	events := make(chan RawEvent, 1)
+	errs := make(chan error, 1)
+	fs := &fakeWatchFS{
+		dirs:   []string{projectsDir},
+		events: events,
+		errs:   errs,
+	}
+	watcher, err := NewWatcher(projectsDir, fs)
+	if err != nil {
+		t.Fatalf("NewWatcher returned error: %v", err)
+	}
+
+	events <- RawEvent{Path: projectsDir + "/session.jsonl", Op: OpWrite}
+	msg := watcher.NextMessage()
+	eventMsg, ok := msg.(WatcherEventsMsg)
+	if !ok {
+		t.Fatalf("message = %#v, want WatcherEventsMsg", msg)
+	}
+	if len(eventMsg.Events) != 1 || eventMsg.Events[0].Kind != EventWritten {
+		t.Fatalf("events = %#v, want written event", eventMsg.Events)
+	}
+
+	errs <- errors.New("watcher closed")
+	msg = watcher.NextMessage()
+	degradedMsg, ok := msg.(WatcherDegradedMsg)
+	if !ok {
+		t.Fatalf("message = %#v, want WatcherDegradedMsg", msg)
+	}
+	if degradedMsg.State.Status != StatusDegraded {
+		t.Fatalf("state = %#v, want degraded", degradedMsg.State)
+	}
+}
+
+type fakeWatchFS struct {
+	dirs       []string
+	isDir      map[string]bool
+	watchErrs  map[string]error
+	fatalWatch map[string]bool
+	events     <-chan RawEvent
+	errs       <-chan error
+}
+
+func (fs *fakeWatchFS) WalkDirs(root string) ([]string, error) {
+	return append([]string(nil), fs.dirs...), nil
+}
+
+func (fs *fakeWatchFS) Watch(path string) error {
+	if err := fs.watchErrs[path]; err != nil {
+		return err
+	}
+	return nil
+}
+
+func (fs *fakeWatchFS) IsDir(path string) bool {
+	return fs.isDir[path]
+}
+
+func (fs *fakeWatchFS) FatalWatchError(path string) bool {
+	return fs.fatalWatch[path]
+}
+
+func (fs *fakeWatchFS) Events() <-chan RawEvent {
+	return fs.events
+}
+
+func (fs *fakeWatchFS) Errors() <-chan error {
+	return fs.errs
+}
+
+type fakeParser struct {
+	results map[string][]session.Session
+}
+
+func (p *fakeParser) Parse(source string) []session.Session {
+	return append([]session.Session(nil), p.results[source]...)
+}

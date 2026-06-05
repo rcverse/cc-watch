@@ -1,0 +1,2 @@
+{"timestamp":"2026-06-03T00:00:00Z","usage":{"cache_creation_input_tokens":10},"message":{"role":"user","content":"unknown ttl start"}}
+{"timestamp":"2026-06-03T00:06:40Z","usage":{"cache_read_input_tokens":5},"message":{"role":"assistant","content":"gap exceeds conservative unknown ttl"}}

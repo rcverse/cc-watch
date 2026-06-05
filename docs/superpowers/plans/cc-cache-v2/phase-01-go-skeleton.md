@@ -1,0 +1,41 @@
+# cc-cache v2 Phase 1: Go Skeleton
+
+> Sliced mechanically from the original consolidated plan. This file is the active checklist for Phase 1.
+
+## Phase 1: Preserve v1 And Establish Go Project Skeleton
+
+**Purpose:** Make v2 buildable without breaking the current command path.
+
+- [x] **Step 1.0: Verify or bootstrap Go toolchain**
+  - Files: none unless toolchain installation notes are added to `README.md` later in Phase 13.
+  - Run: `go version`.
+  - Expected if Go is present: Go 1.23 or newer.
+  - If missing or older: ask the user before installing Go tooling. Recommended macOS path is Homebrew Go installation if Homebrew is available; otherwise use the official Go installer. Do not install tooling silently.
+  - Verification after install: `go version` reports Go 1.23 or newer.
+
+- [x] **Step 1.1: Archive v1 by copy**
+  - Create: `archive/v1/README.md`, `archive/v1/cc_cache.py`, `archive/v1/install-v1.sh`.
+  - Modify: none.
+  - Verification: `cmp cc_cache.py archive/v1/cc_cache.py` passes immediately after copy; `cmp install.sh archive/v1/install-v1.sh` passes immediately after copy.
+  - Gate: root `cc_cache.py` remains present and executable.
+
+- [x] **Step 1.2: Verify v1 command path still works**
+  - Run: `command -v cc-cache`.
+  - Expected: `/Users/richardchen/.local/bin/cc-cache`.
+  - Run: `ls -l "$HOME/.local/bin/cc-cache"`.
+  - Expected before switchover: symlink points to `/Users/richardchen/Dev/cc-cache/cc_cache.py`.
+  - Run: `cc-cache --help`.
+  - Expected: v1 help exits successfully.
+
+- [x] **Step 1.3: Initialize Go module**
+  - Create: `go.mod`, `go.sum`.
+  - Depends on: `docs/adr/2026-06-03-go-module-and-release-identity.md`.
+  - Run: `go mod init github.com/richardchen/cc-cache`.
+  - Add dependencies: Bubbletea, bubbles, lipgloss, fsnotify.
+  - Verification: `go mod tidy` succeeds and `go test ./...` succeeds with no runtime packages yet or only skeleton packages.
+
+- [x] **Step 1.4: Create CLI skeleton**
+  - Create: `cmd/cc-cache/main.go`, `internal/app/cli.go`, `internal/app/app.go`, `internal/app/version.go`, `internal/app/cli_test.go`.
+  - Behavior: support `--help`, `--version`, `--n`, `--id`, `--json`, `--remind`, and `config`; explicitly reject `--watch`.
+  - Test assertions: help/version exit without session discovery; rejected `--watch` exits non-zero; `--json` dispatch is parsed as non-interactive but returns a clear "not wired yet" app error until Phase 3; `config` dispatch is parsed without starting Bubbletea until Phase 10.
+  - Verification: `go test ./internal/app`, `go run ./cmd/cc-cache --help`, `go run ./cmd/cc-cache --version`, and `go run ./cmd/cc-cache --watch` produce expected output; `--watch` exits non-zero with a clear message.

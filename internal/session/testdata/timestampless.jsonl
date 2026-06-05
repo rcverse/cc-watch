@@ -1,0 +1,2 @@
+{"usage":{"cache_creation_input_tokens":7,"cache_read_input_tokens":3,"output_tokens":1},"message":{"role":"user","content":"timestampless synthetic prompt"}}
+{"message":{"role":"assistant","content":"no timestamp here either"}}
