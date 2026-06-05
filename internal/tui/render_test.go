@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/richardchen/cc-cache/internal/config"
+	"github.com/richardchen/cc-cache/internal/keepalive"
 	"github.com/richardchen/cc-cache/internal/notify"
 	"github.com/richardchen/cc-cache/internal/refresh"
 	"github.com/richardchen/cc-cache/internal/session"
@@ -338,11 +340,182 @@ func TestNotificationDeliverySuccessRecordsStatusWithoutDegradedBanner(t *testin
 	}
 }
 
+func TestWorkspaceRendersEvidenceAndControlsSeparately(t *testing.T) {
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	model := NewModel(Options{
+		Now:                now,
+		Width:              120,
+		SelectedID:         "workspace-id",
+		ReminderThresholds: []int{20, 10},
+		Sessions:           []session.Session{workspaceSession(now)},
+	})
+
+	view := model.View()
+	for _, want := range []string{
+		"cc-cache / workspace-api / workspace",
+		"Session Evidence",
+		"Status",
+		"Messages",
+		"Token Stats",
+		"Gaps",
+		"Controls",
+		"[ ] Reminder   alert at 20%, 10%   Sends no Claude message.",
+		"[ ] KeepAlive  [x] auto-send · trigger 5m · scope 1 send   Off. No message.",
+		"copy ID",
+		"manual refresh",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("workspace view missing %q:\n%s", want, view)
+		}
+	}
+
+	assertOrder(t, view, "Session Evidence", "Status", "Messages", "Token Stats", "Gaps", "Controls")
+}
+
+func TestWorkspaceKeepAliveCardStatesRenderSafetyContract(t *testing.T) {
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	cfg := config.Default().KeepAlive
+	cfg.AutoSend = true
+
+	for _, tc := range []struct {
+		name  string
+		state keepalive.SessionState
+		want  []string
+	}{
+		{
+			name:  "watching auto-send on",
+			state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateMonitoringIdle, AutoSend: true, MaxSends: 1},
+			want:  []string{"watching", "State    Watching cache expiry", "Next     Countdown at", "Claude message  May send after countdown unless canceled", "Scope    0 / 1 sends · auto-send [x] on"},
+		},
+		{
+			name:  "watching auto-send off",
+			state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateMonitoringIdle, AutoSend: false, MaxSends: 1},
+			want:  []string{"watching", "State    Watching cache expiry", "Next     Manual prompt at", "Claude message  Will not send automatically", "Scope    0 / 1 sends · auto-send [ ] off"},
+		},
+		{
+			name:  "countdown",
+			state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateCountdown, AutoSend: true, ScopeUsed: 0, MaxSends: 1, InstanceToken: 7},
+			want:  []string{"countdown", "State    Countdown 24s", "Next     Send now or cancel before countdown ends", "Claude message  Will send at zero if not canceled", "Controls Send now · Cancel this instance"},
+		},
+		{
+			name:  "manual prompt",
+			state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateManualReady, AutoSend: false, MaxSends: 1, InstanceToken: 8},
+			want:  []string{"manual prompt", "State    Manual send available", "Next     Send now or dismiss", "Claude message  Not sent", "Controls Send now · Dismiss"},
+		},
+		{
+			name:  "confirming",
+			state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateConfirming, AutoSend: true, ScopeUsed: 1, MaxSends: 1, InstanceToken: 9},
+			want:  []string{"confirming", "State    Confirming result", "Next     Watching this session JSONL", "Claude message  Sent, awaiting evidence", "Controls Stop waiting"},
+		},
+		{
+			name:  "success",
+			state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateSuccess, AutoSend: true, ScopeUsed: 1, MaxSends: 1, InstanceToken: 10, LastResult: "confirmed at 12:00:30"},
+			want:  []string{"done", "State    Cache refreshed", "Claude message  Sent and confirmed", "Evidence confirmed at 12:00:30"},
+		},
+		{
+			name:  "failure",
+			state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateErrorNoClaude, AutoSend: false, ScopeUsed: 1, MaxSends: 1, InstanceToken: 11, LastFailure: "claude command not found"},
+			want:  []string{"failed", "State    Failed: claude command not found", "Claude message  Stopped or not confirmed", "Auto-send stopped", "Manual fallback:", "claude -r workspace-id -p"},
+		},
+		{
+			name:  "scope complete",
+			state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateScopeComplete, AutoSend: false, ScopeUsed: 1, MaxSends: 1, InstanceToken: 12},
+			want:  []string{"scope complete", "State    Scope complete", "Claude message  No more automatic sends", "Controls Acknowledge · Turn Off"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			model := NewModel(Options{
+				Now:             now,
+				Width:           120,
+				SelectedID:      "workspace-id",
+				Sessions:        []session.Session{workspaceSession(now)},
+				KeepAliveConfig: cfg,
+				KeepAliveStates: map[string]keepalive.SessionState{"workspace-id": tc.state},
+				Countdowns:      map[string]int{"workspace-id": 24},
+			})
+			view := model.View()
+			for _, want := range tc.want {
+				if !strings.Contains(view, want) {
+					t.Fatalf("%s view missing %q:\n%s", tc.name, want, view)
+				}
+			}
+		})
+	}
+}
+
+func TestWorkspaceShowsClaudeUnavailableBeforeCountdownCanSend(t *testing.T) {
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	model := NewModel(Options{
+		Now:        now,
+		SelectedID: "workspace-id",
+		Sessions:   []session.Session{workspaceSession(now)},
+		Refresh:    RefreshViewState{ClaudeUnavailableMessage: "claude command not found"},
+		KeepAliveStates: map[string]keepalive.SessionState{
+			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateErrorNoClaude, AutoSend: false, LastFailure: "claude command not found", MaxSends: 1},
+		},
+	})
+
+	view := model.View()
+	for _, want := range []string{"claude unavailable: claude command not found", "Failed: claude command not found", "Manual fallback:"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("workspace unavailable view missing %q:\n%s", want, view)
+		}
+	}
+}
+
 func listViewSessions(now time.Time) []session.Session {
 	return []session.Session{
 		listViewSession("older-id", "old", now.Add(-2*time.Hour), now.Add(-2*time.Hour), session.CacheWindow{Label: "1h", TTLSeconds: 3600, Known: true}, "old first", "old last"),
 		listViewSession("newer-id", "new", now, now.Add(-5*time.Minute), session.CacheWindow{Label: "1h", TTLSeconds: 3600, Known: true}, "new first", "new last"),
 		listViewSession("middle-id", "mid", now.Add(-time.Hour), now.Add(-10*time.Minute), session.CacheWindow{Label: "5m", TTLSeconds: 300, Known: true}, "mid first", "mid last"),
+	}
+}
+
+func workspaceSession(now time.Time) session.Session {
+	last := now.Add(-54 * time.Minute)
+	duration := 3*3600 + 8*60
+	return session.Session{
+		SessionID:       "workspace-id",
+		ShortID:         "workspace",
+		Project:         "workspace-api",
+		JSONLPath:       "/tmp/home/.claude/projects/workspace-api/workspace-id.jsonl",
+		FileModifiedAt:  now,
+		LastMessageAt:   &last,
+		StartedAt:       &last,
+		EndedAt:         &now,
+		DurationSeconds: &duration,
+		CacheWindow: session.CacheWindow{
+			Tier:       session.Tier1Hour,
+			Label:      "1h",
+			TTLSeconds: 3600,
+			Known:      true,
+			Evidence:   []string{"ephemeral_1h_input_tokens"},
+		},
+		Messages: session.Messages{
+			FirstUserExcerpt: "can you check whether this session is cached for 5m or 1h?",
+			LastUserExcerpt:  "please continue the implementation",
+		},
+		TokenStats: session.TokenStats{
+			CacheWrites: 100,
+			CacheReads:  900,
+			HitRate:     90,
+		},
+		Gaps: []session.Gap{{Seconds: 60, From: last, To: last.Add(time.Minute)}},
+	}
+}
+
+func assertOrder(t *testing.T, text string, values ...string) {
+	t.Helper()
+	previous := -1
+	for _, value := range values {
+		index := strings.Index(text, value)
+		if index == -1 {
+			t.Fatalf("missing %q in:\n%s", value, text)
+		}
+		if index < previous {
+			t.Fatalf("%q appeared out of order in:\n%s", value, text)
+		}
+		previous = index
 	}
 }
 

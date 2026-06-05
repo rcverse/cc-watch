@@ -6,10 +6,10 @@ Update this file before ending any implementation context.
 
 ## Current State
 
-- Current phase: Phase 7 - Notification System
-- Current phase file: `docs/superpowers/plans/cc-cache-v2/phase-07-notifications.md`
-- Current step: Phase 7 complete; stop before Phase 8
-- Status: complete pending next user instruction; git status/diff currently blocked by missing HEAD object
+- Current phase: Phase 9 - Session Workspace
+- Current phase file: `docs/superpowers/plans/cc-cache-v2/phase-09-session-workspace.md`
+- Current step: Phase 9 complete; stop before Phase 10
+- Status: complete pending next user instruction
 - Last updated: 2026-06-05
 
 ## Phase Status
@@ -22,8 +22,8 @@ Update this file before ending any implementation context.
 - [x] Phase 5 - Refresh Architecture And Degraded State
 - [x] Phase 6 - List View
 - [x] Phase 7 - Notification System
-- [ ] Phase 8 - KeepAlive State Machine And Bounded Automation
-- [ ] Phase 9 - Session Workspace
+- [x] Phase 8 - KeepAlive State Machine And Bounded Automation
+- [x] Phase 9 - Session Workspace
 - [ ] Phase 10 - Config Editor
 - [ ] Phase 11 - CLI Integration And Full Non-Release Verification
 - [ ] Phase 12 - Packaging, Install, And Release Path
@@ -71,6 +71,17 @@ Update this file before ending any implementation context.
 | 2026-06-05 | Phase 7 | `go test ./internal/app` red/green | pass | App test first failed on missing notification callbacks, then passed after TUI startup wired notify manager callbacks with injectable fakes. |
 | 2026-06-05 | Phase 7 | `go test -count=1 ./...` | pass | Fresh full-suite verification after reviewer fixes. |
 | 2026-06-05 | Phase 7 | `git status --short --branch`; `git diff --check` | blocked | Git HEAD points at object `20730a64b5ea36454437cc23c8cf2ab24eedf00c`, but object lookup fails; `git diff --check` also cannot read indexed blob `fd4d3b3842280b27fa694e89f343f04c0a73d3a7`. No destructive git repair attempted. |
+| 2026-06-05 | Phase 8 | `go test ./internal/keepalive` red/green timing, state-machine, subprocess, confirmation, and reviewer regression cycles | pass | Tests first failed on missing KeepAlive APIs or reviewed safety gaps, then passed after timing helpers, state manager, runner interface, offset-aware confirmation, fallback command formatting, edge-gated re-arm, countdown safety checks, and exhausted-failure acknowledgement. |
+| 2026-06-05 | Phase 8 | `GOCACHE=/private/tmp/cc-cache-go-build go test ./internal/keepalive` | pass | Focused KeepAlive package verification after reviewer fixes. |
+| 2026-06-05 | Phase 8 | `GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go test -count=1 ./...` | pass | Full suite passed after approved network access populated the temp Go module cache. |
+| 2026-06-05 | Phase 8 | `git diff --check` | pass | Whitespace check clean after Phase 8 implementation. |
+| 2026-06-05 | Phase 9 | `go test ./internal/tui` red/green workspace render/update cycles | pass | Tests first failed on missing workspace/KeepAlive TUI APIs, then passed after Session Workspace route, evidence panels, controls, shortcut handling, stale async guards, and KeepAlive card states. |
+| 2026-06-05 | Phase 9 | `go test ./internal/config` red/green partial config merge | pass | Fixture config with only `keep_alive.auto_send` first exposed dropped defaults, then passed after loading JSON over default config values. |
+| 2026-06-05 | Phase 9 | PTY smoke: `HOME="$PWD/internal/session/testdata/smoke-home" PATH="/usr/bin:/bin" go run ./cmd/cc-cache --id 11111111` | pass | Workspace opened from fixture data; Reminder toggled; KeepAlive entered manual prompt with Auto-send off; toggling Auto-send on showed `claude command unavailable` and fallback command without starting a real send. |
+| 2026-06-05 | Phase 9 | Post-review PTY smoke: `HOME="$PWD/internal/session/testdata/smoke-home" PATH="/usr/bin:/bin" go run ./cmd/cc-cache --id 11111111` | pass | Workspace opened with Auto-send off after live ticker wiring and exited with `q`; no real Claude send path was started. Detailed toggle behavior is covered by deterministic TUI/app tests because PTY redraw made normal-key output noisy. |
+| 2026-06-05 | Phase 9 | `GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go test ./internal/tui ./internal/app ./internal/config ./internal/keepalive` | pass | Focused package verification after workspace integration and read-only reviewer fixes. |
+| 2026-06-05 | Phase 9 | `GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go test -count=1 ./...` | pass | Full suite passed after Phase 9 implementation. |
+| 2026-06-05 | Phase 9 | `git diff --check` | pass | Whitespace check clean after Phase 9 implementation. |
 
 ## Review Ledger
 
@@ -85,6 +96,8 @@ Update this file before ending any implementation context.
 | 2026-06-04 | Phase 5 | read-only phase reviewer | Found stale issued refresh results could apply before newer results returned, refresh was modeled but not wired into TUI commands, watcher did not emit Bubbletea messages or consume fsnotify streams, stale docs, and missing propagation tests | Integrated fixes: results apply only for current issued generation, watcher/safety/manual refresh produce commands, watcher emits event/degraded Bubbletea messages, fsnotify adapter added, refresh-to-JSON conversion tested, and ledgers/checklist updated. |
 | 2026-06-05 | Phase 6 | read-only phase reviewer | Found selected session could change on refresh reorder, refresh results did not carry empty/discovery state, empty states exposed invalid row actions, and medium/wide rows omitted TTL evidence | Integrated fixes: preserve selected session by ID across refreshes, add refresh snapshots with view state, restrict empty-state actions to refresh/help/quit, render TTL percent at medium/wide widths, and add regression tests. |
 | 2026-06-05 | Phase 7 | read-only phase reviewer | Found notifications were not wired to runtime events and successful distinct events did not reset failure suppression | Integrated fixes: app/TUI startup now wires notification manager callbacks, Reminder threshold display ticks emit notification commands, manual refresh resets suppression, success clears suppression, and regression tests cover both paths. |
+| 2026-06-05 | Phase 8 | read-only phase reviewer | Found same-window KeepAlive re-arm with remaining scope, countdown expiry ignoring Auto-send/safety drift, and exhausted failure states without a scope-complete path | Integrated fixes: trigger re-arm now requires an above-threshold refresh/new window, countdown expiry re-checks Auto-send and latest safe send time before starting a runner, and acknowledged exhausted failures move to `scope_complete`; added regression tests. |
+| 2026-06-05 | Phase 9 | read-only phase reviewer | Found KeepAlive actions were render/test-injectable but not wired into live Bubbletea commands, sending/confirming did not show Auto-send disabled reasons, workspace refresh merged selected data after reparsing all sessions, async KeepAlive messages lacked selected-session/refresh-edge guards, and overflowing evidence was not focusable. | Integrated fixes: app-enabled display ticks evaluate KeepAlive monitoring state, send-now/countdown actions now return runner and confirmation commands with injected seams, workspace refresh can parse only the selected JSONL path, async messages carry generation/selection guards, sending/confirming/failure cards show Auto-send disabled reasons, overflowing evidence becomes a bounded focusable scroll region, and regression tests cover each path. |
 
 ## Decisions And Blockers
 
@@ -100,4 +113,4 @@ Update this file before ending any implementation context.
 
 ## Last Context Handoff
 
-Phase 7 completed the notification package and runtime notification plumbing, including macOS AppleScript escaping, Linux argument handling, unsupported-platform degraded state, Reminder/KeepAlive event wording, failure suppression without retry loops, TUI notification degraded/status display, Reminder threshold notification commands, and app startup notifier callbacks. Next implementation context should begin at Phase 8: KeepAlive State Machine And Bounded Automation. Git status/diff checks are currently blocked by missing git objects and should be repaired or recloned before any commit-oriented workflow.
+Phase 9 completed the Session Workspace with per-session evidence sections, workspace-only focus/action behavior, Reminder and KeepAlive control rows, KeepAlive state cards, config-driven Auto-send defaults, safe Claude availability preflight, selected-path manual refresh, app-enabled display ticks, live KeepAlive runner/confirmation command wiring, generation/selection-guarded async messages, and bounded evidence scrolling. Read-only reviewer fixes were integrated and covered by regression tests. Next implementation context should begin at Phase 10: Config Editor.

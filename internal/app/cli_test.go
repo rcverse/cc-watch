@@ -212,6 +212,77 @@ func TestTUIStartupWiresManualRefreshLoader(t *testing.T) {
 	}
 }
 
+func TestWorkspaceManualRefreshParsesOnlySelectedSessionPath(t *testing.T) {
+	now := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
+	deps := fakeDeps(t)
+	deps.Now = func() time.Time { return now }
+	discoverCalls := 0
+	parseCalls := map[string]int{}
+	deps.DiscoverHome = func(home string, limit int) (session.DiscoveryResult, error) {
+		discoverCalls++
+		return session.DiscoveryResult{
+			ProjectsDir: "/tmp/home/.claude/projects",
+			Sessions: []session.SessionFile{
+				{SessionID: "selected-id", ShortID: "selected", Project: "tmp", Path: "/tmp/selected.jsonl", ModTime: now.Add(time.Minute)},
+				{SessionID: "other-id", ShortID: "other", Project: "tmp", Path: "/tmp/other.jsonl", ModTime: now},
+			},
+		}, nil
+	}
+	deps.ParseFile = func(path string) (session.Session, error) {
+		parseCalls[path]++
+		id := "other-id"
+		short := "other"
+		if path == "/tmp/selected.jsonl" {
+			id = "selected-id"
+			short = "selected"
+		}
+		return session.Session{
+			SessionID:      id,
+			ShortID:        short,
+			Project:        "tmp",
+			JSONLPath:      path,
+			FileModifiedAt: now,
+		}, nil
+	}
+
+	options, err := buildTUIOptions(Command{Mode: ModeTUI, Limit: 5}, deps.Dependencies)
+	if err != nil {
+		t.Fatalf("buildTUIOptions returned error: %v", err)
+	}
+	model := tui.NewModel(options)
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(tui.Model)
+	for _, key := range []tea.KeyMsg{{Type: tea.KeyDown}, {Type: tea.KeyDown}, {Type: tea.KeyDown}, {Type: tea.KeyDown}} {
+		updated, _ = model.Update(key)
+		model = updated.(tui.Model)
+	}
+	if model.FocusedAction() != "refresh" {
+		t.Fatalf("workspace focused action = %q, want refresh", model.FocusedAction())
+	}
+
+	discoverCalls = 0
+	parseCalls = map[string]int{}
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(tui.Model)
+	if cmd == nil {
+		t.Fatal("workspace refresh returned nil command")
+	}
+	msg := cmd()
+	result, ok := msg.(tui.RefreshResultMsg)
+	if !ok {
+		t.Fatalf("refresh command returned %#v, want RefreshResultMsg", msg)
+	}
+	if !result.SelectedOnly || result.SelectedID != "selected-id" {
+		t.Fatalf("refresh metadata selectedOnly=%v selectedID=%q", result.SelectedOnly, result.SelectedID)
+	}
+	if discoverCalls != 0 {
+		t.Fatalf("workspace selected refresh rediscovered sessions %d time(s)", discoverCalls)
+	}
+	if parseCalls["/tmp/selected.jsonl"] != 1 || len(parseCalls) != 1 {
+		t.Fatalf("parse calls = %#v, want selected path only", parseCalls)
+	}
+}
+
 func TestTUIStartupWiresNotificationCallbacks(t *testing.T) {
 	deps := fakeDeps(t)
 	notifyCalls := 0

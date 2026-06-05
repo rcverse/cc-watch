@@ -9,6 +9,9 @@ func (m Model) View() string {
 	if m.route == RouteList || m.route == RouteAmbiguous {
 		return m.listView()
 	}
+	if m.route == RouteWorkspace {
+		return m.workspaceView()
+	}
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "cc-cache %s\n", m.route)

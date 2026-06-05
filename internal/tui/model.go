@@ -1,10 +1,13 @@
 package tui
 
 import (
+	"context"
 	"sort"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/richardchen/cc-cache/internal/config"
+	"github.com/richardchen/cc-cache/internal/keepalive"
 	"github.com/richardchen/cc-cache/internal/notify"
 	"github.com/richardchen/cc-cache/internal/refresh"
 	"github.com/richardchen/cc-cache/internal/session"
@@ -58,6 +61,10 @@ type Dependencies struct {
 	Refresh                      func()
 	RefreshSessions              func(source refresh.Source, generation int) []session.Session
 	RefreshSnapshot              func(source refresh.Source, generation int) RefreshSnapshot
+	RefreshSelectedSnapshot      func(source refresh.Source, generation int, selected session.Session) RefreshSnapshot
+	CheckClaudeAvailable         func() error
+	KeepAliveRunner              keepalive.ClaudeRunner
+	ConfirmKeepAlive             func(context.Context, keepalive.ConfirmationTarget) (keepalive.ConfirmationResult, error)
 	NotifyEvent                  func(event notify.Event) notify.Result
 	ResetNotificationSuppression func()
 }
@@ -83,12 +90,16 @@ type Options struct {
 	ReminderEnabled    map[string]bool
 	ReminderThresholds []int
 	KeepAliveEnabled   map[string]bool
+	KeepAliveConfig    config.KeepAliveConfig
+	KeepAliveManager   *keepalive.Manager
+	KeepAliveStates    map[string]keepalive.SessionState
 	RefreshGeneration  int
 	SelectedID         string
 	AmbiguousID        string
 	StartMode          StartMode
 	KeepAliveStatus    KeepAliveStatus
 	Refresh            RefreshViewState
+	StartDisplayTicker bool
 }
 
 type Model struct {
@@ -102,6 +113,8 @@ type Model struct {
 	reminderThresholds   []int
 	reminderFired        map[string]map[int]bool
 	keepAliveEnabled     map[string]bool
+	keepAliveConfig      config.KeepAliveConfig
+	keepAliveManager     *keepalive.Manager
 	refreshGeneration    int
 	watcherEvents        []WatcherEventMsg
 	notificationStatuses []NotificationStatus
@@ -115,6 +128,9 @@ type Model struct {
 	refresh              RefreshViewState
 	lastRefreshSource    refresh.Source
 	lastBypassedDebounce bool
+	directWorkspace      bool
+	evidenceOffset       int
+	startDisplayTicker   bool
 }
 
 var rootFocusActions = []string{"session", "reminder", "keepalive", "refresh", "help", "quit"}
@@ -135,13 +151,26 @@ func NewModel(options Options) Model {
 		thresholds = []int{20, 10}
 	}
 	keepAlives := cloneBoolMap(options.KeepAliveEnabled)
+	keepAliveConfig := normalizeKeepAliveConfig(options.KeepAliveConfig)
+	keepAliveManager := options.KeepAliveManager
+	if keepAliveManager == nil {
+		keepAliveManager = keepalive.NewManager(keepAliveConfig)
+	}
 	width := options.Width
 	if width <= 0 {
 		width = 80
 	}
 	sessions := cloneSessions(options.Sessions)
 	selectedIndex := selectedIndexFor(sessions, options.SelectedID)
-	return Model{
+	for _, state := range options.KeepAliveStates {
+		keepAliveManager.SetState(state)
+	}
+	for _, s := range sessions {
+		if keepAlives[s.SessionID] && keepAliveManager.State(s.SessionID).State == keepalive.StateOff {
+			keepAliveManager.Enable(s, now)
+		}
+	}
+	model := Model{
 		width:              width,
 		now:                now,
 		deps:               options.Dependencies,
@@ -152,16 +181,25 @@ func NewModel(options Options) Model {
 		reminderThresholds: thresholds,
 		reminderFired:      map[string]map[int]bool{},
 		keepAliveEnabled:   keepAlives,
+		keepAliveConfig:    keepAliveConfig,
+		keepAliveManager:   keepAliveManager,
 		refreshGeneration:  options.RefreshGeneration,
 		selectedIndex:      selectedIndex,
 		selectedID:         options.SelectedID,
 		ambiguousID:        options.AmbiguousID,
 		keepAliveStatus:    options.KeepAliveStatus,
 		refresh:            defaultRefresh(options.Refresh),
+		directWorkspace:    options.SelectedID != "",
+		startDisplayTicker: options.StartDisplayTicker,
 	}
+	model.focusIndex = model.defaultFocusIndex()
+	return model
 }
 
 func (m Model) Init() tea.Cmd {
+	if m.startDisplayTicker {
+		return displayTickCommand()
+	}
 	return nil
 }
 
@@ -233,7 +271,18 @@ func (m Model) ReminderEnabled(sessionID string) bool {
 }
 
 func (m Model) KeepAliveEnabled(sessionID string) bool {
-	return m.keepAliveEnabled[sessionID]
+	if m.keepAliveEnabled[sessionID] {
+		return true
+	}
+	state := m.KeepAliveState(sessionID)
+	return state.State != "" && state.State != keepalive.StateOff
+}
+
+func (m Model) KeepAliveState(sessionID string) keepalive.SessionState {
+	if m.keepAliveManager == nil {
+		return keepalive.SessionState{SessionID: sessionID, State: keepalive.StateOff}
+	}
+	return m.keepAliveManager.State(sessionID)
 }
 
 func routeFromOptions(options Options) Route {
@@ -257,6 +306,29 @@ func defaultRefresh(state RefreshViewState) RefreshViewState {
 		state.Watcher.SafetyRefreshActive = true
 	}
 	return state
+}
+
+func normalizeKeepAliveConfig(cfg config.KeepAliveConfig) config.KeepAliveConfig {
+	defaults := config.Default().KeepAlive
+	if cfg.TriggerBeforeExpiryMinutes == 0 && cfg.CountdownSeconds == 0 && cfg.Message == "" && cfg.Scope.Mode == "" && cfg.Scope.MaxSends == 0 {
+		return defaults
+	}
+	if cfg.TriggerBeforeExpiryMinutes <= 0 {
+		cfg.TriggerBeforeExpiryMinutes = defaults.TriggerBeforeExpiryMinutes
+	}
+	if cfg.CountdownSeconds <= 0 {
+		cfg.CountdownSeconds = defaults.CountdownSeconds
+	}
+	if cfg.Message == "" {
+		cfg.Message = defaults.Message
+	}
+	if cfg.Scope.Mode == "" {
+		cfg.Scope.Mode = defaults.Scope.Mode
+	}
+	if cfg.Scope.MaxSends <= 0 {
+		cfg.Scope.MaxSends = defaults.Scope.MaxSends
+	}
+	return cfg
 }
 
 func cloneSessions(sessions []session.Session) []session.Session {
@@ -296,4 +368,11 @@ func findSessionIndex(sessions []session.Session, selectedID string) (int, bool)
 		}
 	}
 	return 0, false
+}
+
+func findSessionByID(sessions []session.Session, selectedID string) (session.Session, bool) {
+	if index, ok := findSessionIndex(sessions, selectedID); ok {
+		return sessions[index], true
+	}
+	return session.Session{}, false
 }

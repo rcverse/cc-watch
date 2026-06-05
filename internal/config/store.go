@@ -37,7 +37,7 @@ func Load(home string) (LoadResult, error) {
 		return LoadResult{}, err
 	}
 
-	var cfg Config
+	cfg := Default()
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return LoadResult{
 			Config: Default(),

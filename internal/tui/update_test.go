@@ -1,11 +1,14 @@
 package tui
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/richardchen/cc-cache/internal/config"
+	"github.com/richardchen/cc-cache/internal/keepalive"
 	"github.com/richardchen/cc-cache/internal/notify"
 	"github.com/richardchen/cc-cache/internal/refresh"
 	"github.com/richardchen/cc-cache/internal/session"
@@ -102,6 +105,51 @@ func TestDisplayTickFiresReminderNotificationThreshold(t *testing.T) {
 	updated, cmd = model.Update(DisplayTickMsg{Now: now.Add(2 * time.Second)})
 	if cmd != nil {
 		t.Fatalf("second tick returned command %#v, want threshold one-shot", cmd())
+	}
+}
+
+func TestDisplayTickEvaluatesKeepAliveMonitoringSessions(t *testing.T) {
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	last := now.Add(-56 * time.Minute)
+	cfg := config.Default().KeepAlive
+	cfg.AutoSend = true
+	cfg.CountdownSeconds = 30
+	model := NewModel(Options{
+		Now:             now,
+		SelectedID:      "workspace-id",
+		KeepAliveConfig: cfg,
+		Sessions: []session.Session{{
+			SessionID:     "workspace-id",
+			ShortID:       "workspace",
+			Project:       "workspace-api",
+			JSONLPath:     "/tmp/workspace.jsonl",
+			LastMessageAt: &last,
+			CacheWindow:   session.CacheWindow{Label: "1h", TTLSeconds: 3600, Known: true},
+		}},
+		KeepAliveStates: map[string]keepalive.SessionState{
+			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateMonitoringIdle, AutoSend: true, TriggerArmed: true, MaxSends: 1},
+		},
+	})
+
+	updated, cmd := model.Update(DisplayTickMsg{Now: now})
+	model = updated.(Model)
+	if cmd != nil {
+		t.Fatalf("monitoring tick returned command before countdown elapses, want nil")
+	}
+	if got := model.KeepAliveState("workspace-id").State; got != keepalive.StateCountdown {
+		t.Fatalf("state = %q, want countdown", got)
+	}
+	if got := model.Countdown("workspace-id"); got != 30 {
+		t.Fatalf("countdown = %d, want 30", got)
+	}
+}
+
+func TestInitStartsDisplayTickerWhenEnabled(t *testing.T) {
+	if cmd := NewModel(Options{}).Init(); cmd != nil {
+		t.Fatal("default Init returned ticker command")
+	}
+	if cmd := NewModel(Options{StartDisplayTicker: true}).Init(); cmd == nil {
+		t.Fatal("Init with StartDisplayTicker returned nil command")
 	}
 }
 
@@ -722,6 +770,488 @@ func TestListAcceleratorsToggleSelectedSession(t *testing.T) {
 	}
 }
 
+func TestWorkspaceFocusOrderAndFocusedActions(t *testing.T) {
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	model := NewModel(Options{
+		Now:        now,
+		SelectedID: "workspace-id",
+		Sessions:   []session.Session{workspaceSession(now)},
+	})
+
+	seen := map[string]bool{}
+	for i := 0; i < 12; i++ {
+		seen[model.FocusedAction()] = true
+		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyDown})
+		model = updated.(Model)
+	}
+	for _, want := range []string{"reminder", "keepalive", "keepalive_autosend", "copy_id", "refresh", "help", "back", "quit"} {
+		if !seen[want] {
+			t.Fatalf("workspace focus action %q was not reachable; saw %#v", want, seen)
+		}
+	}
+}
+
+func TestWorkspaceEnterAndSpaceToggleFocusedControls(t *testing.T) {
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	cfg := config.Default().KeepAlive
+	cfg.AutoSend = true
+	model := NewModel(Options{
+		Now:             now,
+		SelectedID:      "workspace-id",
+		Sessions:        []session.Session{workspaceSession(now)},
+		KeepAliveConfig: cfg,
+	})
+
+	model = moveWorkspaceFocusTo(t, model, "reminder")
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+	if cmd != nil {
+		t.Fatalf("enter on reminder returned command, want nil")
+	}
+	if !model.ReminderEnabled("workspace-id") {
+		t.Fatalf("enter did not toggle Reminder for selected session")
+	}
+
+	model = moveWorkspaceFocusTo(t, model, "keepalive")
+	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeySpace})
+	model = updated.(Model)
+	if cmd != nil {
+		t.Fatalf("space on KeepAlive returned command, want nil")
+	}
+	if !model.KeepAliveEnabled("workspace-id") {
+		t.Fatalf("space did not toggle KeepAlive for selected session")
+	}
+
+	model = moveWorkspaceFocusTo(t, model, "keepalive_autosend")
+	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+	if cmd != nil {
+		t.Fatalf("enter on Auto-send returned command, want nil")
+	}
+	if model.KeepAliveState("workspace-id").AutoSend {
+		t.Fatalf("enter did not toggle Auto-send off for selected session")
+	}
+}
+
+func TestWorkspaceAutoSendTogglePreflightsClaudeAvailability(t *testing.T) {
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	cfg := config.Default().KeepAlive
+	cfg.AutoSend = false
+	model := NewModel(Options{
+		Now:             now,
+		SelectedID:      "workspace-id",
+		Sessions:        []session.Session{workspaceSession(now)},
+		KeepAliveConfig: cfg,
+		KeepAliveStates: map[string]keepalive.SessionState{
+			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateManualReady, AutoSend: false, InstanceToken: 5, MaxSends: 1},
+		},
+		Dependencies: Dependencies{
+			CheckClaudeAvailable: func() error { return errForTest("claude command not found") },
+		},
+	})
+
+	model = moveWorkspaceFocusTo(t, model, "keepalive_autosend")
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+
+	if cmd != nil {
+		t.Fatalf("auto-send toggle returned command, want nil")
+	}
+	state := model.KeepAliveState("workspace-id")
+	if state.State != keepalive.StateErrorNoClaude || state.AutoSend {
+		t.Fatalf("state = %#v, want no-claude and auto-send stopped", state)
+	}
+	if !strings.Contains(model.View(), "claude unavailable: claude command not found") {
+		t.Fatalf("view missing claude unavailable banner:\n%s", model.View())
+	}
+}
+
+func TestWorkspaceManualRefreshIsFocusableAndUsesSelectedIDSnapshot(t *testing.T) {
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	model := NewModel(Options{
+		Now:        now,
+		SelectedID: "workspace-id",
+		Sessions:   []session.Session{workspaceSession(now)},
+		Dependencies: Dependencies{
+			RefreshSnapshot: func(source refresh.Source, generation int) RefreshSnapshot {
+				if source != refresh.SourceManual {
+					t.Fatalf("source = %q, want manual", source)
+				}
+				return RefreshSnapshot{
+					Sessions:   []session.Session{workspaceSession(now.Add(time.Minute))},
+					Refresh:    RefreshViewState{ProjectsDir: "/tmp/home/.claude/projects"},
+					HasRefresh: true,
+				}
+			},
+		},
+	})
+
+	model = moveWorkspaceFocusTo(t, model, "refresh")
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+	if cmd == nil {
+		t.Fatal("enter on workspace manual refresh returned nil command")
+	}
+	msg := cmd()
+	result, ok := msg.(RefreshResultMsg)
+	if !ok {
+		t.Fatalf("manual refresh command returned %#v, want RefreshResultMsg", msg)
+	}
+	if len(result.Sessions) != 1 || result.Sessions[0].SessionID != "workspace-id" {
+		t.Fatalf("manual workspace refresh result = %#v, want only selected session", result.Sessions)
+	}
+	if model.LastAction() != "manual_refresh" || !model.LastRefreshBypassedDebounce() {
+		t.Fatalf("manual refresh state = action %q bypass %v", model.LastAction(), model.LastRefreshBypassedDebounce())
+	}
+}
+
+func TestWorkspaceManualRefreshPrefersSelectedPathSnapshot(t *testing.T) {
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	selectedCalls := 0
+	fullCalls := 0
+	model := NewModel(Options{
+		Now:        now,
+		SelectedID: "workspace-id",
+		Sessions:   []session.Session{workspaceSession(now)},
+		Dependencies: Dependencies{
+			RefreshSelectedSnapshot: func(source refresh.Source, generation int, selected session.Session) RefreshSnapshot {
+				selectedCalls++
+				if selected.SessionID != "workspace-id" {
+					t.Fatalf("selected refresh got %q, want workspace-id", selected.SessionID)
+				}
+				return RefreshSnapshot{Sessions: []session.Session{workspaceSession(now.Add(time.Minute))}, HasRefresh: true}
+			},
+			RefreshSnapshot: func(source refresh.Source, generation int) RefreshSnapshot {
+				fullCalls++
+				return RefreshSnapshot{Sessions: []session.Session{listViewSession("other-id", "other", now, now, session.CacheWindow{Label: "1h", TTLSeconds: 3600, Known: true}, "", "")}, HasRefresh: true}
+			},
+		},
+	})
+
+	model = moveWorkspaceFocusTo(t, model, "refresh")
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+	if cmd == nil {
+		t.Fatal("workspace refresh returned nil command")
+	}
+	result := cmd().(RefreshResultMsg)
+	if !result.SelectedOnly || result.SelectedID != "workspace-id" {
+		t.Fatalf("selected refresh metadata = selectedOnly %v selectedID %q", result.SelectedOnly, result.SelectedID)
+	}
+	if selectedCalls != 1 || fullCalls != 0 {
+		t.Fatalf("refresh calls selected=%d full=%d, want selected-only IO", selectedCalls, fullCalls)
+	}
+}
+
+func TestWorkspaceManualRefreshUpdatesOnlySelectedSessionWhenSnapshotReturnsList(t *testing.T) {
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	model := NewModel(Options{
+		Now:        now,
+		SelectedID: "workspace-id",
+		Sessions: []session.Session{
+			workspaceSession(now),
+			listViewSession("other-id", "other", now, now, session.CacheWindow{Label: "1h", TTLSeconds: 3600, Known: true}, "", ""),
+		},
+		Dependencies: Dependencies{
+			RefreshSnapshot: func(source refresh.Source, generation int) RefreshSnapshot {
+				return RefreshSnapshot{
+					Sessions: []session.Session{
+						listViewSession("other-id", "other-mutated", now.Add(time.Hour), now, session.CacheWindow{Label: "1h", TTLSeconds: 3600, Known: true}, "", ""),
+						workspaceSession(now.Add(time.Minute)),
+					},
+					HasRefresh: true,
+				}
+			},
+		},
+	})
+
+	model = moveWorkspaceFocusTo(t, model, "refresh")
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+	if cmd == nil {
+		t.Fatal("workspace refresh returned nil command")
+	}
+	result := cmd().(RefreshResultMsg)
+	updated, _ = model.Update(result)
+	model = updated.(Model)
+
+	got := model.Sessions()
+	if len(got) != 2 {
+		t.Fatalf("sessions length = %d, want 2 selected plus existing other: %#v", len(got), got)
+	}
+	for _, s := range got {
+		if s.SessionID == "other-id" && s.Project != "other" {
+			t.Fatalf("workspace manual refresh mutated non-selected session: %#v", s)
+		}
+	}
+}
+
+func TestWorkspaceFailureKeepsAutosendFocusableWithDisabledReason(t *testing.T) {
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	model := NewModel(Options{
+		Now:        now,
+		SelectedID: "workspace-id",
+		Sessions:   []session.Session{workspaceSession(now)},
+		KeepAliveStates: map[string]keepalive.SessionState{
+			"workspace-id": {
+				SessionID:   "workspace-id",
+				State:       keepalive.StateErrorNoClaude,
+				AutoSend:    false,
+				LastFailure: "claude command not found",
+				MaxSends:    1,
+			},
+		},
+	})
+
+	seen := map[string]bool{}
+	for i := 0; i < 12; i++ {
+		seen[model.FocusedAction()] = true
+		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyDown})
+		model = updated.(Model)
+	}
+	if !seen["keepalive_autosend"] {
+		t.Fatalf("failure focus did not include disabled Auto-send setting; saw %#v", seen)
+	}
+	if !strings.Contains(model.View(), "Auto-send stopped") {
+		t.Fatalf("failure view missing disabled reason:\n%s", model.View())
+	}
+}
+
+func TestWorkspaceSendingAndConfirmingShowAutosendDisabledReason(t *testing.T) {
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	for _, state := range []keepalive.State{keepalive.StateSending, keepalive.StateConfirming} {
+		model := NewModel(Options{
+			Now:        now,
+			SelectedID: "workspace-id",
+			Sessions:   []session.Session{workspaceSession(now)},
+			KeepAliveStates: map[string]keepalive.SessionState{
+				"workspace-id": {SessionID: "workspace-id", State: state, AutoSend: true, InstanceToken: 7, MaxSends: 1},
+			},
+		})
+		if !strings.Contains(model.View(), "Auto-send disabled while") {
+			t.Fatalf("%s view missing Auto-send disabled reason:\n%s", state, model.View())
+		}
+	}
+}
+
+func TestWorkspaceEvidenceFocusOnlyWhenOverflowing(t *testing.T) {
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	normal := NewModel(Options{
+		Now:        now,
+		SelectedID: "workspace-id",
+		Sessions:   []session.Session{workspaceSession(now)},
+	})
+	if normal.FocusedAction() == "evidence" {
+		t.Fatalf("normal evidence focused, want controls first")
+	}
+
+	overflowSession := workspaceSession(now)
+	for i := 0; i < 12; i++ {
+		overflowSession.Warnings = append(overflowSession.Warnings, session.ParseWarning{Message: "warning"})
+		overflowSession.CacheWindow.Evidence = append(overflowSession.CacheWindow.Evidence, "extra")
+	}
+	overflow := NewModel(Options{
+		Now:        now,
+		SelectedID: "workspace-id",
+		Sessions:   []session.Session{overflowSession},
+	})
+	if overflow.FocusedAction() != "evidence" {
+		t.Fatalf("overflow focus = %q, want evidence", overflow.FocusedAction())
+	}
+	if !strings.Contains(overflow.View(), "Evidence scroll") || !strings.Contains(overflow.View(), "arrows scroll evidence") {
+		t.Fatalf("overflow evidence missing scroll affordance:\n%s", overflow.View())
+	}
+}
+
+func TestWorkspaceShortcutAvailabilityAndDefaultActiveFocus(t *testing.T) {
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name   string
+		state  keepalive.SessionState
+		focus  string
+		sendOK bool
+		xOK    bool
+	}{
+		{name: "countdown", state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateCountdown, AutoSend: true, InstanceToken: 1, MaxSends: 1}, focus: "keepalive_send_now", sendOK: true, xOK: true},
+		{name: "manual", state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateManualReady, AutoSend: false, InstanceToken: 2, MaxSends: 1}, focus: "keepalive_send_now", sendOK: true, xOK: true},
+		{name: "confirming", state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateConfirming, AutoSend: true, InstanceToken: 3, MaxSends: 1}, focus: "keepalive_stop_waiting", sendOK: false, xOK: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			model := NewModel(Options{
+				Now:        now,
+				SelectedID: "workspace-id",
+				Sessions:   []session.Session{workspaceSession(now)},
+				KeepAliveStates: map[string]keepalive.SessionState{
+					"workspace-id": tc.state,
+				},
+			})
+			if model.FocusedAction() != tc.focus {
+				t.Fatalf("initial active focus = %q, want %q", model.FocusedAction(), tc.focus)
+			}
+			updated, _ := model.Update(keyRunes("s"))
+			afterS := updated.(Model)
+			if tc.sendOK && afterS.LastAction() != "send_keepalive_now" {
+				t.Fatalf("s in %s last action = %q, want send", tc.name, afterS.LastAction())
+			}
+			if !tc.sendOK && afterS.LastAction() == "send_keepalive_now" {
+				t.Fatalf("s in %s unexpectedly sent", tc.name)
+			}
+			updated, _ = model.Update(keyRunes("x"))
+			afterX := updated.(Model)
+			if tc.xOK && afterX.LastAction() != "cancel_keepalive" {
+				t.Fatalf("x in %s last action = %q, want cancel", tc.name, afterX.LastAction())
+			}
+		})
+	}
+
+	model := NewModel(Options{
+		Now:        now,
+		SelectedID: "workspace-id",
+		Sessions:   []session.Session{workspaceSession(now)},
+	})
+	updated, _ := model.Update(keyRunes("s"))
+	if updated.(Model).LastAction() == "send_keepalive_now" {
+		t.Fatalf("s sent while no KeepAlive send action was available")
+	}
+	updated, _ = model.Update(keyRunes("x"))
+	if updated.(Model).LastAction() == "cancel_keepalive" {
+		t.Fatalf("x canceled while no KeepAlive instance was available")
+	}
+}
+
+func TestWorkspaceIgnoresStaleKeepAliveAsyncMessages(t *testing.T) {
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	state := keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateCountdown, AutoSend: true, InstanceToken: 41, MaxSends: 1}
+	model := NewModel(Options{
+		Now:        now,
+		SelectedID: "workspace-id",
+		Sessions:   []session.Session{workspaceSession(now)},
+		KeepAliveStates: map[string]keepalive.SessionState{
+			"workspace-id": state,
+		},
+	})
+
+	updated, _ := model.Update(keyRunes("x"))
+	model = updated.(Model)
+	if got := model.KeepAliveState("workspace-id").State; got != keepalive.StateCancelledInstance {
+		t.Fatalf("x state = %q, want cancelled", got)
+	}
+
+	for _, msg := range []tea.Msg{
+		KeepAliveCountdownElapsedMsg{SessionID: "workspace-id", InstanceToken: 41, Now: now.Add(30 * time.Second)},
+		KeepAliveRunnerResultMsg{SessionID: "workspace-id", InstanceToken: 41, StartedAt: now.Add(time.Second)},
+		KeepAliveConfirmationResultMsg{SessionID: "workspace-id", InstanceToken: 41, ConfirmedAt: now.Add(time.Minute)},
+	} {
+		updated, _ = model.Update(msg)
+		model = updated.(Model)
+		if got := model.KeepAliveState("workspace-id").State; got != keepalive.StateCancelledInstance {
+			t.Fatalf("stale msg %#v changed state to %q, want cancelled", msg, got)
+		}
+	}
+
+	switched, _ := model.Update(RefreshResultMsg{
+		Generation: 1,
+		Sessions:   []session.Session{listViewSession("other-id", "other", now, now, session.CacheWindow{Label: "1h", TTLSeconds: 3600, Known: true}, "", "")},
+	})
+	model = switched.(Model)
+	updated, _ = model.Update(KeepAliveConfirmationResultMsg{SessionID: "workspace-id", InstanceToken: 41, ConfirmedAt: now.Add(time.Minute)})
+	model = updated.(Model)
+	if model.LastAction() == "keepalive_confirmed" {
+		t.Fatalf("stale confirmation after session switch was applied")
+	}
+}
+
+func TestWorkspaceIgnoresKeepAliveAsyncAfterRefreshGenerationOrSelectionChanges(t *testing.T) {
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	model := NewModel(Options{
+		Now:        now,
+		SelectedID: "workspace-id",
+		Sessions: []session.Session{
+			workspaceSession(now),
+			listViewSession("other-id", "other", now, now, session.CacheWindow{Label: "1h", TTLSeconds: 3600, Known: true}, "", ""),
+		},
+		KeepAliveStates: map[string]keepalive.SessionState{
+			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateConfirming, AutoSend: true, InstanceToken: 11, MaxSends: 1},
+		},
+	})
+
+	updated, _ := model.Update(KeepAliveConfirmationResultMsg{SessionID: "workspace-id", InstanceToken: 11, ConfirmedAt: now, Generation: 1, SelectedID: "workspace-id"})
+	model = updated.(Model)
+	if got := model.KeepAliveState("workspace-id").State; got != keepalive.StateConfirming {
+		t.Fatalf("stale generation changed state to %q, want confirming", got)
+	}
+
+	model = NewModel(Options{
+		Now:        now,
+		SelectedID: "workspace-id",
+		Sessions: []session.Session{
+			workspaceSession(now),
+			listViewSession("other-id", "other", now, now, session.CacheWindow{Label: "1h", TTLSeconds: 3600, Known: true}, "", ""),
+		},
+		KeepAliveStates: map[string]keepalive.SessionState{
+			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateConfirming, AutoSend: true, InstanceToken: 12, MaxSends: 1},
+		},
+	})
+	model.selectedIndex = 1
+	model.selectedID = "other-id"
+	updated, _ = model.Update(KeepAliveConfirmationResultMsg{SessionID: "workspace-id", InstanceToken: 12, ConfirmedAt: now, SelectedID: "workspace-id"})
+	model = updated.(Model)
+	if got := model.KeepAliveState("workspace-id").State; got != keepalive.StateConfirming {
+		t.Fatalf("stale selected session changed state to %q, want confirming", got)
+	}
+}
+
+func TestWorkspaceKeepAliveActionsProduceRunnerAndConfirmationCommands(t *testing.T) {
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	runner := fakeKeepAliveRunner{startedAt: now.Add(time.Second)}
+	confirmCalls := 0
+	model := NewModel(Options{
+		Now:        now,
+		SelectedID: "workspace-id",
+		Sessions:   []session.Session{workspaceSession(now)},
+		KeepAliveStates: map[string]keepalive.SessionState{
+			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateManualReady, AutoSend: false, InstanceToken: 21, MaxSends: 1},
+		},
+		Dependencies: Dependencies{
+			KeepAliveRunner: runner,
+			ConfirmKeepAlive: func(ctx context.Context, target keepalive.ConfirmationTarget) (keepalive.ConfirmationResult, error) {
+				confirmCalls++
+				if target.Path == "" {
+					t.Fatalf("confirmation target path is empty")
+				}
+				return keepalive.ConfirmationResult{Confirmed: true, ConfirmedAt: now.Add(2 * time.Second)}, nil
+			},
+		},
+	})
+
+	updated, cmd := model.Update(keyRunes("s"))
+	model = updated.(Model)
+	if cmd == nil {
+		t.Fatal("send now returned nil command, want runner command")
+	}
+	runnerMsg, ok := cmd().(KeepAliveRunnerResultMsg)
+	if !ok {
+		t.Fatalf("runner command returned %#v", runnerMsg)
+	}
+	updated, cmd = model.Update(runnerMsg)
+	model = updated.(Model)
+	if cmd == nil {
+		t.Fatal("runner success returned nil command, want confirmation command")
+	}
+	confirmMsg, ok := cmd().(KeepAliveConfirmationResultMsg)
+	if !ok {
+		t.Fatalf("confirmation command returned %#v", confirmMsg)
+	}
+	if confirmCalls != 1 {
+		t.Fatalf("confirmation calls = %d, want 1", confirmCalls)
+	}
+	updated, _ = model.Update(confirmMsg)
+	model = updated.(Model)
+	if got := model.KeepAliveState("workspace-id").State; got != keepalive.StateSuccess {
+		t.Fatalf("state = %q, want success", got)
+	}
+}
+
 func TestInitialRoutes(t *testing.T) {
 	if route := NewModel(Options{}).Route(); route != RouteList {
 		t.Fatalf("default route = %q, want list", route)
@@ -741,6 +1271,25 @@ type fakeDeps struct {
 	discoverCalls int
 	parseCalls    int
 	refreshCalls  int
+}
+
+type errForTest string
+
+func (e errForTest) Error() string {
+	return string(e)
+}
+
+type fakeKeepAliveRunner struct {
+	startedAt time.Time
+	err       error
+}
+
+func (r fakeKeepAliveRunner) Available() error {
+	return r.err
+}
+
+func (r fakeKeepAliveRunner) Send(context.Context, keepalive.RunRequest) keepalive.RunResult {
+	return keepalive.RunResult{StartedAt: r.startedAt, Err: r.err}
 }
 
 func (d *fakeDeps) discover() {
@@ -769,5 +1318,18 @@ func moveListFocusTo(t *testing.T, model Model, action string) Model {
 		model = updated.(Model)
 	}
 	t.Fatalf("could not move focus to %q; focused %q", action, model.FocusedAction())
+	return model
+}
+
+func moveWorkspaceFocusTo(t *testing.T, model Model, action string) Model {
+	t.Helper()
+	for i := 0; i < 30; i++ {
+		if model.FocusedAction() == action {
+			return model
+		}
+		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyDown})
+		model = updated.(Model)
+	}
+	t.Fatalf("could not move workspace focus to %q; focused %q", action, model.FocusedAction())
 	return model
 }

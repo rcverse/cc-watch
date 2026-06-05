@@ -63,6 +63,34 @@ func TestLoadReadsConfigFromHome(t *testing.T) {
 	}
 }
 
+func TestLoadMergesPartialConfigWithDefaults(t *testing.T) {
+	home := t.TempDir()
+	path := ConfigPath(home)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(`{"keep_alive":{"auto_send":false}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	result, err := Load(home)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if result.Config.KeepAlive.AutoSend {
+		t.Fatalf("AutoSend = true, want partial config override false")
+	}
+	if result.Config.KeepAlive.TriggerBeforeExpiryMinutes != Default().KeepAlive.TriggerBeforeExpiryMinutes {
+		t.Fatalf("trigger = %d, want default", result.Config.KeepAlive.TriggerBeforeExpiryMinutes)
+	}
+	if result.Config.KeepAlive.Scope.MaxSends != Default().KeepAlive.Scope.MaxSends {
+		t.Fatalf("max sends = %d, want default", result.Config.KeepAlive.Scope.MaxSends)
+	}
+	if len(result.Config.ReminderThresholds) != len(Default().ReminderThresholds) {
+		t.Fatalf("reminder thresholds = %#v, want defaults", result.Config.ReminderThresholds)
+	}
+}
+
 func TestLoadInvalidJSONFallsBackWithVisibleWarning(t *testing.T) {
 	home := t.TempDir()
 	path := ConfigPath(home)

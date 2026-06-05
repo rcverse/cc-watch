@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/richardchen/cc-cache/internal/config"
 	"github.com/richardchen/cc-cache/internal/jsonout"
+	"github.com/richardchen/cc-cache/internal/keepalive"
 	"github.com/richardchen/cc-cache/internal/notify"
 	"github.com/richardchen/cc-cache/internal/refresh"
 	"github.com/richardchen/cc-cache/internal/session"
@@ -97,6 +98,10 @@ func buildTUIOptions(cmd Command, deps Dependencies) (tui.Options, error) {
 	if err != nil {
 		return tui.Options{}, err
 	}
+	cfgResult, err := config.Load(home)
+	if err != nil {
+		return tui.Options{}, err
+	}
 
 	discoveryLimit := cmd.Limit
 	if cmd.ID != "" {
@@ -157,13 +162,16 @@ func buildTUIOptions(cmd Command, deps Dependencies) (tui.Options, error) {
 	}
 
 	options := tui.Options{
-		Now:             now,
-		Dependencies:    tuiDependencies(cmd, deps),
-		Sessions:        sessions,
-		SelectedID:      selectedID,
-		AmbiguousID:     ambiguousID,
-		ReminderEnabled: reminders,
-		Refresh:         refreshState,
+		Now:                now,
+		Dependencies:       tuiDependencies(cmd, deps),
+		Sessions:           sessions,
+		SelectedID:         selectedID,
+		AmbiguousID:        ambiguousID,
+		ReminderEnabled:    reminders,
+		ReminderThresholds: cfgResult.Config.ReminderThresholds,
+		KeepAliveConfig:    cfgResult.Config.KeepAlive,
+		Refresh:            refreshState,
+		StartDisplayTicker: true,
 	}
 	return options, nil
 }
@@ -180,7 +188,19 @@ func tuiDependencies(cmd Command, deps Dependencies) tui.Dependencies {
 			resetNotificationSuppression = manager.ResetSuppression
 		}
 	}
+	runner := keepalive.NewSubprocessRunner()
 	return tui.Dependencies{
+		RefreshSelectedSnapshot: func(_ refresh.Source, _ int, selected session.Session) tui.RefreshSnapshot {
+			parsed, err := deps.ParseFile(selected.JSONLPath)
+			if err != nil {
+				return tui.RefreshSnapshot{}
+			}
+			return tui.RefreshSnapshot{
+				Sessions:   []session.Session{parsed},
+				Refresh:    tui.RefreshViewState{EmptyState: tui.EmptyNone},
+				HasRefresh: true,
+			}
+		},
 		RefreshSnapshot: func(_ refresh.Source, _ int) tui.RefreshSnapshot {
 			options, err := buildTUIOptions(Command{Mode: cmd.Mode, Limit: cmd.Limit, ID: cmd.ID, Remind: cmd.Remind}, deps)
 			if err != nil {
@@ -192,6 +212,10 @@ func tuiDependencies(cmd Command, deps Dependencies) tui.Dependencies {
 				HasRefresh: true,
 			}
 		},
+		CheckClaudeAvailable: func() error {
+			return runner.Available()
+		},
+		KeepAliveRunner:              runner,
 		NotifyEvent:                  notifyEvent,
 		ResetNotificationSuppression: resetNotificationSuppression,
 	}

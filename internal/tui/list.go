@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/richardchen/cc-cache/internal/keepalive"
 	"github.com/richardchen/cc-cache/internal/session"
 )
 
@@ -177,6 +178,13 @@ func (m Model) listFooter() string {
 }
 
 func (m Model) focusedAction() string {
+	if m.route == RouteWorkspace {
+		actions := m.workspaceFocusActions()
+		if len(actions) == 0 {
+			return ""
+		}
+		return actions[m.focusIndex%len(actions)]
+	}
 	if m.route == RouteList || m.route == RouteAmbiguous {
 		if m.isEmptyListState() {
 			if len(emptyFocusActions) == 0 {
@@ -211,6 +219,9 @@ func (m Model) focusedAction() string {
 }
 
 func (m Model) listFocusCount() int {
+	if m.route == RouteWorkspace {
+		return len(m.workspaceFocusActions())
+	}
 	if m.route != RouteList && m.route != RouteAmbiguous {
 		return len(rootFocusActions)
 	}
@@ -229,6 +240,9 @@ func (m *Model) moveFocus(delta int) {
 		return
 	}
 	m.focusIndex = (m.focusIndex + delta + count) % count
+	if m.route == RouteWorkspace {
+		return
+	}
 	if m.focusIndex < len(m.sessions) {
 		m.selectedIndex = m.focusIndex
 		m.selectedID = m.sessions[m.selectedIndex].SessionID
@@ -265,7 +279,23 @@ func (m *Model) toggleKeepAliveForSelected() {
 	if selected == nil {
 		return
 	}
-	m.keepAliveEnabled[selected.SessionID] = !m.keepAliveEnabled[selected.SessionID]
+	state := m.KeepAliveState(selected.SessionID)
+	if state.State != keepalive.StateOff && state.State != "" {
+		m.keepAliveManager.Disable(selected.SessionID)
+		m.keepAliveEnabled[selected.SessionID] = false
+		m.focusIndex = m.defaultFocusIndex()
+		return
+	}
+	actions := m.keepAliveManager.Enable(*selected, m.now)
+	m.keepAliveEnabled[selected.SessionID] = true
+	if m.deps.CheckClaudeAvailable != nil && m.KeepAliveState(selected.SessionID).AutoSend {
+		if err := m.deps.CheckClaudeAvailable(); err != nil {
+			m.keepAliveManager.CheckAvailability(selected.SessionID, availabilityChecker{err: err})
+			m.refresh.ClaudeUnavailableMessage = err.Error()
+		}
+	}
+	m.applyKeepAliveActions(actions, nil)
+	m.focusIndex = m.defaultFocusIndex()
 }
 
 func (m Model) shouldShowClaudeUnavailable() bool {
@@ -274,6 +304,12 @@ func (m Model) shouldShowClaudeUnavailable() bool {
 	}
 	if m.keepAliveStatus != KeepAliveInactive {
 		return true
+	}
+	if m.route == RouteWorkspace {
+		state := m.activeKeepAliveState()
+		if state.State != "" && state.State != keepalive.StateOff {
+			return true
+		}
 	}
 	for _, enabled := range m.keepAliveEnabled {
 		if enabled {
