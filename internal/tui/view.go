@@ -12,6 +12,9 @@ func (m Model) View() string {
 	if m.route == RouteWorkspace {
 		return m.workspaceView()
 	}
+	if m.route == RouteConfig {
+		return m.configView()
+	}
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "cc-cache %s\n", m.route)

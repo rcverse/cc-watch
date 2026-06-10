@@ -1252,6 +1252,248 @@ func TestWorkspaceKeepAliveActionsProduceRunnerAndConfirmationCommands(t *testin
 	}
 }
 
+func TestConfigEditorFocusEditToggleSaveAndCancel(t *testing.T) {
+	cfg := config.Default()
+	saves := 0
+	var saved config.Config
+	model := NewModel(Options{
+		StartMode: StartConfig,
+		Config:    cfg,
+		Dependencies: Dependencies{
+			SaveConfig: func(next config.Config) error {
+				saves++
+				saved = next
+				return nil
+			},
+		},
+	})
+
+	model = moveConfigFocusTo(t, model, "config_reminder_thresholds")
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+	for _, key := range []tea.KeyMsg{
+		keyRunes("3"), keyRunes("0"), keyRunes(","), keyRunes("1"), keyRunes("5"),
+		{Type: tea.KeyEnter},
+	} {
+		updated, _ = model.Update(key)
+		model = updated.(Model)
+	}
+	if !strings.Contains(model.View(), "Alert at:              [30, 15] %") {
+		t.Fatalf("threshold edit not reflected:\n%s", model.View())
+	}
+
+	model = moveConfigFocusTo(t, model, "config_autosend")
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeySpace})
+	model = updated.(Model)
+	if strings.Contains(model.View(), "Auto-send:             [x] enabled") {
+		t.Fatalf("space did not toggle auto-send off:\n%s", model.View())
+	}
+
+	updated, _ = model.Update(keyRunes("s"))
+	model = updated.(Model)
+	if saves != 1 {
+		t.Fatalf("saves = %d, want 1", saves)
+	}
+	if saved.ReminderThresholds[0] != 30 || saved.ReminderThresholds[1] != 15 || saved.KeepAlive.AutoSend {
+		t.Fatalf("saved config = %#v", saved)
+	}
+	if model.LastAction() != "save_config" {
+		t.Fatalf("last action = %q, want save_config", model.LastAction())
+	}
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	model = updated.(Model)
+	if cmd == nil {
+		t.Fatal("esc in config editor returned nil command, want quit")
+	}
+	if saves != 1 {
+		t.Fatalf("esc wrote config; saves = %d", saves)
+	}
+	if model.LastAction() != "cancel_config" {
+		t.Fatalf("last action = %q, want cancel_config", model.LastAction())
+	}
+}
+
+func TestConfigEditorInvalidConfigCannotSave(t *testing.T) {
+	cfg := config.Default()
+	saves := 0
+	model := NewModel(Options{
+		StartMode: StartConfig,
+		Config:    cfg,
+		Dependencies: Dependencies{
+			SaveConfig: func(config.Config) error {
+				saves++
+				return nil
+			},
+		},
+	})
+
+	model = moveConfigFocusTo(t, model, "config_countdown")
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+	for _, key := range []tea.KeyMsg{keyRunes("1"), keyRunes("2"), keyRunes("0"), {Type: tea.KeyEnter}} {
+		updated, _ = model.Update(key)
+		model = updated.(Model)
+	}
+	updated, _ = model.Update(keyRunes("s"))
+	model = updated.(Model)
+
+	if saves != 0 {
+		t.Fatalf("invalid config saved %d time(s)", saves)
+	}
+	if model.LastAction() != "save_config_invalid" {
+		t.Fatalf("last action = %q, want save_config_invalid", model.LastAction())
+	}
+	if !strings.Contains(model.View(), "Cannot save.") {
+		t.Fatalf("invalid config view missing summary:\n%s", model.View())
+	}
+}
+
+func TestConfigEditorMalformedFieldInputBlocksSave(t *testing.T) {
+	cfg := config.Default()
+	saves := 0
+	model := NewModel(Options{
+		StartMode: StartConfig,
+		Config:    cfg,
+		Dependencies: Dependencies{
+			SaveConfig: func(config.Config) error {
+				saves++
+				return nil
+			},
+		},
+	})
+
+	model = moveConfigFocusTo(t, model, "config_reminder_thresholds")
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+	for _, key := range []tea.KeyMsg{keyRunes("1"), keyRunes(","), keyRunes("x"), {Type: tea.KeyEnter}} {
+		updated, _ = model.Update(key)
+		model = updated.(Model)
+	}
+	if !strings.Contains(model.View(), "Error: reminder thresholds") {
+		t.Fatalf("malformed thresholds missing field error:\n%s", model.View())
+	}
+	updated, _ = model.Update(keyRunes("s"))
+	model = updated.(Model)
+	if saves != 0 {
+		t.Fatalf("malformed thresholds saved %d time(s)", saves)
+	}
+
+	model = moveConfigFocusTo(t, model, "config_trigger")
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+	for _, key := range []tea.KeyMsg{keyRunes("abc"), {Type: tea.KeyEnter}} {
+		updated, _ = model.Update(key)
+		model = updated.(Model)
+	}
+	if !strings.Contains(model.View(), "Error: trigger must be positive.") {
+		t.Fatalf("malformed trigger missing field error:\n%s", model.View())
+	}
+}
+
+func TestConfigEditorEditsTriggerMessageAndMaxSends(t *testing.T) {
+	cfg := config.Default()
+	var saved config.Config
+	model := NewModel(Options{
+		StartMode: StartConfig,
+		Config:    cfg,
+		Dependencies: Dependencies{
+			SaveConfig: func(next config.Config) error {
+				saved = next
+				return nil
+			},
+		},
+	})
+
+	for _, edit := range []struct {
+		action string
+		keys   []tea.KeyMsg
+	}{
+		{action: "config_trigger", keys: []tea.KeyMsg{keyRunes("4"), {Type: tea.KeyEnter}}},
+		{action: "config_message", keys: []tea.KeyMsg{keyRunes("still here?"), {Type: tea.KeyEnter}}},
+		{action: "config_max_sends", keys: []tea.KeyMsg{keyRunes("2"), {Type: tea.KeyEnter}}},
+	} {
+		model = moveConfigFocusTo(t, model, edit.action)
+		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		model = updated.(Model)
+		for _, key := range edit.keys {
+			updated, _ = model.Update(key)
+			model = updated.(Model)
+		}
+	}
+	updated, _ := model.Update(keyRunes("s"))
+	model = updated.(Model)
+
+	if saved.KeepAlive.TriggerBeforeExpiryMinutes != 4 || saved.KeepAlive.Message != "still here?" || saved.KeepAlive.Scope.MaxSends != 2 {
+		t.Fatalf("saved config = %#v", saved)
+	}
+}
+
+func TestConfigEditorResetRequiresRepeatConfirmation(t *testing.T) {
+	cfg := config.Default()
+	cfg.ReminderThresholds = []int{30, 15}
+	saves := 0
+	var saved config.Config
+	model := NewModel(Options{
+		StartMode: StartConfig,
+		Config:    cfg,
+		Dependencies: Dependencies{
+			SaveConfig: func(next config.Config) error {
+				saves++
+				saved = next
+				return nil
+			},
+		},
+	})
+
+	updated, _ := model.Update(keyRunes("d"))
+	model = updated.(Model)
+	if !strings.Contains(model.View(), "Reset defaults?") {
+		t.Fatalf("first d did not show reset confirmation:\n%s", model.View())
+	}
+	if !strings.Contains(model.View(), "Alert at:              [30, 15] %") {
+		t.Fatalf("first d reset before confirmation:\n%s", model.View())
+	}
+
+	updated, _ = model.Update(keyRunes("d"))
+	model = updated.(Model)
+	if strings.Contains(model.View(), "Reset defaults?") {
+		t.Fatalf("second d did not clear reset confirmation:\n%s", model.View())
+	}
+	if !strings.Contains(model.View(), "Alert at:              [20, 10] %") {
+		t.Fatalf("second d did not reset draft:\n%s", model.View())
+	}
+	if saves != 1 || saved.ReminderThresholds[0] != 20 || saved.ReminderThresholds[1] != 10 {
+		t.Fatalf("reset save = calls %d config %#v", saves, saved)
+	}
+}
+
+func TestConfigEditorSaveDoesNotMutateActiveKeepAliveState(t *testing.T) {
+	cfg := config.Default()
+	cfg.KeepAlive.AutoSend = false
+	model := NewModel(Options{
+		StartMode: StartConfig,
+		Config:    cfg,
+		Sessions:  []session.Session{workspaceSession(time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC))},
+		KeepAliveStates: map[string]keepalive.SessionState{
+			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateMonitoringIdle, AutoSend: false, MaxSends: 1},
+		},
+		Dependencies: Dependencies{
+			SaveConfig: func(config.Config) error { return nil },
+		},
+	})
+
+	model = moveConfigFocusTo(t, model, "config_autosend")
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeySpace})
+	model = updated.(Model)
+	updated, _ = model.Update(keyRunes("s"))
+	model = updated.(Model)
+
+	if state := model.KeepAliveState("workspace-id"); state.AutoSend {
+		t.Fatalf("config save mutated active KeepAlive state: %#v", state)
+	}
+}
+
 func TestInitialRoutes(t *testing.T) {
 	if route := NewModel(Options{}).Route(); route != RouteList {
 		t.Fatalf("default route = %q, want list", route)
@@ -1331,5 +1573,18 @@ func moveWorkspaceFocusTo(t *testing.T, model Model, action string) Model {
 		model = updated.(Model)
 	}
 	t.Fatalf("could not move workspace focus to %q; focused %q", action, model.FocusedAction())
+	return model
+}
+
+func moveConfigFocusTo(t *testing.T, model Model, action string) Model {
+	t.Helper()
+	for i := 0; i < 30; i++ {
+		if model.FocusedAction() == action {
+			return model
+		}
+		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyDown})
+		model = updated.(Model)
+	}
+	t.Fatalf("could not move config focus to %q; focused %q", action, model.FocusedAction())
 	return model
 }

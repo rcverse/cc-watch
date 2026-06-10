@@ -61,8 +61,18 @@ func RunWithDeps(args []string, stdout io.Writer, stderr io.Writer, deps Depende
 	case ModeJSON:
 		return runJSON(cmd, stdout, stderr, deps)
 	case ModeConfig:
-		fmt.Fprintln(stderr, "config editor is not wired until Phase 10")
-		return 1
+		deps = fillDependencies(deps)
+		var err error
+		if deps.StartTUI != nil {
+			err = deps.StartTUI(cmd)
+		} else {
+			err = runTUI(cmd, deps)
+		}
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		return 0
 	case ModeTUI:
 		deps = fillDependencies(deps)
 		var err error
@@ -101,6 +111,18 @@ func buildTUIOptions(cmd Command, deps Dependencies) (tui.Options, error) {
 	cfgResult, err := config.Load(home)
 	if err != nil {
 		return tui.Options{}, err
+	}
+	if cmd.Mode == ModeConfig {
+		return tui.Options{
+			Now:                now,
+			Dependencies:       tuiDependencies(cmd, deps),
+			StartMode:          tui.StartConfig,
+			ReminderThresholds: cfgResult.Config.ReminderThresholds,
+			KeepAliveConfig:    cfgResult.Config.KeepAlive,
+			Refresh:            tui.RefreshViewState{},
+			StartDisplayTicker: true,
+			Config:             cfgResult.Config,
+		}, nil
 	}
 
 	discoveryLimit := cmd.Limit
@@ -172,6 +194,7 @@ func buildTUIOptions(cmd Command, deps Dependencies) (tui.Options, error) {
 		KeepAliveConfig:    cfgResult.Config.KeepAlive,
 		Refresh:            refreshState,
 		StartDisplayTicker: true,
+		Config:             cfgResult.Config,
 	}
 	return options, nil
 }
@@ -215,7 +238,14 @@ func tuiDependencies(cmd Command, deps Dependencies) tui.Dependencies {
 		CheckClaudeAvailable: func() error {
 			return runner.Available()
 		},
-		KeepAliveRunner:              runner,
+		KeepAliveRunner: runner,
+		SaveConfig: func(next config.Config) error {
+			home, err := deps.HomeDir()
+			if err != nil {
+				return err
+			}
+			return config.Save(home, next)
+		},
 		NotifyEvent:                  notifyEvent,
 		ResetNotificationSuppression: resetNotificationSuppression,
 	}
@@ -262,6 +292,7 @@ func runJSON(cmd Command, stdout io.Writer, _ io.Writer, deps Dependencies) int 
 			Sessions:       []session.Session{selected},
 			Selected:       &selected,
 			Reminder:       reminderStates([]session.Session{selected}, cmd.Remind, cfgResult.Config.ReminderThresholds),
+			KeepAlive:      keepAliveStates([]session.Session{selected}, cfgResult.Config.KeepAlive),
 		}, 0)
 	}
 
@@ -279,6 +310,7 @@ func runJSON(cmd Command, stdout io.Writer, _ io.Writer, deps Dependencies) int 
 		ConfigWarnings: configWarnings,
 		Sessions:       sessions,
 		Reminder:       reminderStates(sessions, cmd.Remind, cfgResult.Config.ReminderThresholds),
+		KeepAlive:      keepAliveStates(sessions, cfgResult.Config.KeepAlive),
 	}, 0)
 }
 
@@ -345,16 +377,32 @@ func sessionFilesToSessions(files []session.SessionFile) []session.Session {
 }
 
 func reminderStates(sessions []session.Session, enabled bool, thresholds []int) map[string]jsonout.ReminderState {
-	if !enabled {
-		return nil
-	}
 	states := make(map[string]jsonout.ReminderState, len(sessions))
 	for _, s := range sessions {
-		sessionEnabled := true
+		sessionEnabled := enabled
 		states[s.SessionID] = jsonout.ReminderState{
 			Available:  true,
 			Enabled:    &sessionEnabled,
 			Thresholds: append([]int(nil), thresholds...),
+		}
+	}
+	return states
+}
+
+func keepAliveStates(sessions []session.Session, cfg config.KeepAliveConfig) map[string]jsonout.KeepAliveState {
+	states := make(map[string]jsonout.KeepAliveState, len(sessions))
+	for _, s := range sessions {
+		sessionEnabled := false
+		autoSend := cfg.AutoSend
+		states[s.SessionID] = jsonout.KeepAliveState{
+			Available: true,
+			Enabled:   &sessionEnabled,
+			AutoSend:  &autoSend,
+			State:     "off",
+			Scope: map[string]any{
+				"mode":      cfg.Scope.Mode,
+				"max_sends": cfg.Scope.MaxSends,
+			},
 		}
 	}
 	return states

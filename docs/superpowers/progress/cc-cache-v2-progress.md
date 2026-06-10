@@ -6,11 +6,11 @@ Update this file before ending any implementation context.
 
 ## Current State
 
-- Current phase: Phase 9 - Session Workspace
-- Current phase file: `docs/superpowers/plans/cc-cache-v2/phase-09-session-workspace.md`
-- Current step: Phase 9 complete; stop before Phase 10
+- Current phase: Phase 11 - CLI Integration And Full Non-Release Verification
+- Current phase file: `docs/superpowers/plans/cc-cache-v2/phase-11-cli-integration.md`
+- Current step: Phase 11 complete; stop before Phase 12
 - Status: complete pending next user instruction
-- Last updated: 2026-06-05
+- Last updated: 2026-06-11
 
 ## Phase Status
 
@@ -24,8 +24,8 @@ Update this file before ending any implementation context.
 - [x] Phase 7 - Notification System
 - [x] Phase 8 - KeepAlive State Machine And Bounded Automation
 - [x] Phase 9 - Session Workspace
-- [ ] Phase 10 - Config Editor
-- [ ] Phase 11 - CLI Integration And Full Non-Release Verification
+- [x] Phase 10 - Config Editor
+- [x] Phase 11 - CLI Integration And Full Non-Release Verification
 - [ ] Phase 12 - Packaging, Install, And Release Path
 - [ ] Phase 13 - Documentation Updates
 - [ ] Phase 14 - Final Acceptance Verification
@@ -82,6 +82,20 @@ Update this file before ending any implementation context.
 | 2026-06-05 | Phase 9 | `GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go test ./internal/tui ./internal/app ./internal/config ./internal/keepalive` | pass | Focused package verification after workspace integration and read-only reviewer fixes. |
 | 2026-06-05 | Phase 9 | `GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go test -count=1 ./...` | pass | Full suite passed after Phase 9 implementation. |
 | 2026-06-05 | Phase 9 | `git diff --check` | pass | Whitespace check clean after Phase 9 implementation. |
+| 2026-06-05 | Phase 10 | `go test ./internal/tui ./internal/config ./internal/app` red/green Config Editor cycles | pass | Tests first failed on missing Config Editor model/options/save wiring and config dispatch, then passed after editor fields, inline edits, validation, save/cancel/reset, app config startup, and selected no-session-IO behavior were implemented. |
+| 2026-06-05 | Phase 10 | Reviewer regression tests for malformed input, reset persistence, and trigger/message/max-sends edits | pass | Tests first failed because malformed edits were discarded and reset did not persist; passed after field parse-error state and confirmed reset save behavior. |
+| 2026-06-05 | Phase 10 | `GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go test ./internal/tui ./internal/config` | pass | Exact Phase 10 verification command passed. |
+| 2026-06-05 | Phase 10 | `GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go test -count=1 ./...` | pass | Full suite passed before checklist/progress update. |
+| 2026-06-05 | Phase 10 | PTY smoke: `go run ./cmd/cc-cache config` | pass | Config Editor opened, rendered Reminder/KeepAlive fields, Auto-send warning, effective 1h/5m behavior summary, validation status, and exited with `q` without saving. |
+| 2026-06-05 | Phase 10 | Final post-ledger `GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go test ./internal/tui ./internal/config ./internal/app` | pass | Focused packages passed after checklist/progress updates. |
+| 2026-06-05 | Phase 10 | Final post-ledger `GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go test -count=1 ./...` | pass | Full suite passed after checklist/progress updates. |
+| 2026-06-05 | Phase 10 | `git diff --check` | pass | Whitespace check clean after Phase 10 implementation and docs updates. |
+| 2026-06-11 | Phase 11 | `GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go test ./internal/app ./...` | pass | Exact Step 11.1 verification passed after adding public CLI command coverage for default TUI, `--n`, `--id`, `--remind`, config, JSON, help/version, and rejected `--watch`. |
+| 2026-06-11 | Phase 11 | Built `/private/tmp/cc-cache-phase11-bin/cc-cache`; ran fixture HOME JSON smokes for `--json`, `--json --id 11111111`, and `--json --id no-such-session` | pass | JSON emits `schema_version: 1`; selected-session output has no error; missing ID exits non-zero with `error.code: "session_not_found"`; Reminder and KeepAlive now report available/off runtime state. |
+| 2026-06-11 | Phase 11 | PTY smoke: `HOME=/private/tmp/cc-cache-phase11-empty-home /private/tmp/cc-cache-phase11-bin/cc-cache` | pass | Empty first-run TUI rendered the missing `/private/tmp/cc-cache-phase11-empty-home/.claude/projects` discovery path and exited with `q` without crashing. |
+| 2026-06-11 | Phase 11 | `GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go test ./internal/tui -run 'TestViewIncludesWatcherRefreshAndEmptyStateBanners|TestNotificationDeliveryFailureIsVisibleAsDegradedStateAndStatus|TestNotificationDeliverySuccessRecordsStatusWithoutDegradedBanner|TestDisplayTickFiresReminderNotificationThreshold|TestRefreshResultUpdatesEmptyState|TestRefreshDegradedMessageUpdatesTUIState'` | pass | Deterministic degraded-state coverage for empty state, notification failure visibility, event status updates, and refresh degraded state. |
+| 2026-06-11 | Phase 11 | `GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go test ./internal/keepalive ./internal/tui -run 'TestStateMachineTransitionsThroughRequiredStates|TestStateMachineImmediateManualAndFailureStates|TestStateMachineIsEdgeTriggeredScopedAndPerSession|TestStateMachineIgnoresStaleTokenEventsAfterCancellationAndRefresh|TestStateMachineDoesNotRearmWithinSameTriggerWindowWhenScopeRemains|TestCountdownElapsedDoesNotSendWhenAutoSendTurnsOffOrSafetyDeadlineIsMissed|TestFailureAcknowledgeMovesExhaustedScopeToScopeComplete|TestRunnerAvailabilityFailuresAreVisibleAndBounded|TestRunnerSubprocessFailuresAndLimitErrorsStopAutoSend|TestConfirmationRequiresTargetSessionLineAfterSendAttempt|TestConfirmationIgnoresTargetLinesThatExistedBeforeSendAttempt|TestConfirmationWaitTimeoutPath|TestWorkspaceKeepAliveCardStatesRenderSafetyContract|TestDisplayTickEvaluatesKeepAliveMonitoringSessions|TestWorkspaceIgnoresStaleKeepAliveAsyncMessages|TestWorkspaceIgnoresKeepAliveAsyncAfterRefreshGenerationOrSelectionChanges|TestWorkspaceKeepAliveActionsProduceRunnerAndConfirmationCommands'` | pass | Fake Claude runner and fake confirmation watcher cover countdown, manual prompt, failure, success, stale async, and scope-complete paths without invoking real `claude`. |
+| 2026-06-11 | Phase 11 | `GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go test -count=1 ./...`; `git diff --check` | pass | Full suite and whitespace check passed before final checklist/progress update. |
 
 ## Review Ledger
 
@@ -98,6 +112,8 @@ Update this file before ending any implementation context.
 | 2026-06-05 | Phase 7 | read-only phase reviewer | Found notifications were not wired to runtime events and successful distinct events did not reset failure suppression | Integrated fixes: app/TUI startup now wires notification manager callbacks, Reminder threshold display ticks emit notification commands, manual refresh resets suppression, success clears suppression, and regression tests cover both paths. |
 | 2026-06-05 | Phase 8 | read-only phase reviewer | Found same-window KeepAlive re-arm with remaining scope, countdown expiry ignoring Auto-send/safety drift, and exhausted failure states without a scope-complete path | Integrated fixes: trigger re-arm now requires an above-threshold refresh/new window, countdown expiry re-checks Auto-send and latest safe send time before starting a runner, and acknowledged exhausted failures move to `scope_complete`; added regression tests. |
 | 2026-06-05 | Phase 9 | read-only phase reviewer | Found KeepAlive actions were render/test-injectable but not wired into live Bubbletea commands, sending/confirming did not show Auto-send disabled reasons, workspace refresh merged selected data after reparsing all sessions, async KeepAlive messages lacked selected-session/refresh-edge guards, and overflowing evidence was not focusable. | Integrated fixes: app-enabled display ticks evaluate KeepAlive monitoring state, send-now/countdown actions now return runner and confirmation commands with injected seams, workspace refresh can parse only the selected JSONL path, async messages carry generation/selection guards, sending/confirming/failure cards show Auto-send disabled reasons, overflowing evidence becomes a bounded focusable scroll region, and regression tests cover each path. |
+| 2026-06-05 | Phase 10 | read-only phase reviewer | Found malformed numeric/threshold edits were silently discarded and could save the old config, reset confirmation only changed the draft without persisting defaults, and update coverage missed trigger/message/max-sends edits and malformed field validation. | Integrated fixes: malformed edits now produce field and summary validation errors that block save, confirmed reset writes defaults through `SaveConfig` and updates the original draft, trigger/message/max-sends edits are covered by save tests, and malformed thresholds/trigger regressions are covered. |
+| 2026-06-11 | Phase 11 | read-only phase reviewer | Found JSON mode still reported Reminder/KeepAlive as unavailable after those features were implemented, and noted `go run` with fixture `HOME` polluted the smoke fixture with Go cache/telemetry directories. | Integrated fixes: JSON output now builds Reminder and KeepAlive runtime-state maps from loaded config for emitted sessions, app tests assert available/off JSON state, generated fixture-home artifacts were removed, and final smokes use a prebuilt `/private/tmp` binary instead of `go run` with fixture `HOME`. |
 
 ## Decisions And Blockers
 
@@ -113,4 +129,4 @@ Update this file before ending any implementation context.
 
 ## Last Context Handoff
 
-Phase 9 completed the Session Workspace with per-session evidence sections, workspace-only focus/action behavior, Reminder and KeepAlive control rows, KeepAlive state cards, config-driven Auto-send defaults, safe Claude availability preflight, selected-path manual refresh, app-enabled display ticks, live KeepAlive runner/confirmation command wiring, generation/selection-guarded async messages, and bounded evidence scrolling. Read-only reviewer fixes were integrated and covered by regression tests. Next implementation context should begin at Phase 10: Config Editor.
+Phase 11 completed CLI integration and non-release verification before packaging. Public CLI command tests cover default TUI, `--n`, `--id`, `--json`, `--json --id`, `--remind`, `config`, `--help`, `--version`, and rejected `--watch`; JSON smokes pass with implemented Reminder/KeepAlive runtime state; empty first-run TUI and degraded notification paths are verified; KeepAlive integration remains fake-runner/fake-confirmation only with no real Claude send. Read-only reviewer fixes were integrated and covered by regression tests. Next implementation context should begin at Phase 12: Packaging, Install, And Release Path.

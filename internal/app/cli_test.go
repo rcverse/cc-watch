@@ -11,6 +11,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/richardchen/cc-cache/internal/config"
 	"github.com/richardchen/cc-cache/internal/notify"
 	"github.com/richardchen/cc-cache/internal/session"
 	"github.com/richardchen/cc-cache/internal/tui"
@@ -119,21 +120,34 @@ func TestJSONDispatchIsNonInteractive(t *testing.T) {
 	if doc["selected_session"] == nil {
 		t.Fatalf("selected_session = nil, want selected session JSON:\n%s", stdout.String())
 	}
+	selected := doc["selected_session"].(map[string]any)
+	reminder := selected["reminder"].(map[string]any)
+	if reminder["available"] != true || reminder["enabled"] != false {
+		t.Fatalf("reminder state = %#v, want available and disabled by default", reminder)
+	}
+	keepAlive := selected["keep_alive"].(map[string]any)
+	if keepAlive["available"] != true || keepAlive["enabled"] != false || keepAlive["auto_send"] != true || keepAlive["state"] != "off" {
+		t.Fatalf("keep_alive state = %#v, want available off state with default auto-send", keepAlive)
+	}
 }
 
-func TestConfigDispatchIsParsedButNotWired(t *testing.T) {
+func TestConfigDispatchStartsConfigEditor(t *testing.T) {
 	var stdout, stderr bytes.Buffer
+	deps := fakeDeps(t)
 
-	code := Run([]string{"config"}, &stdout, &stderr)
+	code := RunWithDeps([]string{"config"}, &stdout, &stderr, deps.Dependencies)
 
-	if code == 0 {
-		t.Fatal("Run(config) exit code = 0, want non-zero until Phase 10")
+	if code != 0 {
+		t.Fatalf("Run(config) exit code = %d, want 0; stderr=%s", code, stderr.String())
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "config editor is not wired until Phase 10") {
-		t.Fatalf("stderr missing config not-wired message:\n%s", stderr.String())
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	if deps.tuiStarts != 1 {
+		t.Fatalf("tui starts = %d, want 1", deps.tuiStarts)
 	}
 }
 
@@ -154,6 +168,146 @@ func TestTUIDispatchStartsListWithoutKeepAliveSideEffects(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestTUIDispatchForwardsPublicCLICommands(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want Command
+	}{
+		{
+			name: "default cc-cache",
+			args: nil,
+			want: Command{Mode: ModeTUI, Limit: 5},
+		},
+		{
+			name: "--n N",
+			args: []string{"--n", "2"},
+			want: Command{Mode: ModeTUI, Limit: 2},
+		},
+		{
+			name: "--id partial",
+			args: []string{"--id", "11111111"},
+			want: Command{Mode: ModeTUI, Limit: 5, ID: "11111111"},
+		},
+		{
+			name: "--remind",
+			args: []string{"--remind"},
+			want: Command{Mode: ModeTUI, Limit: 5, Remind: true},
+		},
+		{
+			name: "config",
+			args: []string{"config"},
+			want: Command{Mode: ModeConfig, Limit: 5},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			deps := fakeDeps(t)
+			var got Command
+			deps.StartTUI = func(cmd Command) error {
+				deps.tuiStarts++
+				got = cmd
+				return nil
+			}
+
+			code := RunWithDeps(tt.args, &stdout, &stderr, deps.Dependencies)
+
+			if code != 0 {
+				t.Fatalf("RunWithDeps(%v) exit code = %d, want 0; stderr=%q", tt.args, code, stderr.String())
+			}
+			if got != tt.want {
+				t.Fatalf("command = %#v, want %#v", got, tt.want)
+			}
+			if deps.tuiStarts != 1 {
+				t.Fatalf("tui starts = %d, want 1", deps.tuiStarts)
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout = %q, want empty", stdout.String())
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("stderr = %q, want empty", stderr.String())
+			}
+		})
+	}
+}
+
+func TestTUIStartupWithIDSelectsMatchingSession(t *testing.T) {
+	now := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
+	deps := fakeDeps(t)
+	deps.Now = func() time.Time { return now }
+	deps.DiscoverHome = func(home string, limit int) (session.DiscoveryResult, error) {
+		if limit != 0 {
+			t.Fatalf("DiscoverHome limit = %d, want 0 for ID resolution", limit)
+		}
+		return session.DiscoveryResult{
+			Sessions: []session.SessionFile{
+				{SessionID: "11111111-0000-0000-0000-000000000000", ShortID: "11111111", Project: "one", Path: "/tmp/one.jsonl", ModTime: now},
+				{SessionID: "22222222-0000-0000-0000-000000000000", ShortID: "22222222", Project: "two", Path: "/tmp/two.jsonl", ModTime: now.Add(-time.Minute)},
+			},
+		}, nil
+	}
+	deps.ParseFile = func(path string) (session.Session, error) {
+		if path != "/tmp/one.jsonl" {
+			t.Fatalf("ParseFile path = %q, want selected session path", path)
+		}
+		return session.Session{
+			SessionID:      "11111111-0000-0000-0000-000000000000",
+			ShortID:        "11111111",
+			Project:        "one",
+			JSONLPath:      path,
+			FileModifiedAt: now,
+		}, nil
+	}
+
+	options, err := buildTUIOptions(Command{Mode: ModeTUI, Limit: 5, ID: "11111111"}, deps.Dependencies)
+	if err != nil {
+		t.Fatalf("buildTUIOptions returned error: %v", err)
+	}
+
+	if options.SelectedID != "11111111-0000-0000-0000-000000000000" {
+		t.Fatalf("selected ID = %q, want matching session", options.SelectedID)
+	}
+	if len(options.Sessions) != 1 || options.Sessions[0].ShortID != "11111111" {
+		t.Fatalf("sessions = %#v, want selected session only", options.Sessions)
+	}
+}
+
+func TestTUIStartupWithRemindEnablesLoadedSessionRemindersOnly(t *testing.T) {
+	now := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
+	deps := fakeDeps(t)
+	deps.Now = func() time.Time { return now }
+	deps.DiscoverHome = func(home string, limit int) (session.DiscoveryResult, error) {
+		return session.DiscoveryResult{
+			Sessions: []session.SessionFile{
+				{SessionID: "reminded-id", ShortID: "reminded", Project: "tmp", Path: "/tmp/reminded.jsonl", ModTime: now},
+			},
+		}, nil
+	}
+	deps.ParseFile = func(path string) (session.Session, error) {
+		return session.Session{
+			SessionID:      "reminded-id",
+			ShortID:        "reminded",
+			Project:        "tmp",
+			JSONLPath:      path,
+			FileModifiedAt: now,
+		}, nil
+	}
+
+	options, err := buildTUIOptions(Command{Mode: ModeTUI, Limit: 5, Remind: true}, deps.Dependencies)
+	if err != nil {
+		t.Fatalf("buildTUIOptions returned error: %v", err)
+	}
+
+	if !options.ReminderEnabled["reminded-id"] {
+		t.Fatalf("reminder map = %#v, want loaded session enabled", options.ReminderEnabled)
+	}
+	if len(options.KeepAliveEnabled) != 0 {
+		t.Fatalf("KeepAlive enabled map = %#v, want --remind to leave KeepAlive off", options.KeepAliveEnabled)
 	}
 }
 
@@ -311,6 +465,59 @@ func TestTUIStartupWiresNotificationCallbacks(t *testing.T) {
 	}
 	if resetCalls != 1 {
 		t.Fatalf("reset calls = %d, want 1", resetCalls)
+	}
+}
+
+func TestConfigEditorStartupLoadsAndSavesConfig(t *testing.T) {
+	home := t.TempDir()
+	deps := fakeDeps(t)
+	deps.HomeDir = func() (string, error) { return home, nil }
+
+	options, err := buildTUIOptions(Command{Mode: ModeConfig}, deps.Dependencies)
+	if err != nil {
+		t.Fatalf("buildTUIOptions returned error: %v", err)
+	}
+	model := tui.NewModel(options)
+	if model.Route() != tui.RouteConfig {
+		t.Fatalf("route = %q, want config", model.Route())
+	}
+	if !strings.Contains(model.View(), "cc-cache config") {
+		t.Fatalf("config editor did not render:\n%s", model.View())
+	}
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	model = updated.(tui.Model)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeySpace})
+	model = updated.(tui.Model)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	model = updated.(tui.Model)
+
+	loaded, err := config.Load(home)
+	if err != nil {
+		t.Fatalf("config load after save: %v", err)
+	}
+	if !loaded.Config.KeepAlive.AutoSend {
+		t.Fatalf("saved config did not preserve default auto-send on: %#v", loaded.Config)
+	}
+}
+
+func TestConfigEditorStartupDoesNotDiscoverOrParseSessions(t *testing.T) {
+	deps := fakeDeps(t)
+	deps.DiscoverHome = func(home string, limit int) (session.DiscoveryResult, error) {
+		t.Fatalf("config editor should not discover sessions")
+		return session.DiscoveryResult{}, nil
+	}
+	deps.ParseFile = func(path string) (session.Session, error) {
+		t.Fatalf("config editor should not parse sessions")
+		return session.Session{}, nil
+	}
+
+	options, err := buildTUIOptions(Command{Mode: ModeConfig}, deps.Dependencies)
+	if err != nil {
+		t.Fatalf("buildTUIOptions returned error: %v", err)
+	}
+	if options.StartMode != tui.StartConfig {
+		t.Fatalf("start mode = %q, want config", options.StartMode)
 	}
 }
 

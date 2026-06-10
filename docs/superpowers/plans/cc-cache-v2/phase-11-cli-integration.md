@@ -6,13 +6,13 @@
 
 **Purpose:** Exercise the implemented product through its public CLI contract before packaging.
 
-- [ ] **Step 11.1: CLI command tests**
+- [x] **Step 11.1: CLI command tests**
   - Create or extend: `internal/app` tests.
   - Assertions: `cc-cache`, `--n N`, `--id <partial-id>`, `--json`, `--json --id <id>`, `--remind`, `config`, `--help`, `--version`, and rejected `--watch`.
   - Run: `go test ./internal/app ./...`.
   - Expected: pass.
 
-- [ ] **Step 11.2: JSON command smoke**
+- [x] **Step 11.2: JSON command smoke**
   - Run: `HOME="$PWD/internal/session/testdata/smoke-home" go run ./cmd/cc-cache --json`.
   - Expected: valid JSON to stdout and process exits without launching TUI.
   - Run: `HOME="$PWD/internal/session/testdata/smoke-home" go run ./cmd/cc-cache --json --id 11111111`.
@@ -20,13 +20,13 @@
   - Run: `HOME="$PWD/internal/session/testdata/smoke-home" go run ./cmd/cc-cache --json --id no-such-session`.
   - Expected: JSON error object with `code: "session_not_found"` and non-zero exit.
 
-- [ ] **Step 11.3: TUI degraded-state smoke**
+- [x] **Step 11.3: TUI degraded-state smoke**
   - Run with a temporary `HOME` containing no `.claude/projects`.
   - Expected: first-run empty state names exact discovery path and no crash.
   - Run with notifier command unavailable in a controlled environment.
   - Expected: Notify degraded visible; event state still updates.
 
-- [ ] **Step 11.4: KeepAlive no-real-send integration**
+- [x] **Step 11.4: KeepAlive no-real-send integration**
   - Run tests with fake Claude runner and fake confirmation watcher.
   - Expected: countdown, manual prompt, failure, success, and scope-complete paths pass without invoking real `claude`.
   - Gate: real Claude send testing is excluded from v2 implementation verification. If it is ever desired later, it must be a separate user-approved task outside this plan.

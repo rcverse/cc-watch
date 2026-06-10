@@ -185,6 +185,12 @@ func (m Model) focusedAction() string {
 		}
 		return actions[m.focusIndex%len(actions)]
 	}
+	if m.route == RouteConfig {
+		if len(configFocusActions) == 0 {
+			return ""
+		}
+		return configFocusActions[m.focusIndex%len(configFocusActions)]
+	}
 	if m.route == RouteList || m.route == RouteAmbiguous {
 		if m.isEmptyListState() {
 			if len(emptyFocusActions) == 0 {
@@ -222,6 +228,9 @@ func (m Model) listFocusCount() int {
 	if m.route == RouteWorkspace {
 		return len(m.workspaceFocusActions())
 	}
+	if m.route == RouteConfig {
+		return len(configFocusActions)
+	}
 	if m.route != RouteList && m.route != RouteAmbiguous {
 		return len(rootFocusActions)
 	}
@@ -241,6 +250,9 @@ func (m *Model) moveFocus(delta int) {
 	}
 	m.focusIndex = (m.focusIndex + delta + count) % count
 	if m.route == RouteWorkspace {
+		return
+	}
+	if m.route != RouteList && m.route != RouteAmbiguous {
 		return
 	}
 	if m.focusIndex < len(m.sessions) {

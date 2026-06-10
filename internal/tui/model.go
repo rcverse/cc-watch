@@ -65,6 +65,7 @@ type Dependencies struct {
 	CheckClaudeAvailable         func() error
 	KeepAliveRunner              keepalive.ClaudeRunner
 	ConfirmKeepAlive             func(context.Context, keepalive.ConfirmationTarget) (keepalive.ConfirmationResult, error)
+	SaveConfig                   func(config.Config) error
 	NotifyEvent                  func(event notify.Event) notify.Result
 	ResetNotificationSuppression func()
 }
@@ -100,6 +101,7 @@ type Options struct {
 	KeepAliveStatus    KeepAliveStatus
 	Refresh            RefreshViewState
 	StartDisplayTicker bool
+	Config             config.Config
 }
 
 type Model struct {
@@ -131,6 +133,14 @@ type Model struct {
 	directWorkspace      bool
 	evidenceOffset       int
 	startDisplayTicker   bool
+	configOriginal       config.Config
+	configDraft          config.Config
+	configEditing        bool
+	configEditingField   string
+	configInput          string
+	configFieldErrors    map[string]string
+	configResetConfirm   bool
+	configSaveError      string
 }
 
 var rootFocusActions = []string{"session", "reminder", "keepalive", "refresh", "help", "quit"}
@@ -152,6 +162,7 @@ func NewModel(options Options) Model {
 	}
 	keepAlives := cloneBoolMap(options.KeepAliveEnabled)
 	keepAliveConfig := normalizeKeepAliveConfig(options.KeepAliveConfig)
+	configDraft := normalizeConfig(options.Config)
 	keepAliveManager := options.KeepAliveManager
 	if keepAliveManager == nil {
 		keepAliveManager = keepalive.NewManager(keepAliveConfig)
@@ -191,6 +202,9 @@ func NewModel(options Options) Model {
 		refresh:            defaultRefresh(options.Refresh),
 		directWorkspace:    options.SelectedID != "",
 		startDisplayTicker: options.StartDisplayTicker,
+		configOriginal:     configDraft,
+		configDraft:        configDraft,
+		configFieldErrors:  map[string]string{},
 	}
 	model.focusIndex = model.defaultFocusIndex()
 	return model
@@ -328,6 +342,20 @@ func normalizeKeepAliveConfig(cfg config.KeepAliveConfig) config.KeepAliveConfig
 	if cfg.Scope.MaxSends <= 0 {
 		cfg.Scope.MaxSends = defaults.Scope.MaxSends
 	}
+	return cfg
+}
+
+func normalizeConfig(cfg config.Config) config.Config {
+	defaults := config.Default()
+	if len(cfg.ReminderThresholds) == 0 && cfg.KeepAlive.TriggerBeforeExpiryMinutes == 0 && cfg.KeepAlive.CountdownSeconds == 0 && cfg.KeepAlive.Message == "" && cfg.KeepAlive.Scope.Mode == "" && cfg.KeepAlive.Scope.MaxSends == 0 {
+		return defaults
+	}
+	if len(cfg.ReminderThresholds) == 0 {
+		cfg.ReminderThresholds = append([]int(nil), defaults.ReminderThresholds...)
+	} else {
+		cfg.ReminderThresholds = append([]int(nil), cfg.ReminderThresholds...)
+	}
+	cfg.KeepAlive = normalizeKeepAliveConfig(cfg.KeepAlive)
 	return cfg
 }
 

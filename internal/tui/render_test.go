@@ -215,6 +215,49 @@ func TestListEmptyStatesOnlyAdvertiseValidActions(t *testing.T) {
 	}
 }
 
+func TestConfigEditorRendersFieldsSummaryWarningsAndValidation(t *testing.T) {
+	cfg := config.Default()
+	cfg.KeepAlive.CountdownSeconds = 120
+	model := NewModel(Options{
+		StartMode: StartConfig,
+		Config:    cfg,
+	})
+
+	view := model.View()
+	for _, want := range []string{
+		"cc-cache config",
+		"Reminder",
+		"Alert at:              [20, 10] %",
+		"KeepAlive automation",
+		"Trigger before expiry: [5] minutes",
+		"Countdown:             [120] seconds",
+		"Message:               [Keep-alive check. Reply \"yes\" only.]",
+		"Auto-send:             [x] enabled, sends Claude message",
+		"Max sends:             [1]",
+		"What will happen",
+		"1h cache:",
+		"5m cache:",
+		"Validation",
+		"Cannot save.",
+		"countdown may not fit the 5m cache trigger window",
+		"up/down move  enter edit  space toggle  s save  d reset(confirm)  esc cancel",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("config view missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestConfigEditorRendersAutosendWarning(t *testing.T) {
+	cfg := config.Default()
+	model := NewModel(Options{StartMode: StartConfig, Config: cfg})
+	view := model.View()
+
+	if !strings.Contains(view, "Warning: Auto-send default is enabled") {
+		t.Fatalf("config view missing auto-send warning:\n%s", view)
+	}
+}
+
 func TestListViewRequiredStates(t *testing.T) {
 	now := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
 	for _, tc := range []struct {

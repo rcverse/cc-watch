@@ -299,6 +299,9 @@ func mergeSelectedRefresh(existing []session.Session, refreshed []session.Sessio
 }
 
 func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.route == RouteConfig && m.configEditing {
+		return m.updateConfigEditing(msg)
+	}
 	switch msg.String() {
 	case "?":
 		m.helpOpen = !m.helpOpen
@@ -324,7 +327,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		return m.activateFocused()
 	case " ":
-		if m.FocusedAction() == "reminder" || m.FocusedAction() == "keepalive" || m.FocusedAction() == "keepalive_autosend" {
+		if m.FocusedAction() == "reminder" || m.FocusedAction() == "keepalive" || m.FocusedAction() == "keepalive_autosend" || m.FocusedAction() == "config_autosend" {
 			return m.activateFocused()
 		}
 		return m, nil
@@ -354,12 +357,14 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else if m.route == RouteAmbiguous {
 			m.route = RouteList
 			m.lastAction = "back_to_list"
+		} else if m.route == RouteConfig {
+			return m.cancelConfig()
 		}
 		return m, nil
 	case "s":
 		switch {
 		case m.route == RouteConfig:
-			m.lastAction = "save_config"
+			return m.saveConfig()
 		case m.route == RouteWorkspace && m.workspaceCanSendKeepAlive():
 			return m.sendKeepAliveNow()
 		}
@@ -371,7 +376,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "d":
 		if m.route == RouteConfig {
-			m.lastAction = "reset_defaults"
+			return m.resetConfigDefaults()
 		}
 		return m, nil
 	default:
@@ -414,6 +419,18 @@ func (m Model) activateFocused() (tea.Model, tea.Cmd) {
 			m.focusIndex = m.defaultFocusIndex()
 		}
 		return m, nil
+	case "config_reminder_thresholds", "config_trigger", "config_countdown", "config_message", "config_max_sends":
+		m.startConfigEdit(action)
+		return m, nil
+	case "config_autosend":
+		m.toggleConfigAutoSend()
+		return m, nil
+	case "config_save":
+		return m.saveConfig()
+	case "config_reset":
+		return m.resetConfigDefaults()
+	case "config_cancel":
+		return m.cancelConfig()
 	case "copy_id":
 		m.lastAction = "copy_session_id"
 		return m, nil

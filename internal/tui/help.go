@@ -24,6 +24,7 @@ func (m Model) helpText() string {
 	case RouteConfig:
 		b.WriteString("s save valid config\n")
 		b.WriteString("d reset defaults with confirmation\n")
+		b.WriteString("esc cancel without writing\n")
 	case RouteAmbiguous:
 		b.WriteString("enter choose matching session\n")
 	}
