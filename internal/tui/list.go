@@ -15,9 +15,9 @@ func (m Model) listView() string {
 		return m.ambiguousListView()
 	}
 
-	fmt.Fprintf(&b, "cc-cache list  %d sessions\n", len(m.sessions))
-	fmt.Fprintf(&b, "focus: %s\n", m.FocusedAction())
-	b.WriteString(m.listSystemState())
+	b.WriteString(Header("cc-cache list", fmt.Sprintf("%d sessions", len(m.sessions)), "focus: "+m.FocusedAction()))
+	b.WriteString(RenderPanel("System", strings.TrimRight(m.listSystemState(), "\n")))
+	b.WriteString("\n")
 
 	switch m.refresh.EmptyState {
 	case EmptyLoading:
@@ -33,9 +33,11 @@ func (m Model) listView() string {
 		b.WriteString("Sessions appear here after Claude Code writes JSONL files.\n")
 		b.WriteString("sessions appear after Claude Code writes JSONL files\n")
 	default:
+		var rows strings.Builder
 		for i, s := range m.sessions {
-			b.WriteString(m.renderListRow(i, s))
+			rows.WriteString(m.renderListRow(i, s))
 		}
+		b.WriteString(RenderPanel("Sessions", strings.TrimRight(rows.String(), "\n")))
 	}
 
 	b.WriteString(m.listFooter())
@@ -102,12 +104,13 @@ func (m Model) renderListRow(index int, s session.Session) string {
 		marker = ">"
 	}
 	status := s.StatusAt(m.now)
-	fmt.Fprintf(&b, "%s %s %s  %s %s  %s",
+	badge := statusBadge(status.State)
+	fmt.Fprintf(&b, "%s %s %s  cache window %s  %s  %s",
 		marker,
 		displayID(s),
 		truncateMiddle(s.Project, 18),
 		cacheLabel(s),
-		status.State,
+		badge,
 		formatStatusTime(status),
 	)
 	if m.width < 90 {
@@ -121,7 +124,7 @@ func (m Model) renderListRow(index int, s session.Session) string {
 	}
 
 	if status.PercentElapsed != nil {
-		fmt.Fprintf(&b, "  TTL %.0f%%", *status.PercentElapsed)
+		fmt.Fprintf(&b, "  TTL %.0f%% %s", *status.PercentElapsed, ProgressBar(*status.PercentElapsed, 12))
 	}
 	fmt.Fprintf(&b, "  hit %.0f%%", s.TokenStats.HitRate)
 	if len(s.Warnings) > 0 {
@@ -151,7 +154,7 @@ func (m Model) renderListRow(index int, s session.Session) string {
 func (m Model) renderNarrowEvidence(s session.Session, status session.Status) string {
 	var parts []string
 	if status.PercentElapsed != nil {
-		parts = append(parts, fmt.Sprintf("TTL %.0f%%", *status.PercentElapsed))
+		parts = append(parts, fmt.Sprintf("TTL %.0f%% %s", *status.PercentElapsed, ProgressBar(*status.PercentElapsed, 10)))
 	}
 	if s.TokenStats.HitRate > 0 {
 		parts = append(parts, fmt.Sprintf("hit %.0f%%", s.TokenStats.HitRate))
@@ -163,6 +166,20 @@ func (m Model) renderNarrowEvidence(s session.Session, status session.Status) st
 		return ""
 	}
 	return "  " + strings.Join(parts, "  ") + "\n"
+}
+
+func statusBadge(state session.StatusState) string {
+	styles := DefaultStyles()
+	switch state {
+	case session.StatusActive:
+		return styles.Badge(RoleSuccess, "active")
+	case session.StatusExpired:
+		return styles.Badge(RoleDanger, "expired")
+	case session.StatusUnknown:
+		return styles.Badge(RoleDisabled, "unknown")
+	default:
+		return styles.Badge(RoleNeutral, string(state))
+	}
 }
 
 func (m Model) listFooter() string {

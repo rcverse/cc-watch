@@ -6,9 +6,9 @@ Update this file before ending any implementation context.
 
 ## Current State
 
-- Current phase: Phase 11 - CLI Integration And Full Non-Release Verification
-- Current phase file: `docs/superpowers/plans/cc-cache-v2/phase-11-cli-integration.md`
-- Current step: Phase 11 complete; stop before Phase 12
+- Current phase: Phase 11.5 - Visual Parity And Terminal Polish
+- Current phase file: `docs/superpowers/plans/cc-cache-v2/phase-11.5-visual-polish.md`
+- Current step: Phase 11.5 complete; stop before Phase 12
 - Status: complete pending next user instruction
 - Last updated: 2026-06-11
 
@@ -26,6 +26,7 @@ Update this file before ending any implementation context.
 - [x] Phase 9 - Session Workspace
 - [x] Phase 10 - Config Editor
 - [x] Phase 11 - CLI Integration And Full Non-Release Verification
+- [x] Phase 11.5 - Visual Parity And Terminal Polish
 - [ ] Phase 12 - Packaging, Install, And Release Path
 - [ ] Phase 13 - Documentation Updates
 - [ ] Phase 14 - Final Acceptance Verification
@@ -96,6 +97,10 @@ Update this file before ending any implementation context.
 | 2026-06-11 | Phase 11 | `GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go test ./internal/tui -run 'TestViewIncludesWatcherRefreshAndEmptyStateBanners|TestNotificationDeliveryFailureIsVisibleAsDegradedStateAndStatus|TestNotificationDeliverySuccessRecordsStatusWithoutDegradedBanner|TestDisplayTickFiresReminderNotificationThreshold|TestRefreshResultUpdatesEmptyState|TestRefreshDegradedMessageUpdatesTUIState'` | pass | Deterministic degraded-state coverage for empty state, notification failure visibility, event status updates, and refresh degraded state. |
 | 2026-06-11 | Phase 11 | `GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go test ./internal/keepalive ./internal/tui -run 'TestStateMachineTransitionsThroughRequiredStates|TestStateMachineImmediateManualAndFailureStates|TestStateMachineIsEdgeTriggeredScopedAndPerSession|TestStateMachineIgnoresStaleTokenEventsAfterCancellationAndRefresh|TestStateMachineDoesNotRearmWithinSameTriggerWindowWhenScopeRemains|TestCountdownElapsedDoesNotSendWhenAutoSendTurnsOffOrSafetyDeadlineIsMissed|TestFailureAcknowledgeMovesExhaustedScopeToScopeComplete|TestRunnerAvailabilityFailuresAreVisibleAndBounded|TestRunnerSubprocessFailuresAndLimitErrorsStopAutoSend|TestConfirmationRequiresTargetSessionLineAfterSendAttempt|TestConfirmationIgnoresTargetLinesThatExistedBeforeSendAttempt|TestConfirmationWaitTimeoutPath|TestWorkspaceKeepAliveCardStatesRenderSafetyContract|TestDisplayTickEvaluatesKeepAliveMonitoringSessions|TestWorkspaceIgnoresStaleKeepAliveAsyncMessages|TestWorkspaceIgnoresKeepAliveAsyncAfterRefreshGenerationOrSelectionChanges|TestWorkspaceKeepAliveActionsProduceRunnerAndConfirmationCommands'` | pass | Fake Claude runner and fake confirmation watcher cover countdown, manual prompt, failure, success, stale async, and scope-complete paths without invoking real `claude`. |
 | 2026-06-11 | Phase 11 | `GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go test -count=1 ./...`; `git diff --check` | pass | Full suite and whitespace check passed before final checklist/progress update. |
+| 2026-06-11 | Phase 11.5 | `GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go test ./internal/tui` | pass | Visual render tests cover bordered panels, status badges, progress bars, bounded workspace JSONL path rendering, List View hierarchy, Workspace Evidence/Controls panels, and Config Editor groups. |
+| 2026-06-11 | Phase 11.5 | PTY smoke via `/private/tmp/cc-cache-phase115-bin/cc-cache` for List View, `--id 11111111`, and `config` | pass | Confirmed visible hierarchy with System/Sessions, Evidence/Controls, Reminder/KeepAlive/What will happen/Validation panels; no installed command path changed and no real Claude send run. |
+| 2026-06-11 | Phase 11.5 | `GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go test ./internal/tui ./internal/app`; `GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go test -count=1 ./...`; `git diff --check` | pass | Full verification passed after terminal visual polish. |
+| 2026-06-11 | Phase 11.5 UI Audit | PTY e2e audit for List View, first-run empty state, Workspace, Config Editor, and KeepAlive manual prompt | blocked | Created `docs/superpowers/plans/cc-cache-v2/phase-11.5-UI-REVIEW.md`; found viewport clipping, unbounded panel width, weak focus affordance, unpolished empty/ambiguous states, and impossible expired TTL percentages. Phase 12 packaging should wait for P1/P2 fixes. |
 
 ## Review Ledger
 
@@ -114,6 +119,7 @@ Update this file before ending any implementation context.
 | 2026-06-05 | Phase 9 | read-only phase reviewer | Found KeepAlive actions were render/test-injectable but not wired into live Bubbletea commands, sending/confirming did not show Auto-send disabled reasons, workspace refresh merged selected data after reparsing all sessions, async KeepAlive messages lacked selected-session/refresh-edge guards, and overflowing evidence was not focusable. | Integrated fixes: app-enabled display ticks evaluate KeepAlive monitoring state, send-now/countdown actions now return runner and confirmation commands with injected seams, workspace refresh can parse only the selected JSONL path, async messages carry generation/selection guards, sending/confirming/failure cards show Auto-send disabled reasons, overflowing evidence becomes a bounded focusable scroll region, and regression tests cover each path. |
 | 2026-06-05 | Phase 10 | read-only phase reviewer | Found malformed numeric/threshold edits were silently discarded and could save the old config, reset confirmation only changed the draft without persisting defaults, and update coverage missed trigger/message/max-sends edits and malformed field validation. | Integrated fixes: malformed edits now produce field and summary validation errors that block save, confirmed reset writes defaults through `SaveConfig` and updates the original draft, trigger/message/max-sends edits are covered by save tests, and malformed thresholds/trigger regressions are covered. |
 | 2026-06-11 | Phase 11 | read-only phase reviewer | Found JSON mode still reported Reminder/KeepAlive as unavailable after those features were implemented, and noted `go run` with fixture `HOME` polluted the smoke fixture with Go cache/telemetry directories. | Integrated fixes: JSON output now builds Reminder and KeepAlive runtime-state maps from loaded config for emitted sessions, app tests assert available/off JSON state, generated fixture-home artifacts were removed, and final smokes use a prebuilt `/private/tmp` binary instead of `go run` with fixture `HOME`. |
+| 2026-06-11 | Phase 11.5 UI Audit | inline visual/UX audit | Found the visual polish improved structure but remains insufficient for packaging: Workspace/Config are not height-aware, generic panels are not width-aware, expired TTL labels exceed useful ranges, focus is weak, and empty/ambiguous states remain plain text. | Wrote `phase-11.5-UI-REVIEW.md` with 6-pillar scorecard and remediation order. P1/P2 fixes should be implemented before Phase 12 packaging/install. |
 
 ## Decisions And Blockers
 
@@ -129,4 +135,4 @@ Update this file before ending any implementation context.
 
 ## Last Context Handoff
 
-Phase 11 completed CLI integration and non-release verification before packaging. Public CLI command tests cover default TUI, `--n`, `--id`, `--json`, `--json --id`, `--remind`, `config`, `--help`, `--version`, and rejected `--watch`; JSON smokes pass with implemented Reminder/KeepAlive runtime state; empty first-run TUI and degraded notification paths are verified; KeepAlive integration remains fake-runner/fake-confirmation only with no real Claude send. Read-only reviewer fixes were integrated and covered by regression tests. Next implementation context should begin at Phase 12: Packaging, Install, And Release Path.
+Phase 11.5 corrected part of the Go TUI's visual regression, then a follow-up UI audit found remaining packaging blockers. The TUI now has shared terminal visual primitives, bordered panels, badges, and progress bars, but Workspace/Config still are not height-aware in 80x24 terminals, panel width handling is inconsistent, focus affordance is weak, empty/ambiguous states remain under-polished, and expired TTL percentages are not presentation-safe. Next implementation context should fix the P1/P2 items in `docs/superpowers/plans/cc-cache-v2/phase-11.5-UI-REVIEW.md` before Phase 12 packaging/install.

@@ -53,6 +53,26 @@ func TestStateBadgesIncludeTextNotOnlyColor(t *testing.T) {
 	}
 }
 
+func TestVisualPrimitivesRenderPanelsAndProgressBars(t *testing.T) {
+	panel := RenderPanel("Status", "Cache window: 1h\nTTL elapsed")
+	for _, want := range []string{"╭", "╮", "╰", "╯", "Status", "Cache window: 1h"} {
+		if !strings.Contains(panel, want) {
+			t.Fatalf("panel missing %q:\n%s", want, panel)
+		}
+	}
+
+	bar := ProgressBar(67, 12)
+	for _, want := range []string{"█", "░"} {
+		if !strings.Contains(bar, want) {
+			t.Fatalf("progress bar missing %q: %q", want, bar)
+		}
+	}
+	if visibleWidth(stripANSI(bar)) != 12 {
+		t.Fatalf("progress bar visible width = %d, want 12: %q", visibleWidth(stripANSI(bar)), bar)
+	}
+
+}
+
 func TestViewIncludesRouteAndFocusLabels(t *testing.T) {
 	model := NewModel(Options{})
 	view := model.View()
@@ -60,6 +80,59 @@ func TestViewIncludesRouteAndFocusLabels(t *testing.T) {
 	for _, want := range []string{"cc-cache list", "focus: session"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("view missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestListViewUsesPolishedVisualHierarchy(t *testing.T) {
+	now := time.Date(2026, 6, 3, 12, 0, 0, 0, time.UTC)
+	last := now.Add(-30 * time.Minute)
+	model := NewModel(Options{
+		Now: now,
+		Sessions: []session.Session{{
+			SessionID:      "11111111-1111-1111-1111-111111111111",
+			ShortID:        "11111111",
+			Project:        "visual-project",
+			FileModifiedAt: now,
+			LastMessageAt:  &last,
+			CacheWindow:    session.CacheWindow{Tier: session.Tier1Hour, Label: "1h", TTLSeconds: 3600, Known: true},
+			TokenStats:     session.TokenStats{HitRate: 88},
+			Messages:       session.Messages{LastUserExcerpt: "last visual message"},
+		}},
+	})
+	view := model.View()
+
+	for _, want := range []string{"cc-cache list", "╭─ Sessions", "╰", "█", "░", "[active]", "cache window"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("list view missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestWorkspaceAndConfigUseBoundedPanels(t *testing.T) {
+	now := time.Date(2026, 6, 3, 12, 0, 0, 0, time.UTC)
+	sessionID := "workspace-id"
+	workspace := NewModel(Options{
+		Now:        now,
+		Sessions:   []session.Session{workspaceSession(now)},
+		SelectedID: sessionID,
+	})
+	workspaceView := workspace.View()
+	for _, want := range []string{"╭─ Evidence", "╭─ Controls", "cache window", "█", "░"} {
+		if !strings.Contains(workspaceView, want) {
+			t.Fatalf("workspace view missing %q:\n%s", want, workspaceView)
+		}
+	}
+	for _, line := range strings.Split(workspaceView, "\n") {
+		if strings.Contains(line, "JSONL:") && visibleWidth(stripANSI(line)) > 80 {
+			t.Fatalf("workspace JSONL line width = %d, want <= 80:\n%s", visibleWidth(stripANSI(line)), workspaceView)
+		}
+	}
+
+	configView := NewModel(Options{StartMode: StartConfig, Config: config.Default()}).View()
+	for _, want := range []string{"╭─ Reminder", "╭─ KeepAlive automation", "╭─ What will happen", "╭─ Validation"} {
+		if !strings.Contains(configView, want) {
+			t.Fatalf("config view missing %q:\n%s", want, configView)
 		}
 	}
 }

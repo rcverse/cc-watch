@@ -24,13 +24,12 @@ func (m Model) workspaceView() string {
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "cc-cache / %s / %s\n", selected.Project, displayID(*selected))
-	fmt.Fprintf(&b, "focus: %s\n", m.FocusedAction())
-	b.WriteString(m.listSystemState())
+	b.WriteString(Header(fmt.Sprintf("cc-cache / %s / %s", selected.Project, displayID(*selected)), "focus: "+m.FocusedAction()))
+	b.WriteString(RenderPanel("System", strings.TrimRight(m.listSystemState(), "\n")))
 	b.WriteString("\nSession Evidence\n")
-	b.WriteString(m.workspaceEvidence(*selected))
+	b.WriteString(RenderPanel("Evidence", strings.TrimRight(m.workspaceEvidence(*selected), "\n")))
 	b.WriteString("\nControls\n")
-	b.WriteString(m.workspaceControls(*selected))
+	b.WriteString(RenderPanel("Controls", strings.TrimRight(m.workspaceControls(*selected), "\n")))
 	b.WriteString(m.workspaceFooter())
 	if m.helpOpen {
 		b.WriteString("\n")
@@ -69,10 +68,14 @@ func workspaceEvidenceLines(s session.Session, now time.Time) []string {
 	var lines []string
 	status := s.StatusAt(now)
 	lines = append(lines, "Status")
-	lines = append(lines, fmt.Sprintf("  Cache window: %s TTL, %s, %s", cacheLabel(s), status.State, formatStatusTime(status)))
+	if status.PercentElapsed != nil {
+		lines = append(lines, fmt.Sprintf("  cache window: %s TTL, %s, %s  %s %.0f%%", cacheLabel(s), status.State, formatStatusTime(status), ProgressBar(*status.PercentElapsed, 16), *status.PercentElapsed))
+	} else {
+		lines = append(lines, fmt.Sprintf("  cache window: %s TTL, %s, %s", cacheLabel(s), status.State, formatStatusTime(status)))
+	}
 	lines = append(lines, fmt.Sprintf("  Project: %s", s.Project))
 	lines = append(lines, fmt.Sprintf("  Full session ID: %s", s.SessionID))
-	lines = append(lines, fmt.Sprintf("  JSONL: %s", s.JSONLPath))
+	lines = append(lines, fmt.Sprintf("  JSONL: %s", truncateMiddle(s.JSONLPath, 66)))
 	lines = append(lines, fmt.Sprintf("  File refresh: %s", formatModified(s.FileModifiedAt)))
 	if len(s.CacheWindow.Evidence) > 0 {
 		lines = append(lines, fmt.Sprintf("  Evidence: %s", strings.Join(s.CacheWindow.Evidence, ", ")))
@@ -151,6 +154,10 @@ func (m Model) keepAliveCard(s session.Session, state keepalive.SessionState) st
 		fmt.Fprintf(&b, "  Scope    %d / %d sends · auto-send %s\n", state.ScopeUsed, maxSends(state), autoSendBox(state.AutoSend))
 	case keepalive.StateCountdown:
 		fmt.Fprintf(&b, "  State    Countdown %ds\n", m.countdowns[s.SessionID])
+		if seconds := m.countdowns[s.SessionID]; seconds > 0 {
+			percent := float64(seconds) / float64(maxInt(m.keepAliveConfig.CountdownSeconds, 1)) * 100
+			fmt.Fprintf(&b, "  Progress %s %ds remaining\n", ProgressBar(percent, 16), seconds)
+		}
 		fmt.Fprintf(&b, "  Next     Send now or cancel before countdown ends\n")
 		fmt.Fprintf(&b, "  Claude message  Will send at zero if not canceled\n")
 		fmt.Fprintf(&b, "  Message  %q\n", m.keepAliveConfig.Message)

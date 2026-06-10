@@ -26,55 +26,60 @@ var configFocusActions = []string{
 func (m Model) configView() string {
 	cfg := m.configDraft
 	var b strings.Builder
-	fmt.Fprintf(&b, "cc-cache config\n")
-	fmt.Fprintf(&b, "focus: %s\n", m.FocusedAction())
-	b.WriteString("\nReminder\n")
-	fmt.Fprintf(&b, "  Alert at:              [%s] %%\n", thresholdsText(cfg.ReminderThresholds))
-	if message := m.configFieldError("config_reminder_thresholds"); message != "" {
-		fmt.Fprintf(&b, "  Error: %s\n", message)
-	}
+	b.WriteString(Header("cc-cache config", "focus: "+m.FocusedAction()))
 
-	b.WriteString("\nKeepAlive automation\n")
-	fmt.Fprintf(&b, "  Trigger before expiry: [%d] minutes\n", cfg.KeepAlive.TriggerBeforeExpiryMinutes)
-	if message := m.configFieldError("config_trigger"); message != "" {
-		fmt.Fprintf(&b, "  Error: %s\n", message)
+	var reminder strings.Builder
+	fmt.Fprintf(&reminder, "Alert at:              [%s] %%\n", thresholdsText(cfg.ReminderThresholds))
+	if message := m.configFieldError("config_reminder_thresholds"); message != "" {
+		fmt.Fprintf(&reminder, "Error: %s\n", message)
 	}
-	fmt.Fprintf(&b, "  Countdown:             [%d] seconds\n", cfg.KeepAlive.CountdownSeconds)
+	b.WriteString(RenderPanel("Reminder", strings.TrimRight(reminder.String(), "\n")))
+	b.WriteString("\n")
+
+	var keepAlive strings.Builder
+	fmt.Fprintf(&keepAlive, "Trigger before expiry: [%d] minutes\n", cfg.KeepAlive.TriggerBeforeExpiryMinutes)
+	if message := m.configFieldError("config_trigger"); message != "" {
+		fmt.Fprintf(&keepAlive, "Error: %s\n", message)
+	}
+	fmt.Fprintf(&keepAlive, "Countdown:             [%d] seconds\n", cfg.KeepAlive.CountdownSeconds)
 	if message := m.configFieldError("config_countdown"); message != "" {
-		fmt.Fprintf(&b, "  Error: %s\n", message)
+		fmt.Fprintf(&keepAlive, "Error: %s\n", message)
 	}
 	if countdownWarnsFor5Minute(cfg) {
-		fmt.Fprintf(&b, "  Error: countdown may not fit the 5m cache trigger window.\n")
+		fmt.Fprintf(&keepAlive, "Error: countdown may not fit the 5m cache trigger window.\n")
 	}
-	fmt.Fprintf(&b, "  Message:               [%s]\n", cfg.KeepAlive.Message)
-	fmt.Fprintf(&b, "  Auto-send:             %s\n", autoSendDefaultText(cfg.KeepAlive.AutoSend))
+	fmt.Fprintf(&keepAlive, "Message:               [%s]\n", cfg.KeepAlive.Message)
+	fmt.Fprintf(&keepAlive, "Auto-send:             %s\n", autoSendDefaultText(cfg.KeepAlive.AutoSend))
 	if cfg.KeepAlive.AutoSend {
-		fmt.Fprintf(&b, "  Warning: Auto-send default is enabled; future KeepAlive sessions may send a Claude message.\n")
+		fmt.Fprintf(&keepAlive, "Warning: Auto-send default is enabled; future KeepAlive sessions may send a Claude message.\n")
 	}
-	fmt.Fprintf(&b, "  Max sends:             [%d]\n", cfg.KeepAlive.Scope.MaxSends)
+	fmt.Fprintf(&keepAlive, "Max sends:             [%d]\n", cfg.KeepAlive.Scope.MaxSends)
 	if message := m.configFieldError("config_max_sends"); message != "" {
-		fmt.Fprintf(&b, "  Error: %s\n", message)
+		fmt.Fprintf(&keepAlive, "Error: %s\n", message)
 	}
 	if m.configEditing {
-		fmt.Fprintf(&b, "  Editing %s: %s\n", m.configEditingField, m.configInput)
+		fmt.Fprintf(&keepAlive, "Editing %s: %s\n", m.configEditingField, m.configInput)
 	}
+	b.WriteString(RenderPanel("KeepAlive automation", strings.TrimRight(keepAlive.String(), "\n")))
 
-	b.WriteString("\nWhat will happen\n")
-	b.WriteString(configBehaviorSummary(cfg))
+	b.WriteString("\n")
+	b.WriteString(RenderPanel("What will happen", strings.TrimRight(configBehaviorSummary(cfg), "\n")))
 
-	b.WriteString("\nValidation\n")
+	var validation strings.Builder
 	if err := m.configEditorValidation(); err != nil {
-		fmt.Fprintf(&b, "  Cannot save. %s\n", err.Error())
+		fmt.Fprintf(&validation, "Cannot save. %s\n", err.Error())
 	} else {
-		fmt.Fprintf(&b, "  OK\n")
+		fmt.Fprintf(&validation, "OK\n")
 	}
 	if m.configSaveError != "" {
-		fmt.Fprintf(&b, "  Save failed: %s\n", m.configSaveError)
+		fmt.Fprintf(&validation, "Save failed: %s\n", m.configSaveError)
 	}
 	if m.configResetConfirm {
-		b.WriteString("\nReset defaults? This will replace KeepAlive defaults.\n")
-		b.WriteString("Press d again to confirm, esc to keep current settings.\n")
+		validation.WriteString("\nReset defaults? This will replace KeepAlive defaults.\n")
+		validation.WriteString("Press d again to confirm, esc to keep current settings.\n")
 	}
+	b.WriteString("\n")
+	b.WriteString(RenderPanel("Validation", strings.TrimRight(validation.String(), "\n")))
 	b.WriteString("\nActions: save · reset defaults · cancel · help · quit\n")
 	b.WriteString("up/down move  enter edit  space toggle  s save  d reset(confirm)  esc cancel\n")
 	if m.helpOpen {
@@ -236,7 +241,7 @@ func configBehaviorSummary(cfg config.Config) string {
 
 func countdownOutcome(autoSend bool, countdown int, disabled bool) string {
 	if !autoSend {
-		return "manual prompt only; no Claude message sent automatically"
+		return "manual prompt only; no auto-send"
 	}
 	if disabled {
 		return "auto-send disabled for affected sessions"
