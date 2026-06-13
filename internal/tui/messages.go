@@ -14,6 +14,10 @@ type DisplayTickMsg struct {
 	Now time.Time
 }
 
+type RefreshTickMsg struct {
+	Now time.Time
+}
+
 type WatcherEventMsg struct {
 	Path string
 	Op   string

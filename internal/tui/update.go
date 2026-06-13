@@ -16,6 +16,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch typed := msg.(type) {
 	case DisplayTickMsg:
 		m.now = typed.Now
+		m.clearExpiredNotice()
+		m.enforceKeepAliveEligibility()
 		var keepAliveCommands []tea.Cmd
 		for sessionID, seconds := range m.countdowns {
 			if seconds > 0 {
@@ -36,6 +38,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			commands = append(commands, displayTickCommand())
 		}
 		return m, tea.Batch(commands...)
+	case RefreshTickMsg:
+		m.now = typed.Now
+		updated, cmd := m.scheduleRefresh(refresh.SourceSafety, false)
+		m = updated.(Model)
+		if m.startRefreshTicker {
+			return m, tea.Batch(cmd, refreshTickCommand())
+		}
+		return m, cmd
 	case WatcherEventMsg:
 		m.watcherEvents = append(m.watcherEvents, typed)
 		return m.scheduleRefresh(refresh.SourceFsnotify, false)
@@ -69,6 +79,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		default:
 			m.clampSelectedIndex()
 		}
+		if m.route == RouteList || m.route == RouteAmbiguous {
+			m.focusIndex = m.selectedIndex
+		}
+		m.enforceKeepAliveEligibility()
 		return m, nil
 	case RefreshDegradedMsg:
 		m.refresh.Watcher = typed.State
@@ -125,6 +139,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.deps.ResetNotificationSuppression()
 		}
 		m.lastAction = "manual_refresh"
+		if m.route == RouteWorkspace {
+			m.setNotice("updating selected session", RoleInfo, 3*time.Second)
+		} else {
+			m.setNotice("updating sessions", RoleInfo, 3*time.Second)
+		}
 		return m.scheduleRefresh(refresh.SourceManual, true)
 	case SafetyRefreshMsg:
 		m.lastAction = "safety_refresh"
@@ -133,6 +152,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateKey(typed)
 	case tea.WindowSizeMsg:
 		m.width = typed.Width
+		m.height = typed.Height
 		return m, nil
 	default:
 		return m, nil
@@ -311,15 +331,15 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.lastAction = "quit"
 		return m, tea.Quit
 	case "down":
-		if m.route == RouteWorkspace && m.FocusedAction() == "evidence" && m.evidenceCanScroll(1) {
-			m.evidenceOffset++
+		if m.route == RouteWorkspace && m.FocusedAction() == "details_scroll" && m.detailsCanScroll(1) {
+			m.detailsOffset++
 			return m, nil
 		}
 		m.moveFocus(1)
 		return m, nil
 	case "up":
-		if m.route == RouteWorkspace && m.FocusedAction() == "evidence" && m.evidenceCanScroll(-1) {
-			m.evidenceOffset--
+		if m.route == RouteWorkspace && m.FocusedAction() == "details_scroll" && m.detailsCanScroll(-1) {
+			m.detailsOffset--
 			return m, nil
 		}
 		m.moveFocus(-1)
@@ -341,9 +361,29 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.toggleKeepAliveForSelected()
 		}
 		return m, nil
+	case "u":
+		if m.route == RouteList || m.route == RouteWorkspace {
+			return m.Update(ManualRefreshMsg{})
+		}
+		return m, nil
 	case "c":
-		if m.route == RouteWorkspace {
+		if m.route == RouteList || m.route == RouteAmbiguous {
+			m.route = RouteConfig
+			m.focusIndex = m.defaultFocusIndex()
+			m.lastAction = "open_config"
+		} else if m.route == RouteWorkspace {
 			m.lastAction = "copy_session_id"
+			if selected := m.selectedSession(); selected != nil {
+				m.setNotice("Session ID shown: "+selected.SessionID, RoleInfo, 3*time.Second)
+			}
+		}
+		return m, nil
+	case "v":
+		if m.route == RouteWorkspace {
+			m.sessionInfoExpanded = !m.sessionInfoExpanded
+			m.detailsOffset = 0
+			m.focusIndex = m.defaultFocusIndex()
+			m.lastAction = "toggle_session_info_details"
 		}
 		return m, nil
 	case "b", "esc":
@@ -365,6 +405,10 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch {
 		case m.route == RouteConfig:
 			return m.saveConfig()
+		case m.route == RouteWorkspace && m.sessionInfoExpanded:
+			m.gapSortNewest = !m.gapSortNewest
+			m.lastAction = "toggle_gap_sort"
+			return m, nil
 		case m.route == RouteWorkspace && m.workspaceCanSendKeepAlive():
 			return m.sendKeepAliveNow()
 		}
@@ -433,6 +477,9 @@ func (m Model) activateFocused() (tea.Model, tea.Cmd) {
 		return m.cancelConfig()
 	case "copy_id":
 		m.lastAction = "copy_session_id"
+		if selected := m.selectedSession(); selected != nil {
+			m.setNotice("Session ID shown: "+selected.SessionID, RoleInfo, 3*time.Second)
+		}
 		return m, nil
 	case "refresh":
 		return m.Update(ManualRefreshMsg{})
@@ -482,6 +529,12 @@ func (m *Model) toggleKeepAliveAutoSendForSelected() {
 	if selected == nil {
 		return
 	}
+	if reason := m.keepAliveUnavailableReason(*selected); reason != "" {
+		m.disableKeepAlive(selected.SessionID)
+		m.lastAction = "keepalive_unavailable_expired"
+		m.setNotice("KeepAlive "+reason, RoleWarning, 3*time.Second)
+		return
+	}
 	state := m.KeepAliveState(selected.SessionID)
 	if state.State == keepalive.StateSending || state.State == keepalive.StateConfirming || isKeepAliveFailure(state.State) {
 		m.lastAction = "keepalive_autosend_disabled"
@@ -516,6 +569,13 @@ func (m Model) sendKeepAliveNow() (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if reason := m.keepAliveUnavailableReason(*selected); reason != "" {
+		m.disableKeepAlive(selected.SessionID)
+		m.lastAction = "keepalive_unavailable_expired"
+		m.setNotice("KeepAlive "+reason, RoleWarning, 3*time.Second)
+		m.restoreFocusAction("keepalive")
+		return m, nil
+	}
 	state := m.KeepAliveState(selected.SessionID)
 	actions := m.keepAliveManager.SendNow(selected.SessionID, state.InstanceToken, m.now)
 	commands := m.applyKeepAliveActions(actions, nil)
@@ -533,9 +593,44 @@ func (m *Model) cancelKeepAlive() {
 		return
 	}
 	state := m.KeepAliveState(selected.SessionID)
-	m.keepAliveManager.Cancel(selected.SessionID, state.InstanceToken)
+	if state.State == keepalive.StateMonitoringIdle || state.State == keepalive.StateCancelledInstance {
+		m.disableKeepAlive(selected.SessionID)
+	} else {
+		m.keepAliveManager.Cancel(selected.SessionID, state.InstanceToken)
+	}
 	m.lastAction = "cancel_keepalive"
-	m.focusIndex = m.defaultFocusIndex()
+	m.setNotice("KeepAlive cancelled", RoleInfo, 3*time.Second)
+	m.restoreFocusAction("keepalive")
+}
+
+func (m *Model) enforceKeepAliveEligibility() {
+	for _, s := range m.sessions {
+		if m.keepAliveUnavailableReason(s) == "" {
+			continue
+		}
+		state := m.KeepAliveState(s.SessionID)
+		if state.State != "" && state.State != keepalive.StateOff {
+			m.disableKeepAlive(s.SessionID)
+		}
+	}
+}
+
+func (m *Model) disableKeepAlive(sessionID string) {
+	if m.keepAliveManager != nil {
+		m.keepAliveManager.Disable(sessionID)
+	}
+	m.keepAliveEnabled[sessionID] = false
+	delete(m.countdowns, sessionID)
+}
+
+func (m *Model) setNotice(message string, role StyleRole, ttl time.Duration) {
+	m.notice = Notice{Message: message, Role: role, ExpiresAt: m.now.Add(ttl)}
+}
+
+func (m *Model) clearExpiredNotice() {
+	if !m.notice.ExpiresAt.IsZero() && !m.now.Before(m.notice.ExpiresAt) {
+		m.notice = Notice{}
+	}
 }
 
 func isKeepAliveFailure(state keepalive.State) bool {
@@ -615,6 +710,12 @@ func keepAliveFailureReason(result keepalive.RunResult) string {
 func displayTickCommand() tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
 		return DisplayTickMsg{Now: t.UTC()}
+	})
+}
+
+func refreshTickCommand() tea.Cmd {
+	return tea.Tick(5*time.Second, func(t time.Time) tea.Msg {
+		return RefreshTickMsg{Now: t.UTC()}
 	})
 }
 

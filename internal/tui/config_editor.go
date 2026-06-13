@@ -19,68 +19,66 @@ var configFocusActions = []string{
 	"config_save",
 	"config_reset",
 	"config_cancel",
-	"help",
-	"quit",
 }
 
 func (m Model) configView() string {
 	cfg := m.configDraft
 	var b strings.Builder
-	b.WriteString(Header("cc-cache config", "focus: "+m.FocusedAction()))
-
-	var reminder strings.Builder
-	fmt.Fprintf(&reminder, "Alert at:              [%s] %%\n", thresholdsText(cfg.ReminderThresholds))
-	if message := m.configFieldError("config_reminder_thresholds"); message != "" {
-		fmt.Fprintf(&reminder, "Error: %s\n", message)
-	}
-	b.WriteString(RenderPanel("Reminder", strings.TrimRight(reminder.String(), "\n")))
+	styles := DefaultStyles()
+	b.WriteString(styles.Render(RoleIdentity, "Claude Code Cache / config"))
 	b.WriteString("\n")
+	b.WriteString(styles.Render(RoleSeparator, strings.Repeat("─", 46)))
+	b.WriteString("\n\n")
 
-	var keepAlive strings.Builder
-	fmt.Fprintf(&keepAlive, "Trigger before expiry: [%d] minutes\n", cfg.KeepAlive.TriggerBeforeExpiryMinutes)
-	if message := m.configFieldError("config_trigger"); message != "" {
-		fmt.Fprintf(&keepAlive, "Error: %s\n", message)
+	fmt.Fprintf(&b, "%s\n", m.configRow("config_reminder_thresholds", "Reminder thresholds", thresholdsText(cfg.ReminderThresholds)+"%", "alerts only; no Claude message"))
+	if message := m.configFieldError("config_reminder_thresholds"); message != "" {
+		fmt.Fprintf(&b, "    %s\n", styles.Render(RoleDanger, "Error: "+message))
 	}
-	fmt.Fprintf(&keepAlive, "Countdown:             [%d] seconds\n", cfg.KeepAlive.CountdownSeconds)
+	fmt.Fprintf(&b, "%s\n", m.configRow("config_trigger", "KeepAlive trigger", fmt.Sprintf("%dm", cfg.KeepAlive.TriggerBeforeExpiryMinutes), "before cache expiry"))
+	if message := m.configFieldError("config_trigger"); message != "" {
+		fmt.Fprintf(&b, "    %s\n", styles.Render(RoleDanger, "Error: "+message))
+	}
+	fmt.Fprintf(&b, "%s\n", m.configRow("config_countdown", "Countdown", fmt.Sprintf("%ds", cfg.KeepAlive.CountdownSeconds), "cancel window before any send"))
 	if message := m.configFieldError("config_countdown"); message != "" {
-		fmt.Fprintf(&keepAlive, "Error: %s\n", message)
+		fmt.Fprintf(&b, "    %s\n", styles.Render(RoleDanger, "Error: "+message))
 	}
 	if countdownWarnsFor5Minute(cfg) {
-		fmt.Fprintf(&keepAlive, "Error: countdown may not fit the 5m cache trigger window.\n")
+		fmt.Fprintf(&b, "    %s\n", styles.Render(RoleWarning, "Warning: countdown may not fit the 5m cache trigger window."))
 	}
-	fmt.Fprintf(&keepAlive, "Message:               [%s]\n", cfg.KeepAlive.Message)
-	fmt.Fprintf(&keepAlive, "Auto-send:             %s\n", autoSendDefaultText(cfg.KeepAlive.AutoSend))
+	fmt.Fprintf(&b, "%s\n", m.configRow("config_message", "Message", truncateEnd(cfg.KeepAlive.Message, 38), "Claude prompt text"))
+	fmt.Fprintf(&b, "%s\n", m.configRow("config_autosend", "Auto-send", onOffText(cfg.KeepAlive.AutoSend, true), autoSendConfigDetail(cfg.KeepAlive.AutoSend)))
 	if cfg.KeepAlive.AutoSend {
-		fmt.Fprintf(&keepAlive, "Warning: Auto-send default is enabled; future KeepAlive sessions may send a Claude message.\n")
+		fmt.Fprintf(&b, "    %s\n", styles.Render(RoleWarning, "Warning: Auto-send default may send a Claude message after countdown."))
 	}
-	fmt.Fprintf(&keepAlive, "Max sends:             [%d]\n", cfg.KeepAlive.Scope.MaxSends)
+	fmt.Fprintf(&b, "%s\n", m.configRow("config_max_sends", "Max sends", fmt.Sprintf("%d", cfg.KeepAlive.Scope.MaxSends), "per session scope"))
 	if message := m.configFieldError("config_max_sends"); message != "" {
-		fmt.Fprintf(&keepAlive, "Error: %s\n", message)
+		fmt.Fprintf(&b, "    %s\n", styles.Render(RoleDanger, "Error: "+message))
 	}
 	if m.configEditing {
-		fmt.Fprintf(&keepAlive, "Editing %s: %s\n", m.configEditingField, m.configInput)
+		fmt.Fprintf(&b, "    %s\n", styles.Render(RoleInfo, fmt.Sprintf("Editing %s: %s", configFieldLabel(m.configEditingField), m.configInput)))
+		fmt.Fprintf(&b, "    %s\n", styles.Render(RoleMuted, "Enter saves field · Esc cancels edit"))
 	}
-	b.WriteString(RenderPanel("KeepAlive automation", strings.TrimRight(keepAlive.String(), "\n")))
 
-	b.WriteString("\n")
-	b.WriteString(RenderPanel("What will happen", strings.TrimRight(configBehaviorSummary(cfg), "\n")))
+	b.WriteString("\nWhat will happen\n")
+	b.WriteString(configBehaviorSummary(cfg))
 
-	var validation strings.Builder
+	b.WriteString("\nValidation\n")
 	if err := m.configEditorValidation(); err != nil {
-		fmt.Fprintf(&validation, "Cannot save. %s\n", err.Error())
+		fmt.Fprintf(&b, "  %s\n", styles.Render(RoleDanger, "Cannot save. "+err.Error()))
 	} else {
-		fmt.Fprintf(&validation, "OK\n")
+		fmt.Fprintf(&b, "  %s\n", styles.Render(RoleSuccess, "OK"))
 	}
 	if m.configSaveError != "" {
-		fmt.Fprintf(&validation, "Save failed: %s\n", m.configSaveError)
+		fmt.Fprintf(&b, "  %s\n", styles.Render(RoleDanger, "Save failed: "+m.configSaveError))
 	}
 	if m.configResetConfirm {
-		validation.WriteString("\nReset defaults? This will replace KeepAlive defaults.\n")
-		validation.WriteString("Press d again to confirm, esc to keep current settings.\n")
+		b.WriteString("\n  Reset defaults? This will replace KeepAlive defaults.\n")
+		b.WriteString("  Press d again to confirm, esc to keep current settings.\n")
 	}
-	b.WriteString("\n")
-	b.WriteString(RenderPanel("Validation", strings.TrimRight(validation.String(), "\n")))
-	b.WriteString("\nActions: save · reset defaults · cancel · help · quit\n")
+	b.WriteString("\nActions\n")
+	fmt.Fprintf(&b, "%s\n", m.configRow("config_save", "Save", "", "write config"))
+	fmt.Fprintf(&b, "%s\n", m.configRow("config_reset", "Reset defaults", "", "requires confirmation"))
+	fmt.Fprintf(&b, "%s\n", m.configRow("config_cancel", "Cancel", "", "discard edits"))
 	b.WriteString("up/down move  enter edit  space toggle  s save  d reset(confirm)  esc cancel\n")
 	if m.helpOpen {
 		b.WriteString("\n")
@@ -89,24 +87,51 @@ func (m Model) configView() string {
 	return b.String()
 }
 
+func (m Model) configRow(action string, label string, value string, detail string) string {
+	styles := DefaultStyles()
+	marker := " "
+	if m.FocusedAction() == action {
+		marker = styles.Render(RoleIdentity, "›")
+	}
+	return truncateANSI(fmt.Sprintf("  %s %-20s %-10s %s", marker, label, value, detail), m.width)
+}
+
+func autoSendConfigDetail(enabled bool) string {
+	if enabled {
+		return "sends Claude message after countdown"
+	}
+	return "manual prompt only"
+}
+
 func (m Model) updateConfigEditing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
 		m.configEditing = false
 		m.configEditingField = ""
 		m.configInput = ""
+		m.configInputFresh = false
 		m.lastAction = "cancel_config_edit"
 		return m, nil
 	case tea.KeyEnter:
 		m.commitConfigInput()
 		return m, nil
 	case tea.KeyBackspace:
+		if m.configInputFresh {
+			m.configInput = ""
+			m.configInputFresh = false
+			return m, nil
+		}
 		if len(m.configInput) > 0 {
 			m.configInput = m.configInput[:len(m.configInput)-1]
 		}
 		return m, nil
 	case tea.KeyRunes:
-		m.configInput += string(msg.Runes)
+		if m.configInputFresh {
+			m.configInput = string(msg.Runes)
+			m.configInputFresh = false
+		} else {
+			m.configInput += string(msg.Runes)
+		}
 		return m, nil
 	default:
 		return m, nil
@@ -117,9 +142,44 @@ func (m *Model) startConfigEdit(field string) {
 	m.configEditing = true
 	m.configEditingField = field
 	m.configResetConfirm = false
-	m.configInput = ""
+	m.configInput = m.configFieldValue(field)
+	m.configInputFresh = true
 	m.clearConfigFieldError(field)
 	m.lastAction = "edit_" + field
+}
+
+func (m Model) configFieldValue(field string) string {
+	switch field {
+	case "config_reminder_thresholds":
+		return thresholdsText(m.configDraft.ReminderThresholds)
+	case "config_trigger":
+		return strconv.Itoa(m.configDraft.KeepAlive.TriggerBeforeExpiryMinutes)
+	case "config_countdown":
+		return strconv.Itoa(m.configDraft.KeepAlive.CountdownSeconds)
+	case "config_message":
+		return m.configDraft.KeepAlive.Message
+	case "config_max_sends":
+		return strconv.Itoa(m.configDraft.KeepAlive.Scope.MaxSends)
+	default:
+		return ""
+	}
+}
+
+func configFieldLabel(field string) string {
+	switch field {
+	case "config_reminder_thresholds":
+		return "Reminder thresholds"
+	case "config_trigger":
+		return "KeepAlive trigger"
+	case "config_countdown":
+		return "Countdown"
+	case "config_message":
+		return "Message"
+	case "config_max_sends":
+		return "Max sends"
+	default:
+		return field
+	}
 }
 
 func (m *Model) commitConfigInput() {
@@ -150,8 +210,12 @@ func (m *Model) commitConfigInput() {
 			m.clearConfigFieldError("config_countdown")
 		}
 	case "config_message":
-		m.configDraft.KeepAlive.Message = input
-		m.clearConfigFieldError("config_message")
+		if input == "" {
+			m.setConfigFieldError("config_message", "message cannot be empty.")
+		} else {
+			m.configDraft.KeepAlive.Message = input
+			m.clearConfigFieldError("config_message")
+		}
 	case "config_max_sends":
 		value, err := strconv.Atoi(input)
 		if err != nil {
@@ -164,6 +228,7 @@ func (m *Model) commitConfigInput() {
 	m.configEditing = false
 	m.configEditingField = ""
 	m.configInput = ""
+	m.configInputFresh = false
 	m.configResetConfirm = false
 	m.lastAction = "commit_config_edit"
 }
@@ -215,6 +280,7 @@ func (m Model) resetConfigDefaults() (tea.Model, tea.Cmd) {
 	m.configEditing = false
 	m.configEditingField = ""
 	m.configInput = ""
+	m.configInputFresh = false
 	m.lastAction = "reset_defaults"
 	return m, nil
 }
@@ -224,6 +290,7 @@ func (m Model) cancelConfig() (tea.Model, tea.Cmd) {
 	m.configEditing = false
 	m.configEditingField = ""
 	m.configInput = ""
+	m.configInputFresh = false
 	m.configFieldErrors = map[string]string{}
 	m.configResetConfirm = false
 	m.lastAction = "cancel_config"
@@ -289,6 +356,9 @@ func (m Model) configEditorValidation() error {
 	if err := config.Validate(cfg); err != nil {
 		return err
 	}
+	if strings.TrimSpace(cfg.KeepAlive.Message) == "" {
+		return config.ValidationError{Messages: []string{"message cannot be empty"}}
+	}
 	summary := config.EffectiveKeepAliveSummary(cfg)
 	if cfg.KeepAlive.AutoSend && summary.AutoSendDisabledFor5Minute {
 		return config.ValidationError{Messages: []string{"countdown may not fit the 5m cache trigger window"}}
@@ -319,6 +389,10 @@ func (m Model) configFieldError(field string) string {
 	case "config_countdown":
 		if cfg.KeepAlive.CountdownSeconds <= 0 {
 			return "countdown must be positive."
+		}
+	case "config_message":
+		if strings.TrimSpace(cfg.KeepAlive.Message) == "" {
+			return "message cannot be empty."
 		}
 	case "config_max_sends":
 		if cfg.KeepAlive.Scope.MaxSends <= 0 {

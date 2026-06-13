@@ -119,7 +119,7 @@ func FormatEvent(event Event) Notification {
 	case EventReminderThresholdCrossed:
 		return Notification{
 			Title: "Reminder alarm",
-			Body:  fmt.Sprintf("Cache window crossed %d%% remaining. Sends no Claude message.", event.ThresholdPercent),
+			Body:  fmt.Sprintf("Reminder: %d%% cache remaining. No Claude message was sent.", event.ThresholdPercent),
 		}
 	case EventKeepAliveCountdownStarted:
 		return Notification{

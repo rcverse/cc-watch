@@ -194,6 +194,7 @@ func buildTUIOptions(cmd Command, deps Dependencies) (tui.Options, error) {
 		KeepAliveConfig:    cfgResult.Config.KeepAlive,
 		Refresh:            refreshState,
 		StartDisplayTicker: true,
+		StartRefreshTicker: true,
 		Config:             cfgResult.Config,
 	}
 	return options, nil

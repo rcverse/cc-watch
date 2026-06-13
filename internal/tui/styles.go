@@ -13,6 +13,11 @@ type StyleRole string
 const (
 	RoleNeutral       StyleRole = "neutral"
 	RoleMuted         StyleRole = "muted"
+	RoleExcerptLabel  StyleRole = "excerpt_label"
+	RoleReminder      StyleRole = "reminder"
+	RoleKeepAlive     StyleRole = "keepalive"
+	RoleSeparator     StyleRole = "separator"
+	RoleIdentity      StyleRole = "identity"
 	RoleSelectedFocus StyleRole = "selected_focus"
 	RoleInfo          StyleRole = "info"
 	RoleWarning       StyleRole = "warning"
@@ -30,14 +35,27 @@ func DefaultStyles() SemanticStyles {
 	return SemanticStyles{roles: map[StyleRole]lipgloss.Style{
 		RoleNeutral:       lipgloss.NewStyle(),
 		RoleMuted:         lipgloss.NewStyle().Foreground(lipgloss.Color("244")),
+		RoleExcerptLabel:  lipgloss.NewStyle().Foreground(lipgloss.Color("109")),
+		RoleReminder:      lipgloss.NewStyle().Foreground(lipgloss.Color("177")),
+		RoleKeepAlive:     lipgloss.NewStyle().Foreground(lipgloss.Color("214")),
+		RoleSeparator:     lipgloss.NewStyle().Foreground(lipgloss.Color("240")),
+		RoleIdentity:      lipgloss.NewStyle().Foreground(lipgloss.Color("81")).Bold(true),
 		RoleSelectedFocus: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Background(lipgloss.Color("24")),
 		RoleInfo:          lipgloss.NewStyle().Foreground(lipgloss.Color("39")),
 		RoleWarning:       lipgloss.NewStyle().Foreground(lipgloss.Color("214")),
-		RoleDanger:        lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true),
+		RoleDanger:        lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true),
 		RoleSuccess:       lipgloss.NewStyle().Foreground(lipgloss.Color("42")),
 		RoleDisabled:      lipgloss.NewStyle().Foreground(lipgloss.Color("240")),
 		RoleDegraded:      lipgloss.NewStyle().Foreground(lipgloss.Color("202")),
 	}}
+}
+
+func (s SemanticStyles) Render(role StyleRole, value string) string {
+	style, ok := s.roles[role]
+	if !ok {
+		style = lipgloss.NewStyle()
+	}
+	return style.Render(value)
 }
 
 func (s SemanticStyles) Has(role StyleRole) bool {
@@ -58,11 +76,22 @@ func RenderPanel(title string, body string) string {
 	if width < 24 {
 		width = 24
 	}
+	return RenderPanelWidth(title, body, width)
+}
+
+func RenderPanelWidth(title string, body string, width int) string {
+	if width < 24 {
+		width = 24
+	}
+	titleWidth := visibleWidth(stripANSI(title))
+	if width < titleWidth+1 {
+		width = titleWidth + 1
+	}
 	var b strings.Builder
 	b.WriteString("╭─ ")
 	b.WriteString(title)
 	b.WriteString(" ")
-	b.WriteString(strings.Repeat("─", maxInt(width-visibleWidth(title)-3, 0)))
+	b.WriteString(strings.Repeat("─", maxInt(width-titleWidth-1, 0)))
 	b.WriteString("╮\n")
 	for _, line := range strings.Split(strings.TrimRight(body, "\n"), "\n") {
 		b.WriteString("│ ")
@@ -77,6 +106,14 @@ func RenderPanel(title string, body string) string {
 }
 
 func ProgressBar(percent float64, width int) string {
+	return progressBarWithRole(percent, width, ttlPercentRole(percent))
+}
+
+func HitRateProgressBar(percent float64, width int) string {
+	return progressBarWithRole(percent, width, hitRatePercentRole(percent))
+}
+
+func progressBarWithRole(percent float64, width int, role StyleRole) string {
 	if width < 1 {
 		width = 1
 	}
@@ -90,14 +127,28 @@ func ProgressBar(percent float64, width int) string {
 	if filled > width {
 		filled = width
 	}
-	role := RoleSuccess
-	if percent >= 80 {
-		role = RoleDanger
-	} else if percent >= 50 {
-		role = RoleWarning
-	}
 	styles := DefaultStyles()
 	return styles.roles[role].Render(strings.Repeat("█", filled)) + styles.roles[RoleDisabled].Render(strings.Repeat("░", width-filled))
+}
+
+func ttlPercentRole(percent float64) StyleRole {
+	if percent >= 80 {
+		return RoleDanger
+	}
+	if percent >= 50 {
+		return RoleWarning
+	}
+	return RoleSuccess
+}
+
+func hitRatePercentRole(percent float64) StyleRole {
+	if percent >= 80 {
+		return RoleSuccess
+	}
+	if percent >= 50 {
+		return RoleWarning
+	}
+	return RoleDanger
 }
 
 func Divider(label string) string {

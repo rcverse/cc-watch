@@ -295,6 +295,9 @@ func TestRefreshResultPreservesSelectedSessionAcrossReorder(t *testing.T) {
 	if model.SelectedSessionID() != "middle-id" {
 		t.Fatalf("selected after reorder refresh = %q, want middle-id", model.SelectedSessionID())
 	}
+	if focused := focusedListLine(model.View()); !strings.Contains(focused, "middle-id") {
+		t.Fatalf("visible focus after reorder = %q, want middle-id in:\n%s", focused, model.View())
+	}
 }
 
 func TestRefreshResultUpdatesEmptyState(t *testing.T) {
@@ -324,7 +327,7 @@ func TestRefreshResultUpdatesEmptyState(t *testing.T) {
 		HasRefresh: true,
 	})
 	model = updated.(Model)
-	if !strings.Contains(model.View(), "No Claude Code session files found") {
+	if !strings.Contains(model.View(), "No sessions found") {
 		t.Fatalf("empty refresh did not render no-session state:\n%s", model.View())
 	}
 }
@@ -513,6 +516,88 @@ func TestRefreshResultHandlesDeletedAndNewSessions(t *testing.T) {
 	}
 }
 
+func TestRefreshTickReparsesListAndWorkspaceSessions(t *testing.T) {
+	now := time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)
+	listCalls := 0
+	list := NewModel(Options{
+		Now:      now,
+		Sessions: []session.Session{workspaceSession(now)},
+		Dependencies: Dependencies{
+			RefreshSnapshot: func(source refresh.Source, generation int) RefreshSnapshot {
+				listCalls++
+				if source != refresh.SourceSafety {
+					t.Fatalf("list refresh source = %q, want safety", source)
+				}
+				return RefreshSnapshot{Sessions: []session.Session{workspaceSession(now.Add(time.Minute))}, HasRefresh: true}
+			},
+		},
+	})
+	updated, cmd := list.Update(RefreshTickMsg{Now: now.Add(time.Minute)})
+	list = updated.(Model)
+	if cmd == nil {
+		t.Fatal("refresh tick returned nil list command")
+	}
+	if msg := cmd(); msg.(RefreshResultMsg).Generation != list.RefreshGeneration() {
+		t.Fatalf("refresh result generation did not match model generation")
+	}
+	if listCalls != 1 || list.LastRefreshSource() != refresh.SourceSafety {
+		t.Fatalf("list refresh calls=%d source=%q", listCalls, list.LastRefreshSource())
+	}
+
+	selectedCalls := 0
+	workspace := NewModel(Options{
+		Now:        now,
+		SelectedID: "workspace-id",
+		Sessions:   []session.Session{workspaceSession(now)},
+		Dependencies: Dependencies{
+			RefreshSelectedSnapshot: func(source refresh.Source, generation int, selected session.Session) RefreshSnapshot {
+				selectedCalls++
+				if source != refresh.SourceSafety || selected.SessionID != "workspace-id" {
+					t.Fatalf("workspace refresh source=%q selected=%q", source, selected.SessionID)
+				}
+				return RefreshSnapshot{Sessions: []session.Session{workspaceSession(now.Add(time.Minute))}, HasRefresh: true}
+			},
+		},
+	})
+	updated, cmd = workspace.Update(RefreshTickMsg{Now: now.Add(time.Minute)})
+	workspace = updated.(Model)
+	if cmd == nil {
+		t.Fatal("refresh tick returned nil workspace command")
+	}
+	result := cmd().(RefreshResultMsg)
+	if !result.SelectedOnly || result.SelectedID != "workspace-id" {
+		t.Fatalf("workspace refresh result selectedOnly=%v selectedID=%q", result.SelectedOnly, result.SelectedID)
+	}
+	if selectedCalls != 1 || workspace.LastRefreshSource() != refresh.SourceSafety {
+		t.Fatalf("workspace refresh calls=%d source=%q", selectedCalls, workspace.LastRefreshSource())
+	}
+}
+
+func TestDisplayTickDoesNotRefreshData(t *testing.T) {
+	now := time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)
+	refreshCalls := 0
+	model := NewModel(Options{
+		Now:      now,
+		Sessions: []session.Session{workspaceSession(now)},
+		Dependencies: Dependencies{
+			RefreshSnapshot: func(source refresh.Source, generation int) RefreshSnapshot {
+				refreshCalls++
+				return RefreshSnapshot{Sessions: []session.Session{workspaceSession(now.Add(time.Minute))}, HasRefresh: true}
+			},
+		},
+	})
+	updated, cmd := model.Update(DisplayTickMsg{Now: now.Add(time.Second)})
+	model = updated.(Model)
+	if refreshCalls != 0 || model.LastRefreshSource() != "" {
+		t.Fatalf("display tick refreshed data: calls=%d source=%q", refreshCalls, model.LastRefreshSource())
+	}
+	if cmd != nil {
+		if _, ok := cmd().(RefreshResultMsg); ok {
+			t.Fatalf("display tick produced refresh result")
+		}
+	}
+}
+
 func TestRefreshDegradedMessageUpdatesTUIState(t *testing.T) {
 	model := NewModel(Options{})
 
@@ -526,34 +611,109 @@ func TestRefreshDegradedMessageUpdatesTUIState(t *testing.T) {
 	model = updated.(Model)
 
 	view := model.View()
-	for _, want := range []string{"Watcher: partial", "new directory permission denied", "Safety refresh: active"} {
+	for _, want := range []string{"watcher partial", "new directory permission denied"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("view missing %q:\n%s", want, view)
 		}
 	}
 }
 
-func TestFocusActionsAreReachable(t *testing.T) {
-	model := NewModel(Options{})
-	if model.FocusedAction() == "" {
-		t.Fatal("initial focused action is empty")
+func TestFocusActionAlwaysHasVisibleMarker(t *testing.T) {
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	cfg := config.Default().KeepAlive
+	cfg.AutoSend = false
+	cases := []struct {
+		name    string
+		options Options
+	}{
+		{
+			name: "list",
+			options: Options{
+				Now:      now,
+				Sessions: listViewSessions(now),
+			},
+		},
+		{
+			name: "workspace",
+			options: Options{
+				Now:        now,
+				SelectedID: "workspace-id",
+				Sessions:   []session.Session{workspaceSession(now)},
+			},
+		},
+		{
+			name: "keepalive active",
+			options: Options{
+				Now:             now,
+				SelectedID:      "workspace-id",
+				Sessions:        []session.Session{workspaceSession(now)},
+				KeepAliveConfig: cfg,
+				KeepAliveStates: map[string]keepalive.SessionState{
+					"workspace-id": {SessionID: "workspace-id", State: keepalive.StateManualReady, AutoSend: false, MaxSends: 1, InstanceToken: 8},
+				},
+			},
+		},
+		{
+			name: "config",
+			options: Options{
+				StartMode: StartConfig,
+				Config:    config.Default(),
+			},
+		},
+		{
+			name: "empty",
+			options: Options{
+				Refresh: RefreshViewState{ProjectsDir: "/tmp/home/.claude/projects", EmptyState: EmptyNoSessions},
+			},
+		},
+		{
+			name: "ambiguous",
+			options: Options{
+				Now:         now,
+				AmbiguousID: "d4b",
+				Sessions:    listViewSessions(now),
+			},
+		},
 	}
 
-	seen := map[string]bool{model.FocusedAction(): true}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			model := NewModel(tc.options)
+			if model.FocusedAction() == "" {
+				t.Fatal("focused action is empty")
+			}
+			if !viewHasVisibleFocusMarker(model.View()) {
+				t.Fatalf("focused action %q has no visible marker:\n%s", model.FocusedAction(), model.View())
+			}
+		})
+	}
+}
+
+func TestConfigFocusCycleOnlyVisitsVisibleRows(t *testing.T) {
+	model := NewModel(Options{StartMode: StartConfig, Config: config.Default()})
+	seen := map[string]bool{}
 	for i := 0; i < 12; i++ {
+		action := model.FocusedAction()
+		seen[action] = true
+		if !viewHasVisibleFocusMarker(model.View()) {
+			t.Fatalf("config focus %q has no visible marker:\n%s", action, model.View())
+		}
 		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyDown})
 		model = updated.(Model)
-		seen[model.FocusedAction()] = true
 	}
-
-	for _, want := range []string{"session", "reminder", "keepalive", "refresh", "help", "quit"} {
+	for _, hidden := range []string{"help", "quit"} {
+		if seen[hidden] {
+			t.Fatalf("config focus reached hidden action %q; saw %#v", hidden, seen)
+		}
+	}
+	for _, want := range []string{"config_save", "config_reset", "config_cancel"} {
 		if !seen[want] {
-			t.Fatalf("focus action %q was not reachable; saw %#v", want, seen)
+			t.Fatalf("config focus did not reach visible action %q; saw %#v", want, seen)
 		}
 	}
 }
 
-func TestListCursorMovesRowsAndActionsLinearly(t *testing.T) {
+func TestListCursorMovesSessionsOnly(t *testing.T) {
 	now := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
 	model := NewModel(Options{
 		Now:      now,
@@ -575,14 +735,19 @@ func TestListCursorMovesRowsAndActionsLinearly(t *testing.T) {
 	}
 
 	seen := map[string]bool{}
-	for i := 0; i < 10; i++ {
+	seenIDs := map[string]bool{}
+	for i := 0; i < 8; i++ {
 		seen[model.FocusedAction()] = true
+		seenIDs[model.SelectedSessionID()] = true
 		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
 		model = updated.(Model)
 	}
-	for _, want := range []string{"session", "reminder", "keepalive", "refresh", "help", "quit"} {
-		if !seen[want] {
-			t.Fatalf("focus action %q was not reachable; saw %#v", want, seen)
+	if len(seen) != 1 || !seen["session"] {
+		t.Fatalf("list cursor reached non-session focus actions: %#v", seen)
+	}
+	for _, want := range []string{"newer-id", "middle-id", "older-id"} {
+		if !seenIDs[want] {
+			t.Fatalf("list cursor did not reach session %q; saw %#v", want, seenIDs)
 		}
 	}
 }
@@ -608,6 +773,9 @@ func TestEmptyStateFocusOnlyReachesValidActions(t *testing.T) {
 		if !seen[want] {
 			t.Fatalf("empty state did not reach %q; saw %#v", want, seen)
 		}
+	}
+	if !viewHasVisibleFocusMarker(model.View()) {
+		t.Fatalf("empty state focused action %q has no visible marker:\n%s", model.FocusedAction(), model.View())
 	}
 }
 
@@ -675,7 +843,7 @@ func TestAmbiguousEscapeReturnsToList(t *testing.T) {
 	}
 }
 
-func TestListFocusableActionsToggleAndActivate(t *testing.T) {
+func TestListDirectKeysToggleAndActivate(t *testing.T) {
 	now := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
 	model := NewModel(Options{
 		Now:      now,
@@ -687,53 +855,48 @@ func TestListFocusableActionsToggleAndActivate(t *testing.T) {
 		},
 	})
 
-	model = moveListFocusTo(t, model, "reminder")
 	selectedID := model.SelectedSessionID()
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := model.Update(keyRunes("r"))
 	model = updated.(Model)
 	if cmd != nil {
-		t.Fatalf("enter on reminder returned command, want nil")
+		t.Fatalf("r returned command, want nil")
 	}
 	if !model.ReminderEnabled(selectedID) {
 		t.Fatalf("ReminderEnabled(%s) = false, want true", selectedID)
 	}
 
-	model = moveListFocusTo(t, model, "keepalive")
 	selectedID = model.SelectedSessionID()
-	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd = model.Update(keyRunes("k"))
 	model = updated.(Model)
 	if cmd != nil {
-		t.Fatalf("enter on keepalive returned command, want nil")
+		t.Fatalf("k returned command, want nil")
 	}
 	if !model.KeepAliveEnabled(selectedID) {
 		t.Fatalf("KeepAliveEnabled(%s) = false, want true", selectedID)
 	}
 
-	model = moveListFocusTo(t, model, "refresh")
-	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd = model.Update(keyRunes("u"))
 	model = updated.(Model)
 	if cmd == nil {
-		t.Fatalf("enter on refresh returned nil command, want manual refresh command")
+		t.Fatalf("u returned nil command, want manual refresh command")
 	}
 	if model.LastAction() != "manual_refresh" {
 		t.Fatalf("last action = %q, want manual_refresh", model.LastAction())
 	}
 
-	model = moveListFocusTo(t, model, "help")
-	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd = model.Update(keyRunes("?"))
 	model = updated.(Model)
 	if cmd != nil {
-		t.Fatalf("enter on help returned command, want nil")
+		t.Fatalf("? returned command, want nil")
 	}
 	if !model.HelpOpen() {
 		t.Fatal("HelpOpen = false, want true")
 	}
 
-	model = moveListFocusTo(t, model, "quit")
-	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd = model.Update(keyRunes("q"))
 	model = updated.(Model)
 	if cmd == nil {
-		t.Fatalf("enter on quit returned nil command, want tea.Quit")
+		t.Fatalf("q returned nil command, want tea.Quit")
 	}
 	if msg := cmd(); msg != (tea.QuitMsg{}) {
 		t.Fatalf("quit command returned %#v, want tea.QuitMsg", msg)
@@ -743,30 +906,136 @@ func TestListFocusableActionsToggleAndActivate(t *testing.T) {
 func TestListAcceleratorsToggleSelectedSession(t *testing.T) {
 	now := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
 	model := NewModel(Options{
-		Now:      now,
-		Sessions: listViewSessions(now),
+		Now: now,
+		Sessions: []session.Session{
+			listViewSession("top-id", "top", now, now.Add(-2*time.Minute), session.CacheWindow{Label: "1h", TTLSeconds: 3600, Known: true}, "", ""),
+			listViewSession("target-id", "target", now.Add(-time.Minute), now.Add(-5*time.Minute), session.CacheWindow{Label: "1h", TTLSeconds: 3600, Known: true}, "", ""),
+		},
 	})
-
-	updated, _ := model.Update(keyRunes("r"))
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyDown})
 	model = updated.(Model)
-	if !model.ReminderEnabled("newer-id") {
+	if model.SelectedSessionID() != "target-id" {
+		t.Fatalf("setup selected %q, want target-id", model.SelectedSessionID())
+	}
+
+	updated, _ = model.Update(keyRunes("r"))
+	model = updated.(Model)
+	if !model.ReminderEnabled("target-id") {
 		t.Fatalf("r did not enable reminder for selected session")
+	}
+	if model.SelectedSessionID() != "target-id" || model.FocusedAction() != "session" {
+		t.Fatalf("r changed list focus/selection to action %q selected %q", model.FocusedAction(), model.SelectedSessionID())
 	}
 	updated, _ = model.Update(keyRunes("r"))
 	model = updated.(Model)
-	if model.ReminderEnabled("newer-id") {
+	if model.ReminderEnabled("target-id") {
 		t.Fatalf("second r did not disable reminder for selected session")
 	}
 
 	updated, _ = model.Update(keyRunes("k"))
 	model = updated.(Model)
-	if !model.KeepAliveEnabled("newer-id") {
+	if !model.KeepAliveEnabled("target-id") {
 		t.Fatalf("k did not enable KeepAlive for selected session")
+	}
+	if model.SelectedSessionID() != "target-id" || model.FocusedAction() != "session" {
+		t.Fatalf("k changed list focus/selection to action %q selected %q", model.FocusedAction(), model.SelectedSessionID())
 	}
 	updated, _ = model.Update(keyRunes("k"))
 	model = updated.(Model)
-	if model.KeepAliveEnabled("newer-id") {
+	if model.KeepAliveEnabled("target-id") {
 		t.Fatalf("second k did not disable KeepAlive for selected session")
+	}
+}
+
+func TestListConfigShortcutOpensConfigEditor(t *testing.T) {
+	model := NewModel(Options{Sessions: listViewSessions(time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC))})
+
+	updated, _ := model.Update(keyRunes("c"))
+	model = updated.(Model)
+
+	if model.Route() != RouteConfig {
+		t.Fatalf("c from list route = %q, want config", model.Route())
+	}
+	if !strings.Contains(model.View(), "Claude Code Cache / config") {
+		t.Fatalf("config shortcut did not render config editor:\n%s", model.View())
+	}
+}
+
+func TestExpiredSessionDoesNotEnableKeepAlive(t *testing.T) {
+	now := time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)
+	expiredLast := now.Add(-2 * time.Hour)
+	expired := workspaceSession(now)
+	expired.LastMessageAt = &expiredLast
+	expired.CacheWindow = session.CacheWindow{Tier: session.Tier1Hour, Label: "1h", TTLSeconds: 3600, Known: true}
+	model := NewModel(Options{
+		Now:        now,
+		SelectedID: expired.SessionID,
+		Sessions:   []session.Session{expired},
+	})
+
+	updated, cmd := model.Update(keyRunes("k"))
+	model = updated.(Model)
+
+	if cmd != nil {
+		t.Fatalf("expired k returned command, want nil")
+	}
+	if model.KeepAliveEnabled(expired.SessionID) {
+		t.Fatalf("expired session enabled KeepAlive")
+	}
+	if model.LastAction() != "keepalive_unavailable_expired" {
+		t.Fatalf("last action = %q, want expired unavailable", model.LastAction())
+	}
+	if !strings.Contains(model.View(), "unavailable after expiry") {
+		t.Fatalf("expired workspace missing KeepAlive disabled reason:\n%s", model.View())
+	}
+}
+
+func TestExpiredSessionDisablesExistingKeepAliveAndCannotSend(t *testing.T) {
+	now := time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)
+	expiredLast := now.Add(-2 * time.Hour)
+	expired := workspaceSession(now)
+	expired.LastMessageAt = &expiredLast
+	expired.CacheWindow = session.CacheWindow{Tier: session.Tier1Hour, Label: "1h", TTLSeconds: 3600, Known: true}
+	cfg := config.Default().KeepAlive
+	cfg.AutoSend = false
+	model := NewModel(Options{
+		Now:             now,
+		SelectedID:      expired.SessionID,
+		Sessions:        []session.Session{expired},
+		KeepAliveConfig: cfg,
+		KeepAliveStates: map[string]keepalive.SessionState{
+			expired.SessionID: {SessionID: expired.SessionID, State: keepalive.StateMonitoringIdle, AutoSend: false, MaxSends: 1},
+		},
+	})
+
+	updated, cmd := model.Update(DisplayTickMsg{Now: now.Add(time.Second)})
+	model = updated.(Model)
+
+	if cmd != nil {
+		t.Fatalf("expired display tick returned command, want nil")
+	}
+	if state := model.KeepAliveState(expired.SessionID); state.State != keepalive.StateOff {
+		t.Fatalf("expired monitoring state = %#v, want off", state)
+	}
+	if strings.Contains(model.View(), "KeepAlive · manual prompt") || strings.Contains(model.View(), "Send now") {
+		t.Fatalf("expired session still exposes KeepAlive send UI:\n%s", model.View())
+	}
+
+	model = NewModel(Options{
+		Now:        now,
+		SelectedID: expired.SessionID,
+		Sessions:   []session.Session{expired},
+		KeepAliveStates: map[string]keepalive.SessionState{
+			expired.SessionID: {SessionID: expired.SessionID, State: keepalive.StateManualReady, AutoSend: false, InstanceToken: 7, MaxSends: 1},
+		},
+	})
+	updated, cmd = model.Update(keyRunes("s"))
+	model = updated.(Model)
+	if cmd != nil || model.LastAction() == "send_keepalive_now" {
+		t.Fatalf("expired manual-ready send produced cmd=%v action=%q", cmd, model.LastAction())
+	}
+	if state := model.KeepAliveState(expired.SessionID); state.State != keepalive.StateOff {
+		t.Fatalf("expired manual-ready state = %#v, want off", state)
 	}
 }
 
@@ -784,9 +1053,14 @@ func TestWorkspaceFocusOrderAndFocusedActions(t *testing.T) {
 		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyDown})
 		model = updated.(Model)
 	}
-	for _, want := range []string{"reminder", "keepalive", "keepalive_autosend", "copy_id", "refresh", "help", "back", "quit"} {
+	for _, want := range []string{"reminder", "keepalive", "keepalive_autosend", "copy_id", "back"} {
 		if !seen[want] {
 			t.Fatalf("workspace focus action %q was not reachable; saw %#v", want, seen)
+		}
+	}
+	for _, hidden := range []string{"evidence", "refresh", "help", "quit"} {
+		if seen[hidden] {
+			t.Fatalf("workspace focus reached hidden action %q; saw %#v", hidden, seen)
 		}
 	}
 }
@@ -821,6 +1095,9 @@ func TestWorkspaceEnterAndSpaceToggleFocusedControls(t *testing.T) {
 	if !model.KeepAliveEnabled("workspace-id") {
 		t.Fatalf("space did not toggle KeepAlive for selected session")
 	}
+	if model.FocusedAction() != "keepalive" {
+		t.Fatalf("KeepAlive toggle moved focus to %q, want keepalive", model.FocusedAction())
+	}
 
 	model = moveWorkspaceFocusTo(t, model, "keepalive_autosend")
 	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -830,6 +1107,79 @@ func TestWorkspaceEnterAndSpaceToggleFocusedControls(t *testing.T) {
 	}
 	if model.KeepAliveState("workspace-id").AutoSend {
 		t.Fatalf("enter did not toggle Auto-send off for selected session")
+	}
+}
+
+func TestWorkspaceActionFeedbackForUpdateCopyAndCancelWatching(t *testing.T) {
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	model := NewModel(Options{
+		Now:        now,
+		SelectedID: "workspace-id",
+		Sessions:   []session.Session{workspaceSession(now)},
+		Dependencies: Dependencies{
+			RefreshSelectedSnapshot: func(source refresh.Source, generation int, selected session.Session) RefreshSnapshot {
+				return RefreshSnapshot{Sessions: []session.Session{workspaceSession(now.Add(time.Minute))}, HasRefresh: true}
+			},
+		},
+	})
+
+	updated, cmd := model.Update(keyRunes("u"))
+	model = updated.(Model)
+	if cmd == nil {
+		t.Fatal("manual update returned nil command")
+	}
+	if !strings.Contains(model.View(), "updating selected session") {
+		t.Fatalf("manual update missing visible feedback:\n%s", model.View())
+	}
+
+	updated, _ = model.Update(keyRunes("c"))
+	model = updated.(Model)
+	if !strings.Contains(model.View(), "Session ID shown") || !strings.Contains(model.View(), "workspace-id") {
+		t.Fatalf("copy id missing visible feedback:\n%s", model.View())
+	}
+
+	state := keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateMonitoringIdle, AutoSend: true, MaxSends: 1}
+	model = NewModel(Options{
+		Now:        now,
+		SelectedID: "workspace-id",
+		Sessions:   []session.Session{workspaceSession(now)},
+		KeepAliveStates: map[string]keepalive.SessionState{
+			"workspace-id": state,
+		},
+	})
+	model = moveWorkspaceFocusTo(t, model, "keepalive")
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+	if model.KeepAliveEnabled("workspace-id") {
+		t.Fatalf("cancel watching left KeepAlive enabled: %#v", model.KeepAliveState("workspace-id"))
+	}
+	if !strings.Contains(model.View(), "KeepAlive cancelled") {
+		t.Fatalf("cancel watching missing visible feedback:\n%s", model.View())
+	}
+}
+
+func TestTransientNoticesClearAfterDisplayTick(t *testing.T) {
+	now := time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)
+	expiredLast := now.Add(-2 * time.Hour)
+	expired := workspaceSession(now)
+	expired.LastMessageAt = &expiredLast
+	expired.CacheWindow = session.CacheWindow{Tier: session.Tier1Hour, Label: "1h", TTLSeconds: 3600, Known: true}
+	model := NewModel(Options{
+		Now:        now,
+		SelectedID: expired.SessionID,
+		Sessions:   []session.Session{expired},
+	})
+
+	updated, _ := model.Update(keyRunes("k"))
+	model = updated.(Model)
+	if !strings.Contains(model.View(), "KeepAlive unavailable after expiry") {
+		t.Fatalf("missing transient expiry notice:\n%s", model.View())
+	}
+
+	updated, _ = model.Update(DisplayTickMsg{Now: now.Add(4 * time.Second)})
+	model = updated.(Model)
+	if strings.Contains(model.View(), "KeepAlive unavailable after expiry") {
+		t.Fatalf("transient expiry notice did not clear:\n%s", model.View())
 	}
 }
 
@@ -886,11 +1236,10 @@ func TestWorkspaceManualRefreshIsFocusableAndUsesSelectedIDSnapshot(t *testing.T
 		},
 	})
 
-	model = moveWorkspaceFocusTo(t, model, "refresh")
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := model.Update(keyRunes("u"))
 	model = updated.(Model)
 	if cmd == nil {
-		t.Fatal("enter on workspace manual refresh returned nil command")
+		t.Fatal("u on workspace manual refresh returned nil command")
 	}
 	msg := cmd()
 	result, ok := msg.(RefreshResultMsg)
@@ -928,8 +1277,7 @@ func TestWorkspaceManualRefreshPrefersSelectedPathSnapshot(t *testing.T) {
 		},
 	})
 
-	model = moveWorkspaceFocusTo(t, model, "refresh")
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := model.Update(keyRunes("u"))
 	model = updated.(Model)
 	if cmd == nil {
 		t.Fatal("workspace refresh returned nil command")
@@ -965,8 +1313,7 @@ func TestWorkspaceManualRefreshUpdatesOnlySelectedSessionWhenSnapshotReturnsList
 		},
 	})
 
-	model = moveWorkspaceFocusTo(t, model, "refresh")
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := model.Update(keyRunes("u"))
 	model = updated.(Model)
 	if cmd == nil {
 		t.Fatal("workspace refresh returned nil command")
@@ -1012,7 +1359,7 @@ func TestWorkspaceFailureKeepsAutosendFocusableWithDisabledReason(t *testing.T) 
 	if !seen["keepalive_autosend"] {
 		t.Fatalf("failure focus did not include disabled Auto-send setting; saw %#v", seen)
 	}
-	if !strings.Contains(model.View(), "Auto-send stopped") {
+	if !strings.Contains(model.View(), "disabled after failure") {
 		t.Fatalf("failure view missing disabled reason:\n%s", model.View())
 	}
 }
@@ -1028,38 +1375,56 @@ func TestWorkspaceSendingAndConfirmingShowAutosendDisabledReason(t *testing.T) {
 				"workspace-id": {SessionID: "workspace-id", State: state, AutoSend: true, InstanceToken: 7, MaxSends: 1},
 			},
 		})
-		if !strings.Contains(model.View(), "Auto-send disabled while") {
+		if !strings.Contains(model.View(), "disabled while") {
 			t.Fatalf("%s view missing Auto-send disabled reason:\n%s", state, model.View())
 		}
 	}
 }
 
-func TestWorkspaceEvidenceFocusOnlyWhenOverflowing(t *testing.T) {
+func TestWorkspaceDetailsDisclosureDoesNotBecomeFocusRow(t *testing.T) {
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 	normal := NewModel(Options{
 		Now:        now,
 		SelectedID: "workspace-id",
 		Sessions:   []session.Session{workspaceSession(now)},
 	})
-	if normal.FocusedAction() == "evidence" {
-		t.Fatalf("normal evidence focused, want controls first")
+	if normal.FocusedAction() != "reminder" {
+		t.Fatalf("normal focus = %q, want controls first", normal.FocusedAction())
 	}
 
 	overflowSession := workspaceSession(now)
 	for i := 0; i < 12; i++ {
 		overflowSession.Warnings = append(overflowSession.Warnings, session.ParseWarning{Message: "warning"})
 		overflowSession.CacheWindow.Evidence = append(overflowSession.CacheWindow.Evidence, "extra")
+		overflowSession.Gaps = append(overflowSession.Gaps, session.Gap{
+			Seconds: float64(60 + i),
+			From:    now.Add(-time.Duration(i+2) * time.Minute),
+			To:      now.Add(-time.Duration(i+1) * time.Minute),
+		})
 	}
 	overflow := NewModel(Options{
 		Now:        now,
+		Height:     24,
 		SelectedID: "workspace-id",
 		Sessions:   []session.Session{overflowSession},
 	})
-	if overflow.FocusedAction() != "evidence" {
-		t.Fatalf("overflow focus = %q, want evidence", overflow.FocusedAction())
+	if overflow.FocusedAction() != "reminder" {
+		t.Fatalf("overflow focus = %q, want reminder", overflow.FocusedAction())
 	}
-	if !strings.Contains(overflow.View(), "Evidence scroll") || !strings.Contains(overflow.View(), "arrows scroll evidence") {
-		t.Fatalf("overflow evidence missing scroll affordance:\n%s", overflow.View())
+	updated, _ := overflow.Update(keyRunes("v"))
+	overflow = updated.(Model)
+	if overflow.FocusedAction() != "details_scroll" {
+		t.Fatalf("details disclosure focus = %q, want details_scroll", overflow.FocusedAction())
+	}
+	if !strings.Contains(overflow.View(), "Session Info · details") {
+		t.Fatalf("details disclosure did not render expanded session info:\n%s", overflow.View())
+	}
+	before := overflow.View()
+	updated, _ = overflow.Update(tea.KeyMsg{Type: tea.KeyDown})
+	overflow = updated.(Model)
+	after := overflow.View()
+	if before == after || !strings.Contains(after, "more gap(s)") {
+		t.Fatalf("details scroll did not change bounded gap window:\nbefore:\n%s\nafter:\n%s", before, after)
 	}
 }
 
@@ -1252,6 +1617,41 @@ func TestWorkspaceKeepAliveActionsProduceRunnerAndConfirmationCommands(t *testin
 	}
 }
 
+func TestConfigEditorPrefillsCurrentValueAndPreservesMessageOnEmptyEdit(t *testing.T) {
+	cfg := config.Default()
+	saves := 0
+	var saved config.Config
+	model := NewModel(Options{
+		StartMode: StartConfig,
+		Config:    cfg,
+		Dependencies: Dependencies{
+			SaveConfig: func(next config.Config) error {
+				saves++
+				saved = next
+				return nil
+			},
+		},
+	})
+
+	model = moveConfigFocusTo(t, model, "config_message")
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+	if !strings.Contains(model.View(), cfg.KeepAlive.Message) || !strings.Contains(model.View(), "Enter saves field") {
+		t.Fatalf("message edit did not prefill current value with guidance:\n%s", model.View())
+	}
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+	updated, _ = model.Update(keyRunes("s"))
+	model = updated.(Model)
+
+	if saves != 1 {
+		t.Fatalf("saves = %d, want 1", saves)
+	}
+	if saved.KeepAlive.Message != cfg.KeepAlive.Message {
+		t.Fatalf("message = %q, want preserved %q", saved.KeepAlive.Message, cfg.KeepAlive.Message)
+	}
+}
+
 func TestConfigEditorFocusEditToggleSaveAndCancel(t *testing.T) {
 	cfg := config.Default()
 	saves := 0
@@ -1278,7 +1678,7 @@ func TestConfigEditorFocusEditToggleSaveAndCancel(t *testing.T) {
 		updated, _ = model.Update(key)
 		model = updated.(Model)
 	}
-	if !strings.Contains(model.View(), "Alert at:              [30, 15] %") {
+	if !strings.Contains(model.View(), "30, 15%") {
 		t.Fatalf("threshold edit not reflected:\n%s", model.View())
 	}
 
@@ -1451,7 +1851,7 @@ func TestConfigEditorResetRequiresRepeatConfirmation(t *testing.T) {
 	if !strings.Contains(model.View(), "Reset defaults?") {
 		t.Fatalf("first d did not show reset confirmation:\n%s", model.View())
 	}
-	if !strings.Contains(model.View(), "Alert at:              [30, 15] %") {
+	if !strings.Contains(model.View(), "30, 15%") {
 		t.Fatalf("first d reset before confirmation:\n%s", model.View())
 	}
 
@@ -1460,7 +1860,7 @@ func TestConfigEditorResetRequiresRepeatConfirmation(t *testing.T) {
 	if strings.Contains(model.View(), "Reset defaults?") {
 		t.Fatalf("second d did not clear reset confirmation:\n%s", model.View())
 	}
-	if !strings.Contains(model.View(), "Alert at:              [20, 10] %") {
+	if !strings.Contains(model.View(), "20, 10%") {
 		t.Fatalf("second d did not reset draft:\n%s", model.View())
 	}
 	if saves != 1 || saved.ReminderThresholds[0] != 20 || saved.ReminderThresholds[1] != 10 {
@@ -1548,6 +1948,21 @@ func (d *fakeDeps) refresh() {
 
 func keyRunes(value string) tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(value)}
+}
+
+func viewHasVisibleFocusMarker(view string) bool {
+	clean := stripANSI(view)
+	return strings.Contains(clean, "›") || strings.Contains(clean, ">")
+}
+
+func focusedListLine(view string) string {
+	for _, line := range strings.Split(view, "\n") {
+		clean := stripANSI(line)
+		if strings.Contains(clean, "› #") {
+			return clean
+		}
+	}
+	return ""
 }
 
 func moveListFocusTo(t *testing.T, model Model, action string) Model {

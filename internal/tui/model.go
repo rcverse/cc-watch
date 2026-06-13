@@ -82,9 +82,16 @@ type NotificationStatus struct {
 	Result       notify.Result
 }
 
+type Notice struct {
+	Message   string
+	Role      StyleRole
+	ExpiresAt time.Time
+}
+
 type Options struct {
 	Now                time.Time
 	Width              int
+	Height             int
 	Dependencies       Dependencies
 	Sessions           []session.Session
 	Countdowns         map[string]int
@@ -101,12 +108,14 @@ type Options struct {
 	KeepAliveStatus    KeepAliveStatus
 	Refresh            RefreshViewState
 	StartDisplayTicker bool
+	StartRefreshTicker bool
 	Config             config.Config
 }
 
 type Model struct {
 	now                  time.Time
 	width                int
+	height               int
 	deps                 Dependencies
 	route                Route
 	sessions             []session.Session
@@ -127,23 +136,32 @@ type Model struct {
 	ambiguousID          string
 	keepAliveStatus      KeepAliveStatus
 	lastAction           string
+	notice               Notice
 	refresh              RefreshViewState
 	lastRefreshSource    refresh.Source
 	lastBypassedDebounce bool
 	directWorkspace      bool
 	evidenceOffset       int
+	detailsOffset        int
+	sessionInfoExpanded  bool
+	gapSortNewest        bool
 	startDisplayTicker   bool
+	startRefreshTicker   bool
 	configOriginal       config.Config
 	configDraft          config.Config
 	configEditing        bool
 	configEditingField   string
 	configInput          string
+	configInputFresh     bool
 	configFieldErrors    map[string]string
 	configResetConfirm   bool
 	configSaveError      string
 }
 
-var rootFocusActions = []string{"session", "reminder", "keepalive", "refresh", "help", "quit"}
+type focusItem struct {
+	action string
+}
+
 var emptyFocusActions = []string{"refresh", "help", "quit"}
 
 func NewModel(options Options) Model {
@@ -171,18 +189,23 @@ func NewModel(options Options) Model {
 	if width <= 0 {
 		width = 80
 	}
+	height := options.Height
+	if height <= 0 {
+		height = 24
+	}
 	sessions := cloneSessions(options.Sessions)
 	selectedIndex := selectedIndexFor(sessions, options.SelectedID)
 	for _, state := range options.KeepAliveStates {
 		keepAliveManager.SetState(state)
 	}
 	for _, s := range sessions {
-		if keepAlives[s.SessionID] && keepAliveManager.State(s.SessionID).State == keepalive.StateOff {
+		if keepAlives[s.SessionID] && s.StatusAt(now).State != session.StatusExpired && keepAliveManager.State(s.SessionID).State == keepalive.StateOff {
 			keepAliveManager.Enable(s, now)
 		}
 	}
 	model := Model{
 		width:              width,
+		height:             height,
 		now:                now,
 		deps:               options.Dependencies,
 		route:              routeFromOptions(options),
@@ -202,6 +225,7 @@ func NewModel(options Options) Model {
 		refresh:            defaultRefresh(options.Refresh),
 		directWorkspace:    options.SelectedID != "",
 		startDisplayTicker: options.StartDisplayTicker,
+		startRefreshTicker: options.StartRefreshTicker,
 		configOriginal:     configDraft,
 		configDraft:        configDraft,
 		configFieldErrors:  map[string]string{},
@@ -211,10 +235,14 @@ func NewModel(options Options) Model {
 }
 
 func (m Model) Init() tea.Cmd {
+	var commands []tea.Cmd
 	if m.startDisplayTicker {
-		return displayTickCommand()
+		commands = append(commands, displayTickCommand())
 	}
-	return nil
+	if m.startRefreshTicker {
+		commands = append(commands, refreshTickCommand())
+	}
+	return tea.Batch(commands...)
 }
 
 func (m Model) Route() Route {

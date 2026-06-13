@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/richardchen/cc-cache/internal/keepalive"
+	"github.com/richardchen/cc-cache/internal/refresh"
 	"github.com/richardchen/cc-cache/internal/session"
 )
 
@@ -15,29 +16,28 @@ func (m Model) listView() string {
 		return m.ambiguousListView()
 	}
 
-	b.WriteString(Header("cc-cache list", fmt.Sprintf("%d sessions", len(m.sessions)), "focus: "+m.FocusedAction()))
-	b.WriteString(RenderPanel("System", strings.TrimRight(m.listSystemState(), "\n")))
+	b.WriteString(m.listHeader())
+	if banner := m.listDegradedBanner(); banner != "" {
+		b.WriteString(banner)
+		b.WriteString("\n")
+	}
+	if banner := m.actionBanner(); banner != "" {
+		b.WriteString(banner)
+		b.WriteString("\n")
+	}
 	b.WriteString("\n")
 
 	switch m.refresh.EmptyState {
 	case EmptyLoading:
-		b.WriteString("Loading sessions...\n")
+		b.WriteString(m.emptyStateBlock("Loading sessions", "Reading Claude's cache trail now.", ""))
 	case EmptyProjectsDir:
-		b.WriteString("No projects directory.\n")
-		fmt.Fprintf(&b, "No ~/.claude/projects directory exists yet: %s\n", m.refresh.ProjectsDir)
-		b.WriteString("cc-cache cannot discover sessions until Claude Code creates that directory.\n")
+		b.WriteString(m.emptyStateBlock("No projects directory", "Claude has not written cache history here yet.", m.refresh.ProjectsDir))
 	case EmptyNoSessions:
-		b.WriteString("No sessions found.\n")
-		b.WriteString("No Claude Code session files found.\n")
-		fmt.Fprintf(&b, "cc-cache looks for JSONL files under: %s\n", m.refresh.ProjectsDir)
-		b.WriteString("Sessions appear here after Claude Code writes JSONL files.\n")
-		b.WriteString("sessions appear after Claude Code writes JSONL files\n")
+		b.WriteString(m.emptyStateBlock("No sessions found", "Sessions appear after Claude Code writes JSONL files.", m.refresh.ProjectsDir))
 	default:
-		var rows strings.Builder
 		for i, s := range m.sessions {
-			rows.WriteString(m.renderListRow(i, s))
+			b.WriteString(m.renderListRow(i, s))
 		}
-		b.WriteString(RenderPanel("Sessions", strings.TrimRight(rows.String(), "\n")))
 	}
 
 	b.WriteString(m.listFooter())
@@ -48,216 +48,356 @@ func (m Model) listView() string {
 	return b.String()
 }
 
-func (m Model) ambiguousListView() string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "cc-cache ambiguous session id: %s\n", m.refreshQuery())
-	b.WriteString("The partial id matched more than one session. Choose one to open.\n")
-	b.WriteString(m.listSystemState())
-	for i, s := range m.sessions {
-		marker := " "
-		if m.focusIndex == i {
-			marker = ">"
-		}
-		status := s.StatusAt(m.now)
-		fmt.Fprintf(&b, "%s %s  %s  modified %s  %s  %s\n", marker, displayID(s), s.Project, formatModified(s.FileModifiedAt), status.State, formatStatusTime(status))
-	}
-	b.WriteString("up/down move  enter open selected  esc list  q quit\n")
-	return b.String()
-}
-
-func (m Model) listSystemState() string {
-	var b strings.Builder
+func (m Model) listHeader() string {
+	styles := DefaultStyles()
 	status := m.refresh.Watcher.Status
 	if status == "" {
 		status = "ok"
 	}
-	fmt.Fprintf(&b, "Watcher: %s\n", status)
-	if len(m.refresh.Watcher.Messages) > 0 {
-		fmt.Fprintf(&b, "%s\n", m.refresh.Watcher.Messages[0])
+	parts := []string{
+		styles.Render(RoleIdentity, "Claude Code Cache"),
+		styles.Render(RoleMuted, fmt.Sprintf("%d sessions", len(m.sessions))),
 	}
-	if m.refresh.Watcher.SafetyRefreshActive {
-		b.WriteString("Safety refresh: active\n")
+	if status != "" && status != refresh.StatusOK {
+		parts = append(parts, styles.Render(RoleWarning, "watcher "+string(status)))
+	} else {
+		parts = append(parts, styles.Render(RoleMuted, "live"))
+	}
+	parts = append(parts, styles.Render(RoleMuted, "updated "+m.now.Local().Format("15:04")))
+	line := strings.Join(parts, styles.Render(RoleSeparator, "  ·  "))
+	return truncateANSI(line, m.width) + "\n" + styles.Render(RoleSeparator, strings.Repeat("─", maxInt(minInt(m.width, 68)-2, 12))) + "\n"
+}
+
+func (m Model) listDegradedBanner() string {
+	var messages []string
+	deliveredOnly := false
+	if len(m.refresh.Watcher.Messages) > 0 {
+		messages = append(messages, m.refresh.Watcher.Messages[0])
 	}
 	if m.refresh.NotificationDegraded != "" {
-		fmt.Fprintf(&b, "Notify degraded: %s\n", m.refresh.NotificationDegraded)
+		messages = append(messages, "notifications degraded: "+m.refresh.NotificationDegraded)
 	}
 	if len(m.notificationStatuses) > 0 {
 		status := m.notificationStatuses[0]
 		switch {
 		case status.Result.Degraded:
-			fmt.Fprintf(&b, "Notification delivery failed: %s\n", status.Result.Message)
-			fmt.Fprintf(&b, "Event happened: %s - %s\n", status.Notification.Title, status.Notification.Body)
+			messages = append(messages, "notification failed: "+status.Notification.Title)
+			if status.Notification.Body != "" {
+				messages = append(messages, status.Notification.Body)
+			}
+			if status.Result.Message != "" {
+				messages = append(messages, "reason: "+status.Result.Message)
+			}
 		case status.Result.Delivered:
-			fmt.Fprintf(&b, "Notification delivered: %s - %s\n", status.Notification.Title, status.Notification.Body)
+			deliveredOnly = len(messages) == 0
 		}
 	}
 	if m.shouldShowClaudeUnavailable() {
-		fmt.Fprintf(&b, "claude unavailable: %s\n", m.refresh.ClaudeUnavailableMessage)
+		messages = append(messages, "claude unavailable: "+m.refresh.ClaudeUnavailableMessage)
 	}
+	if len(messages) == 0 {
+		return ""
+	}
+	styles := DefaultStyles()
+	prefix := "! "
+	if deliveredOnly {
+		prefix = "  "
+	}
+	var lines []string
+	for _, message := range messages {
+		lines = append(lines, styles.Render(RoleWarning, truncateEnd(prefix+message, maxInt(m.width-2, 20))))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m Model) emptyStateBlock(title string, body string, path string) string {
+	styles := DefaultStyles()
+	var b strings.Builder
+	fmt.Fprintf(&b, "  %s\n", styles.Render(RoleIdentity, title))
+	fmt.Fprintf(&b, "     %s\n", body)
+	if path != "" {
+		fmt.Fprintf(&b, "     %s  %s\n", styles.Render(RoleMuted, "path"), truncateMiddle(path, maxInt(m.width-17, 16)))
+	}
+	b.WriteString("\n")
+	for _, action := range emptyFocusActions {
+		fmt.Fprintf(&b, "%s\n", m.emptyActionRow(action))
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+func (m Model) emptyActionRow(action string) string {
+	styles := DefaultStyles()
+	marker := " "
+	if m.FocusedAction() == action {
+		marker = styles.Render(RoleIdentity, "›")
+	}
+	label := action
+	switch action {
+	case "refresh":
+		label = "Refresh"
+	case "help":
+		label = "Help"
+	case "quit":
+		label = "Quit"
+	}
+	return fmt.Sprintf("  %s %-8s %s", marker, label, emptyActionDetail(action))
+}
+
+func emptyActionDetail(action string) string {
+	switch action {
+	case "refresh":
+		return "check again"
+	case "help":
+		return "show key hints"
+	case "quit":
+		return "close cc-cache"
+	default:
+		return ""
+	}
+}
+
+func (m Model) ambiguousListView() string {
+	var b strings.Builder
+	styles := DefaultStyles()
+	b.WriteString(styles.Render(RoleIdentity, "Claude Code Cache / choose session"))
+	b.WriteString("\n")
+	b.WriteString(styles.Render(RoleSeparator, strings.Repeat("─", maxInt(minInt(m.width, 68)-2, 12))))
+	b.WriteString("\n\n")
+	fmt.Fprintf(&b, "  partial id %s matched more than one session\n\n", styles.Render(RoleWarning, m.refreshQuery()))
+	for i, s := range m.sessions {
+		b.WriteString(m.renderListRow(i, s))
+	}
+	b.WriteString("up/down move  enter open selected  esc list  q quit\n")
 	return b.String()
 }
 
 func (m Model) renderListRow(index int, s session.Session) string {
 	var b strings.Builder
+	styles := DefaultStyles()
+	selected := m.focusIndex == index
 	marker := " "
-	if m.focusIndex == index {
-		marker = ">"
+	if selected {
+		marker = styles.Render(RoleIdentity, "›")
 	}
 	status := s.StatusAt(m.now)
-	badge := statusBadge(status.State)
-	fmt.Fprintf(&b, "%s %s %s  cache window %s  %s  %s",
-		marker,
-		displayID(s),
-		truncateMiddle(s.Project, 18),
-		cacheLabel(s),
-		badge,
-		formatStatusTime(status),
-	)
-	if m.width < 90 {
-		fmt.Fprintf(&b, "  %s", compactKeepAliveSummary(m, s))
-		if len(s.Warnings) > 0 {
-			fmt.Fprintf(&b, "  warn %d", len(s.Warnings))
-		}
-		b.WriteString("\n")
-		b.WriteString(m.renderNarrowEvidence(s, status))
-		return b.String()
+	id := displayID(s)
+	if selected {
+		id = styles.Render(RoleIdentity, id)
 	}
-
-	if status.PercentElapsed != nil {
-		fmt.Fprintf(&b, "  TTL %.0f%% %s", *status.PercentElapsed, ProgressBar(*status.PercentElapsed, 12))
-	}
-	fmt.Fprintf(&b, "  hit %.0f%%", s.TokenStats.HitRate)
-	if len(s.Warnings) > 0 {
-		fmt.Fprintf(&b, "  warnings: %d", len(s.Warnings))
+	projectWidth := 18
+	if m.width >= 100 {
+		projectWidth = 28
 	}
 	if m.width >= 120 {
-		if s.DurationSeconds != nil {
-			fmt.Fprintf(&b, "  duration %s", formatDuration(*s.DurationSeconds))
-		}
-		if summary := keepAliveSummary(m, s); summary != "" {
-			fmt.Fprintf(&b, "  %s", summary)
-		}
+		projectWidth = 36
 	}
+	identity := fmt.Sprintf("  %s #%d  %s  %s  %s  %s",
+		marker,
+		index+1,
+		id,
+		styles.Render(RoleSeparator, "·"),
+		styles.Render(RoleIdentity, truncateMiddle(s.Project, projectWidth)),
+		cacheDisplay(s),
+	)
+	identity = appendChips(identity, []string{keepAliveChip(m, s), reminderChip(m, s)}, m.width)
+	b.WriteString(truncateANSI(identity, m.width))
 	b.WriteString("\n")
 
+	statusLine := fmt.Sprintf("     %s  %s  hit %.0f%%",
+		sessionStatusText(status, m.now),
+		progressSummary(status),
+		s.TokenStats.HitRate,
+	)
 	if m.width >= 120 {
-		if s.Messages.FirstUserExcerpt != "" {
-			fmt.Fprintf(&b, "  first: %q\n", truncateEnd(s.Messages.FirstUserExcerpt, m.width-12))
+		if s.DurationSeconds != nil {
+			statusLine += "  duration " + formatDuration(*s.DurationSeconds)
+		}
+		if len(s.Warnings) > 0 {
+			statusLine += fmt.Sprintf("  warnings %d", len(s.Warnings))
 		}
 	}
-	if s.Messages.LastUserExcerpt != "" {
-		fmt.Fprintf(&b, "  last: %q\n", truncateEnd(s.Messages.LastUserExcerpt, m.width-11))
+	b.WriteString(truncateANSI(statusLine, m.width))
+	b.WriteString("\n")
+
+	firstExcerpt := displayExcerpt(s.Messages.FirstUserExcerpt)
+	lastExcerpt := displayExcerpt(s.Messages.LastUserExcerpt)
+	if m.width >= 96 && firstExcerpt != "" {
+		fmt.Fprintf(&b, "    %s  %s\n", styles.Render(RoleExcerptLabel, "first"), truncateEnd(firstExcerpt, maxInt(m.width-13, 18)))
 	}
+	if lastExcerpt != "" {
+		label := "last"
+		available := maxInt(m.width-13, 18)
+		if m.width < 90 {
+			label = "last"
+			available = maxInt(m.width-13, 18)
+		}
+		fmt.Fprintf(&b, "    %s  %s\n", styles.Render(RoleExcerptLabel, label), truncateEnd(lastExcerpt, available))
+	}
+	if len(s.Warnings) > 0 && m.width < 120 {
+		fmt.Fprintf(&b, "     %s\n", styles.Render(RoleWarning, fmt.Sprintf("! %d parse warning(s)", len(s.Warnings))))
+	}
+	b.WriteString("\n")
 	return b.String()
 }
 
-func (m Model) renderNarrowEvidence(s session.Session, status session.Status) string {
-	var parts []string
-	if status.PercentElapsed != nil {
-		parts = append(parts, fmt.Sprintf("TTL %.0f%% %s", *status.PercentElapsed, ProgressBar(*status.PercentElapsed, 10)))
+func cacheDisplay(s session.Session) string {
+	switch cacheLabel(s) {
+	case "1h":
+		return "1-hour cache"
+	case "5m":
+		return "5-min cache"
+	case "TTL ?":
+		return "TTL unknown"
+	default:
+		return cacheLabel(s) + " cache"
 	}
-	if s.TokenStats.HitRate > 0 {
-		parts = append(parts, fmt.Sprintf("hit %.0f%%", s.TokenStats.HitRate))
-	}
-	if s.Messages.LastUserExcerpt != "" {
-		parts = append(parts, fmt.Sprintf("last: %q", truncateEnd(s.Messages.LastUserExcerpt, 28)))
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return "  " + strings.Join(parts, "  ") + "\n"
 }
 
-func statusBadge(state session.StatusState) string {
+func sessionStatusText(status session.Status, now time.Time) string {
 	styles := DefaultStyles()
-	switch state {
+	when := formatStatusTime(status)
+	switch status.State {
 	case session.StatusActive:
-		return styles.Badge(RoleSuccess, "active")
+		return styles.Render(RoleSuccess, "active") + " " + when + " left"
 	case session.StatusExpired:
-		return styles.Badge(RoleDanger, "expired")
+		if status.LastMessageAt != nil {
+			when = formatDuration(int(now.Sub(*status.LastMessageAt).Seconds())) + " ago"
+		}
+		return styles.Render(RoleDanger, "expired") + " " + when
 	case session.StatusUnknown:
-		return styles.Badge(RoleDisabled, "unknown")
+		return styles.Render(RoleDisabled, "unknown") + " " + when
 	default:
-		return styles.Badge(RoleNeutral, string(state))
+		return string(status.State) + " " + when
 	}
+}
+
+func progressSummary(status session.Status) string {
+	if status.PercentElapsed == nil {
+		return "no TTL"
+	}
+	percent := cappedPercent(*status.PercentElapsed)
+	return fmt.Sprintf("%s %.0f%%", ProgressBar(percent, 14), percent)
+}
+
+func cappedPercent(percent float64) float64 {
+	if percent < 0 {
+		return 0
+	}
+	if percent > 100 {
+		return 100
+	}
+	return percent
+}
+
+func reminderChip(m Model, s session.Session) string {
+	styles := DefaultStyles()
+	if m.reminderEnabled[s.SessionID] {
+		return styles.Render(RoleReminder, "remind") + " " + styles.Render(RoleSuccess, "ON")
+	}
+	return styles.Render(RoleReminder, "remind") + " " + styles.Render(RoleMuted, "off")
+}
+
+func keepAliveChip(m Model, s session.Session) string {
+	styles := DefaultStyles()
+	state := m.KeepAliveState(s.SessionID).State
+	switch state {
+	case keepalive.StateCountdown:
+		return styles.Render(RoleKeepAlive, "KeepAlive") + " " + styles.Render(RoleWarning, "countdown")
+	case keepalive.StateManualReady:
+		return styles.Render(RoleKeepAlive, "KeepAlive") + " " + styles.Render(RoleWarning, "ready")
+	case keepalive.StateSending:
+		return styles.Render(RoleKeepAlive, "KeepAlive") + " " + styles.Render(RoleWarning, "sending")
+	case keepalive.StateConfirming:
+		return styles.Render(RoleKeepAlive, "KeepAlive") + " " + styles.Render(RoleWarning, "confirming")
+	case keepalive.StateErrorNoClaude, keepalive.StateErrorSubprocess, keepalive.StateErrorTimeout:
+		return styles.Render(RoleKeepAlive, "KeepAlive") + " " + styles.Render(RoleDanger, "failed")
+	case keepalive.StateMonitoringIdle, keepalive.StateSuccess, keepalive.StateScopeComplete:
+		return styles.Render(RoleKeepAlive, "KeepAlive") + " " + styles.Render(RoleSuccess, "ON")
+	default:
+		if m.keepAliveEnabled[s.SessionID] {
+			return styles.Render(RoleKeepAlive, "KeepAlive") + " " + styles.Render(RoleSuccess, "ON")
+		}
+		return styles.Render(RoleKeepAlive, "KeepAlive") + " " + styles.Render(RoleMuted, "off")
+	}
+}
+
+func appendChips(base string, chips []string, width int) string {
+	line := base
+	separator := DefaultStyles().Render(RoleSeparator, "  ·  ")
+	for _, chip := range chips {
+		if chip == "" {
+			continue
+		}
+		candidate := line + separator + chip
+		if visibleWidth(stripANSI(candidate)) <= width {
+			line = candidate
+		}
+	}
+	return line
+}
+
+func displayExcerpt(value string) string {
+	return strings.Join(strings.Fields(value), " ")
+}
+
+func truncateANSI(value string, max int) string {
+	if max <= 0 || visibleWidth(stripANSI(value)) <= max {
+		return value
+	}
+	return truncateEnd(stripANSI(value), max)
 }
 
 func (m Model) listFooter() string {
 	if m.isEmptyListState() {
-		return "refresh  ? help  q quit\n"
+		return "enter act  u update  ? help  q quit\n"
 	}
 	switch {
 	case m.width < 90:
-		return "cursor move  enter open  r remind  k keepalive  ? help  q quit\n"
+		return "↑↓ select  enter open  r remind  k KeepAlive  u update  c config  ? help  q quit\n"
 	default:
-		return "enter open focused  r remind  k keepalive  refresh  ? help  q quit\n"
+		return "↑↓ select  enter open  r remind  k KeepAlive  u update  c config  ? help  q quit\n"
 	}
 }
 
 func (m Model) focusedAction() string {
-	if m.route == RouteWorkspace {
-		actions := m.workspaceFocusActions()
-		if len(actions) == 0 {
-			return ""
-		}
-		return actions[m.focusIndex%len(actions)]
-	}
-	if m.route == RouteConfig {
-		if len(configFocusActions) == 0 {
-			return ""
-		}
-		return configFocusActions[m.focusIndex%len(configFocusActions)]
-	}
-	if m.route == RouteList || m.route == RouteAmbiguous {
-		if m.isEmptyListState() {
-			if len(emptyFocusActions) == 0 {
-				return ""
-			}
-			return emptyFocusActions[m.focusIndex%len(emptyFocusActions)]
-		}
-		if len(m.sessions) == 0 {
-			if len(rootFocusActions) == 0 {
-				return ""
-			}
-			return rootFocusActions[m.focusIndex%len(rootFocusActions)]
-		}
-		if m.focusIndex < len(m.sessions) {
-			return "session"
-		}
-		actionIndex := m.focusIndex - len(m.sessions)
-		if len(m.sessions) == 0 {
-			actionIndex = m.focusIndex
-		}
-		if actionIndex >= 0 && actionIndex < len(rootFocusActions)-1 {
-			return rootFocusActions[actionIndex+1]
-		}
-		if actionIndex >= 0 && actionIndex < len(rootFocusActions) {
-			return rootFocusActions[actionIndex]
-		}
-	}
-	if len(rootFocusActions) == 0 {
+	items := m.focusItems()
+	if len(items) == 0 {
 		return ""
 	}
-	return rootFocusActions[m.focusIndex%len(rootFocusActions)]
+	return items[m.focusIndex%len(items)].action
 }
 
 func (m Model) listFocusCount() int {
-	if m.route == RouteWorkspace {
-		return len(m.workspaceFocusActions())
+	return len(m.focusItems())
+}
+
+func (m Model) focusItems() []focusItem {
+	switch m.route {
+	case RouteWorkspace:
+		return focusItemsFromActions(m.workspaceFocusActions())
+	case RouteConfig:
+		return focusItemsFromActions(configFocusActions)
+	case RouteList, RouteAmbiguous:
+		if m.isEmptyListState() {
+			return focusItemsFromActions(emptyFocusActions)
+		}
+		items := make([]focusItem, len(m.sessions))
+		for i := range items {
+			items[i] = focusItem{action: "session"}
+		}
+		return items
+	default:
+		return nil
 	}
-	if m.route == RouteConfig {
-		return len(configFocusActions)
+}
+
+func focusItemsFromActions(actions []string) []focusItem {
+	items := make([]focusItem, 0, len(actions))
+	for _, action := range actions {
+		items = append(items, focusItem{action: action})
 	}
-	if m.route != RouteList && m.route != RouteAmbiguous {
-		return len(rootFocusActions)
-	}
-	if m.isEmptyListState() {
-		return len(emptyFocusActions)
-	}
-	if len(m.sessions) == 0 {
-		return len(rootFocusActions)
-	}
-	return len(m.sessions) + len(rootFocusActions) - 1
+	return items
 }
 
 func (m *Model) moveFocus(delta int) {
@@ -308,11 +448,19 @@ func (m *Model) toggleKeepAliveForSelected() {
 	if selected == nil {
 		return
 	}
+	if reason := m.keepAliveUnavailableReason(*selected); reason != "" {
+		m.disableKeepAlive(selected.SessionID)
+		m.lastAction = "keepalive_unavailable_expired"
+		m.setNotice("KeepAlive "+reason, RoleWarning, 3*time.Second)
+		return
+	}
+	currentAction := m.FocusedAction()
 	state := m.KeepAliveState(selected.SessionID)
 	if state.State != keepalive.StateOff && state.State != "" {
 		m.keepAliveManager.Disable(selected.SessionID)
 		m.keepAliveEnabled[selected.SessionID] = false
-		m.focusIndex = m.defaultFocusIndex()
+		m.setNotice("KeepAlive cancelled", RoleInfo, 3*time.Second)
+		m.restoreFocusAction(currentAction)
 		return
 	}
 	actions := m.keepAliveManager.Enable(*selected, m.now)
@@ -324,7 +472,7 @@ func (m *Model) toggleKeepAliveForSelected() {
 		}
 	}
 	m.applyKeepAliveActions(actions, nil)
-	m.focusIndex = m.defaultFocusIndex()
+	m.restoreFocusAction(currentAction)
 }
 
 func (m Model) shouldShowClaudeUnavailable() bool {
@@ -411,38 +559,15 @@ func formatModified(modified time.Time) string {
 	return modified.Format("15:04")
 }
 
-func compactKeepAliveSummary(m Model, s session.Session) string {
-	if m.keepAliveStatus == KeepAliveCountdown {
-		if seconds := m.countdowns[s.SessionID]; seconds > 0 {
-			return fmt.Sprintf("KA %ds", seconds)
-		}
-	}
-	if m.keepAliveEnabled[s.SessionID] {
-		return "KA on"
-	}
-	return ""
-}
-
-func keepAliveSummary(m Model, s session.Session) string {
-	if m.keepAliveStatus == KeepAliveCountdown {
-		if seconds := m.countdowns[s.SessionID]; seconds > 0 {
-			return fmt.Sprintf("KeepAlive countdown %ds", seconds)
-		}
-	}
-	if m.keepAliveEnabled[s.SessionID] {
-		return "KeepAlive on"
-	}
-	return ""
-}
-
 func truncateEnd(value string, max int) string {
-	if max <= 0 || len(value) <= max {
+	runes := []rune(value)
+	if max <= 0 || len(runes) <= max {
 		return value
 	}
 	if max <= 3 {
-		return value[:max]
+		return string(runes[:max])
 	}
-	return value[:max-3] + "..."
+	return string(runes[:max-3]) + "..."
 }
 
 func truncateMiddle(value string, max int) string {

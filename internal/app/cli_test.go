@@ -343,18 +343,14 @@ func TestTUIStartupWiresManualRefreshLoader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildTUIOptions returned error: %v", err)
 	}
+	if !options.StartRefreshTicker {
+		t.Fatal("StartRefreshTicker = false, want autonomous refresh enabled")
+	}
 	model := tui.NewModel(options)
-	for _, key := range []tea.KeyMsg{{Type: tea.KeyDown}, {Type: tea.KeyDown}, {Type: tea.KeyDown}} {
-		updated, _ := model.Update(key)
-		model = updated.(tui.Model)
-	}
-	if model.FocusedAction() != "refresh" {
-		t.Fatalf("focused action = %q, want refresh", model.FocusedAction())
-	}
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
 	model = updated.(tui.Model)
 	if cmd == nil {
-		t.Fatal("refresh action returned nil command")
+		t.Fatal("u refresh returned nil command")
 	}
 	msg := cmd()
 	result, ok := msg.(tui.RefreshResultMsg)
@@ -406,17 +402,9 @@ func TestWorkspaceManualRefreshParsesOnlySelectedSessionPath(t *testing.T) {
 	model := tui.NewModel(options)
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated.(tui.Model)
-	for _, key := range []tea.KeyMsg{{Type: tea.KeyDown}, {Type: tea.KeyDown}, {Type: tea.KeyDown}, {Type: tea.KeyDown}} {
-		updated, _ = model.Update(key)
-		model = updated.(tui.Model)
-	}
-	if model.FocusedAction() != "refresh" {
-		t.Fatalf("workspace focused action = %q, want refresh", model.FocusedAction())
-	}
-
 	discoverCalls = 0
 	parseCalls = map[string]int{}
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
 	model = updated.(tui.Model)
 	if cmd == nil {
 		t.Fatal("workspace refresh returned nil command")
@@ -481,7 +469,7 @@ func TestConfigEditorStartupLoadsAndSavesConfig(t *testing.T) {
 	if model.Route() != tui.RouteConfig {
 		t.Fatalf("route = %q, want config", model.Route())
 	}
-	if !strings.Contains(model.View(), "cc-cache config") {
+	if !strings.Contains(model.View(), "Claude Code Cache / config") || !strings.Contains(model.View(), "Reminder thresholds") {
 		t.Fatalf("config editor did not render:\n%s", model.View())
 	}
 

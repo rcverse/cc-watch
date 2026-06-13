@@ -26,6 +26,8 @@
 - [Phase 9: Session Workspace](phase-09-session-workspace.md)
 - [Phase 10: Config Editor](phase-10-config-editor.md)
 - [Phase 11: CLI Integration And Full Non-Release Verification](phase-11-cli-integration.md)
+- [Phase 11.6: Adaptive Terminal Elegance](phase-11.6-adaptive-terminal-elegance.md)
+- [Phase 11.7: TUI Interaction Architecture Refactor](phase-11.7-tui-interaction-architecture.md)
 - [Phase 12: Packaging, Install, And Release Path](phase-12-packaging-install.md)
 - [Phase 13: Documentation Updates](phase-13-documentation.md)
 - [Phase 14: Final Acceptance Verification](phase-14-final-acceptance.md)

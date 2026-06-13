@@ -136,7 +136,7 @@ func TestEventWordingSeparatesReminderAlarmFromKeepAliveAutomation(t *testing.T)
 		{
 			name:  "reminder alarm",
 			event: Event{Kind: EventReminderThresholdCrossed, ThresholdPercent: 20},
-			want:  []string{"Reminder alarm", "20%", "Sends no Claude message"},
+			want:  []string{"Reminder alarm", "20%", "No Claude message was sent"},
 		},
 		{
 			name:  "keepalive countdown",
