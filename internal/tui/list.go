@@ -479,9 +479,6 @@ func (m Model) shouldShowClaudeUnavailable() bool {
 	if m.refresh.ClaudeUnavailableMessage == "" {
 		return false
 	}
-	if m.keepAliveStatus != KeepAliveInactive {
-		return true
-	}
 	if m.route == RouteWorkspace {
 		state := m.activeKeepAliveState()
 		if state.State != "" && state.State != keepalive.StateOff {

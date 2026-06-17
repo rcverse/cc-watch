@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/richardchen/cc-cache/internal/config"
 	"github.com/richardchen/cc-cache/internal/notify"
+	"github.com/richardchen/cc-cache/internal/refresh"
 	"github.com/richardchen/cc-cache/internal/session"
 	"github.com/richardchen/cc-cache/internal/tui"
 )
@@ -107,8 +109,8 @@ func TestJSONDispatchIsNonInteractive(t *testing.T) {
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
-	if deps.tuiStarts != 0 || deps.watcherStarts != 0 || deps.notifierStarts != 0 || deps.keepAliveRunnerCreations != 0 {
-		t.Fatalf("interactive side effects: tui=%d watcher=%d notifier=%d keepalive=%d", deps.tuiStarts, deps.watcherStarts, deps.notifierStarts, deps.keepAliveRunnerCreations)
+	if deps.tuiStarts != 0 {
+		t.Fatalf("interactive side effects: tui=%d", deps.tuiStarts)
 	}
 	var doc map[string]any
 	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
@@ -162,9 +164,6 @@ func TestTUIDispatchStartsListWithoutKeepAliveSideEffects(t *testing.T) {
 	}
 	if deps.tuiStarts != 1 {
 		t.Fatalf("tui starts = %d, want 1", deps.tuiStarts)
-	}
-	if deps.keepAliveRunnerCreations != 0 {
-		t.Fatalf("KeepAlive runner creations = %d, want 0", deps.keepAliveRunnerCreations)
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
@@ -308,6 +307,202 @@ func TestTUIStartupWithRemindEnablesLoadedSessionRemindersOnly(t *testing.T) {
 	}
 	if len(options.KeepAliveEnabled) != 0 {
 		t.Fatalf("KeepAlive enabled map = %#v, want --remind to leave KeepAlive off", options.KeepAliveEnabled)
+	}
+}
+
+func TestJSONAndTUIUseSameSelectedDiscoverySemantics(t *testing.T) {
+	deps := testDepsWithTwoSessions(t)
+	var tuiCommand Command
+	deps.StartTUI = func(cmd Command) error {
+		tuiCommand = cmd
+		return nil
+	}
+
+	if code := RunWithDeps([]string{"--id", "2222"}, io.Discard, io.Discard, deps.Dependencies); code != 0 {
+		t.Fatalf("TUI selected run exit = %d, want 0", code)
+	}
+	if tuiCommand.ID != "2222" {
+		t.Fatalf("TUI command ID = %q, want 2222", tuiCommand.ID)
+	}
+
+	var stdout bytes.Buffer
+	if code := RunWithDeps([]string{"--json", "--id", "2222"}, &stdout, io.Discard, deps.Dependencies); code != 0 {
+		t.Fatalf("JSON selected run exit = %d, want 0; output=%s", code, stdout.String())
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
+		t.Fatalf("json unmarshal: %v", err)
+	}
+	selected := doc["selected_session"].(map[string]any)
+	if selected["session_id"] != "22222222-2222-2222-2222-222222222222" {
+		t.Fatalf("selected session id = %v", selected["session_id"])
+	}
+}
+
+func TestConfigModeDoesNotDiscoverOrParseSessionsThroughSnapshot(t *testing.T) {
+	deps := fakeDeps(t)
+	deps.DiscoverHome = func(home string, limit int) (session.DiscoveryResult, error) {
+		t.Fatalf("DiscoverHome called in config mode")
+		return session.DiscoveryResult{}, nil
+	}
+	deps.ParseFile = func(path string) (session.Session, error) {
+		t.Fatalf("ParseFile called in config mode with %q", path)
+		return session.Session{}, nil
+	}
+	options, err := buildTUIOptions(Command{Mode: ModeConfig}, deps.Dependencies)
+	if err != nil {
+		t.Fatalf("buildTUIOptions returned error: %v", err)
+	}
+	if options.StartMode != tui.StartConfig {
+		t.Fatalf("start mode = %q, want config", options.StartMode)
+	}
+}
+
+func TestTUIIDNoMatchMapsToCurrentEmptyStateBehavior(t *testing.T) {
+	deps := fakeDeps(t)
+	deps.DiscoverHome = func(home string, limit int) (session.DiscoveryResult, error) {
+		return session.DiscoveryResult{Sessions: []session.SessionFile{{
+			SessionID: "11111111-1111-1111-1111-111111111111",
+			ShortID:   "11111111",
+			Project:   "tmp",
+			Path:      "/tmp/session.jsonl",
+		}}}, nil
+	}
+
+	options, err := buildTUIOptions(Command{Mode: ModeTUI, Limit: 5, ID: "zzz"}, deps.Dependencies)
+	if err != nil {
+		t.Fatalf("buildTUIOptions returned error: %v", err)
+	}
+	if options.SelectedID != "" || options.AmbiguousID != "" {
+		t.Fatalf("selected=%q ambiguous=%q, want neither", options.SelectedID, options.AmbiguousID)
+	}
+	if options.Refresh.EmptyState != tui.EmptyNoSessions {
+		t.Fatalf("empty state = %q, want no sessions", options.Refresh.EmptyState)
+	}
+}
+
+func TestTUIAmbiguousIDMapsToAmbiguousRouteCandidates(t *testing.T) {
+	deps := fakeDeps(t)
+	deps.DiscoverHome = func(home string, limit int) (session.DiscoveryResult, error) {
+		return session.DiscoveryResult{Sessions: []session.SessionFile{
+			{SessionID: "11111111-0000-0000-0000-000000000000", ShortID: "11111111", Project: "one"},
+			{SessionID: "11112222-0000-0000-0000-000000000000", ShortID: "11112222", Project: "two"},
+		}}, nil
+	}
+
+	options, err := buildTUIOptions(Command{Mode: ModeTUI, Limit: 5, ID: "1111"}, deps.Dependencies)
+	if err != nil {
+		t.Fatalf("buildTUIOptions returned error: %v", err)
+	}
+	model := tui.NewModel(options)
+	if model.Route() != tui.RouteAmbiguous {
+		t.Fatalf("route = %q, want ambiguous", model.Route())
+	}
+	if len(model.Sessions()) != 2 {
+		t.Fatalf("candidate sessions = %d, want 2", len(model.Sessions()))
+	}
+}
+
+func TestTUIAmbiguousIDWithRemindEnablesCandidateReminders(t *testing.T) {
+	deps := fakeDeps(t)
+	deps.DiscoverHome = func(home string, limit int) (session.DiscoveryResult, error) {
+		return session.DiscoveryResult{Sessions: []session.SessionFile{
+			{SessionID: "11111111-0000-0000-0000-000000000000", ShortID: "11111111", Project: "one"},
+			{SessionID: "11112222-0000-0000-0000-000000000000", ShortID: "11112222", Project: "two"},
+		}}, nil
+	}
+
+	options, err := buildTUIOptions(Command{Mode: ModeTUI, Limit: 5, ID: "1111", Remind: true}, deps.Dependencies)
+	if err != nil {
+		t.Fatalf("buildTUIOptions returned error: %v", err)
+	}
+	for _, s := range options.Sessions {
+		if !options.ReminderEnabled[s.SessionID] {
+			t.Fatalf("reminder for candidate %q = false, want true; map=%#v", s.SessionID, options.ReminderEnabled)
+		}
+	}
+}
+
+func TestWorkspaceManualRefreshParsesSelectedJSONLPathOnly(t *testing.T) {
+	deps := fakeDeps(t)
+	now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
+	deps.DiscoverHome = func(home string, limit int) (session.DiscoveryResult, error) {
+		return session.DiscoveryResult{Sessions: []session.SessionFile{{
+			SessionID: "11111111-1111-1111-1111-111111111111",
+			ShortID:   "11111111",
+			Project:   "tmp",
+			Path:      "/tmp/selected.jsonl",
+			ModTime:   now,
+		}}}, nil
+	}
+	parseCalls := []string{}
+	deps.ParseFile = func(path string) (session.Session, error) {
+		parseCalls = append(parseCalls, path)
+		return session.Session{
+			SessionID:      "11111111-1111-1111-1111-111111111111",
+			ShortID:        "11111111",
+			Project:        "tmp",
+			JSONLPath:      path,
+			FileModifiedAt: now,
+		}, nil
+	}
+
+	options, err := buildTUIOptions(Command{Mode: ModeTUI, Limit: 5, ID: "11111111"}, deps.Dependencies)
+	if err != nil {
+		t.Fatalf("buildTUIOptions: %v", err)
+	}
+	if len(parseCalls) != 1 || parseCalls[0] != "/tmp/selected.jsonl" {
+		t.Fatalf("startup parse calls = %#v", parseCalls)
+	}
+	parseCalls = nil
+	selected := options.Sessions[0]
+	snapshot := options.Dependencies.RefreshSnapshot(refresh.SourceManual, 2, &selected)
+	if len(parseCalls) != 1 || parseCalls[0] != "/tmp/selected.jsonl" {
+		t.Fatalf("refresh parse calls = %#v, want selected path only", parseCalls)
+	}
+	if !snapshot.SelectedOnly || snapshot.SelectedID != selected.SessionID {
+		t.Fatalf("snapshot selected flags = %#v", snapshot)
+	}
+}
+
+func TestWorkspaceManualRefreshParseFailurePreservesSelectedRefreshScope(t *testing.T) {
+	deps := fakeDeps(t)
+	now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
+	deps.DiscoverHome = func(home string, limit int) (session.DiscoveryResult, error) {
+		return session.DiscoveryResult{Sessions: []session.SessionFile{{
+			SessionID: "11111111-1111-1111-1111-111111111111",
+			ShortID:   "11111111",
+			Project:   "tmp",
+			Path:      "/tmp/selected.jsonl",
+			ModTime:   now,
+		}}}, nil
+	}
+	parseErr := false
+	deps.ParseFile = func(path string) (session.Session, error) {
+		if parseErr {
+			return session.Session{}, errors.New("read failed")
+		}
+		return session.Session{
+			SessionID:      "11111111-1111-1111-1111-111111111111",
+			ShortID:        "11111111",
+			Project:        "tmp",
+			JSONLPath:      path,
+			FileModifiedAt: now,
+		}, nil
+	}
+
+	options, err := buildTUIOptions(Command{Mode: ModeTUI, Limit: 5, ID: "11111111"}, deps.Dependencies)
+	if err != nil {
+		t.Fatalf("buildTUIOptions: %v", err)
+	}
+	selected := options.Sessions[0]
+	parseErr = true
+	snapshot := options.Dependencies.RefreshSnapshot(refresh.SourceManual, 2, &selected)
+	if !snapshot.SelectedOnly || snapshot.SelectedID != selected.SessionID {
+		t.Fatalf("snapshot selected flags = %#v, want selected scope preserved", snapshot)
+	}
+	if len(snapshot.Sessions) != 0 {
+		t.Fatalf("snapshot sessions = %#v, want no replacement on parse failure", snapshot.Sessions)
 	}
 }
 
@@ -685,10 +880,7 @@ func TestJSONInvalidConfigWarningIsVisible(t *testing.T) {
 
 type fakeAppDeps struct {
 	Dependencies
-	tuiStarts                int
-	watcherStarts            int
-	notifierStarts           int
-	keepAliveRunnerCreations int
+	tuiStarts int
 }
 
 func fakeDeps(t *testing.T) *fakeAppDeps {
@@ -707,17 +899,45 @@ func fakeDeps(t *testing.T) *fakeAppDeps {
 		deps.tuiStarts++
 		return nil
 	}
-	deps.StartWatcher = func() error {
-		deps.watcherStarts++
-		return nil
+	return deps
+}
+
+func testDepsWithTwoSessions(t *testing.T) *fakeAppDeps {
+	t.Helper()
+	now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
+	deps := fakeDeps(t)
+	deps.Now = func() time.Time { return now }
+	deps.DiscoverHome = func(home string, limit int) (session.DiscoveryResult, error) {
+		return session.DiscoveryResult{
+			ProjectsDir: "/home/me/.claude/projects",
+			Sessions: []session.SessionFile{
+				{SessionID: "11111111-1111-1111-1111-111111111111", ShortID: "11111111", Project: "one", Path: "/tmp/one.jsonl", ModTime: now},
+				{SessionID: "22222222-2222-2222-2222-222222222222", ShortID: "22222222", Project: "two", Path: "/tmp/two.jsonl", ModTime: now.Add(-time.Minute)},
+			},
+		}, nil
 	}
-	deps.StartNotifier = func() error {
-		deps.notifierStarts++
-		return nil
-	}
-	deps.NewKeepAliveRunner = func() error {
-		deps.keepAliveRunnerCreations++
-		return nil
+	deps.ParseFile = func(path string) (session.Session, error) {
+		switch path {
+		case "/tmp/one.jsonl":
+			return session.Session{
+				SessionID:      "11111111-1111-1111-1111-111111111111",
+				ShortID:        "11111111",
+				Project:        "one",
+				JSONLPath:      path,
+				FileModifiedAt: now,
+			}, nil
+		case "/tmp/two.jsonl":
+			return session.Session{
+				SessionID:      "22222222-2222-2222-2222-222222222222",
+				ShortID:        "22222222",
+				Project:        "two",
+				JSONLPath:      path,
+				FileModifiedAt: now.Add(-time.Minute),
+			}, nil
+		default:
+			t.Fatalf("ParseFile path = %q, want fixture path", path)
+			return session.Session{}, nil
+		}
 	}
 	return deps
 }

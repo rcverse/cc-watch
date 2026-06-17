@@ -38,8 +38,6 @@ type RefreshDegradedMsg struct {
 
 type ManualRefreshMsg struct{}
 
-type SafetyRefreshMsg struct{}
-
 type NotificationResultMsg struct {
 	Event  notify.Event
 	Result notify.Result

@@ -28,6 +28,8 @@
 - [Phase 11: CLI Integration And Full Non-Release Verification](phase-11-cli-integration.md)
 - [Phase 11.6: Adaptive Terminal Elegance](phase-11.6-adaptive-terminal-elegance.md)
 - [Phase 11.7: TUI Interaction Architecture Refactor](phase-11.7-tui-interaction-architecture.md)
+- [Phase 11.8: Architecture Refactor](phase-11.8-architecture-refactor.md)
+- [Phase 11.9: Architecture Simplification](phase-11.9-architecture-simplification.md)
 - [Phase 12: Packaging, Install, And Release Path](phase-12-packaging-install.md)
 - [Phase 13: Documentation Updates](phase-13-documentation.md)
 - [Phase 14: Final Acceptance Verification](phase-14-final-acceptance.md)

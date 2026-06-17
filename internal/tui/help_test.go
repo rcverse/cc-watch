@@ -3,6 +3,9 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	"github.com/richardchen/cc-cache/internal/keepalive"
+	"github.com/richardchen/cc-cache/internal/session"
 )
 
 func TestHelpIncludesGlobalShortcuts(t *testing.T) {
@@ -45,30 +48,33 @@ func TestHelpShowsOnlyCurrentlyValidRouteShortcuts(t *testing.T) {
 
 func TestHelpSummarizesDangerousKeepAliveState(t *testing.T) {
 	for _, tc := range []struct {
-		status KeepAliveStatus
-		want   []string
+		state keepalive.State
+		want  []string
 	}{
 		{
-			status: KeepAliveCountdown,
-			want:   []string{"KeepAlive countdown remains visible", "s send KeepAlive now", "x cancel/dismiss"},
+			state: keepalive.StateCountdown,
+			want:  []string{"KeepAlive countdown remains visible", "s send KeepAlive now", "x cancel/dismiss"},
 		},
 		{
-			status: KeepAliveConfirming,
-			want:   []string{"KeepAlive confirming remains visible", "x cancel/dismiss"},
+			state: keepalive.StateConfirming,
+			want:  []string{"KeepAlive confirming remains visible", "x cancel/dismiss"},
 		},
 		{
-			status: KeepAliveFailure,
-			want:   []string{"KeepAlive failure remains visible", "x cancel/dismiss"},
+			state: keepalive.StateErrorNoClaude,
+			want:  []string{"KeepAlive failure remains visible", "x cancel/dismiss"},
 		},
 	} {
 		model := NewModel(Options{
-			SelectedID:      "11111111",
-			KeepAliveStatus: tc.status,
+			SelectedID: "11111111",
+			Sessions:   []session.Session{{SessionID: "11111111", ShortID: "11111111"}},
+			KeepAliveStates: map[string]keepalive.SessionState{
+				"11111111": {SessionID: "11111111", State: tc.state, InstanceToken: 1, MaxSends: 1},
+			},
 		})
 		view := openHelp(model).View()
 		for _, want := range tc.want {
 			if !strings.Contains(view, want) {
-				t.Fatalf("%s help missing %q:\n%s", tc.status, want, view)
+				t.Fatalf("%s help missing %q:\n%s", tc.state, want, view)
 			}
 		}
 	}

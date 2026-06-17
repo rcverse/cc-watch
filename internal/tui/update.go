@@ -145,9 +145,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setNotice("updating sessions", RoleInfo, 3*time.Second)
 		}
 		return m.scheduleRefresh(refresh.SourceManual, true)
-	case SafetyRefreshMsg:
-		m.lastAction = "safety_refresh"
-		return m.scheduleRefresh(refresh.SourceSafety, false)
 	case tea.KeyMsg:
 		return m.updateKey(typed)
 	case tea.WindowSizeMsg:
@@ -238,41 +235,25 @@ func (m Model) scheduleRefresh(source refresh.Source, bypassedDebounce bool) (te
 	m.lastRefreshSource = source
 	m.lastBypassedDebounce = bypassedDebounce
 	generation := m.refreshGeneration
-	refreshSessions := m.deps.RefreshSessions
 	refreshSnapshot := m.deps.RefreshSnapshot
-	refreshSelectedSnapshot := m.deps.RefreshSelectedSnapshot
 	selected := m.selectedSession()
-	if refreshSessions == nil && refreshSnapshot == nil && refreshSelectedSnapshot == nil {
+	if refreshSnapshot == nil {
 		return m, nil
 	}
+	var selectedForRefresh *session.Session
+	if m.route == RouteWorkspace && selected != nil {
+		copied := *selected
+		selectedForRefresh = &copied
+	}
 	return m, func() tea.Msg {
-		if m.route == RouteWorkspace && selected != nil && refreshSelectedSnapshot != nil {
-			snapshot := refreshSelectedSnapshot(source, generation, *selected)
-			return RefreshResultMsg{
-				Generation:   generation,
-				Sessions:     snapshot.Sessions,
-				Refresh:      snapshot.Refresh,
-				HasRefresh:   snapshot.HasRefresh,
-				SelectedOnly: true,
-				SelectedID:   selected.SessionID,
-			}
-		}
-		if refreshSnapshot != nil {
-			snapshot := refreshSnapshot(source, generation)
-			return RefreshResultMsg{
-				Generation:   generation,
-				Sessions:     snapshot.Sessions,
-				Refresh:      snapshot.Refresh,
-				HasRefresh:   snapshot.HasRefresh,
-				SelectedOnly: m.route == RouteWorkspace && m.SelectedSessionID() != "",
-				SelectedID:   m.SelectedSessionID(),
-			}
-		}
+		snapshot := refreshSnapshot(source, generation, selectedForRefresh)
 		return RefreshResultMsg{
 			Generation:   generation,
-			Sessions:     refreshSessions(source, generation),
-			SelectedOnly: m.route == RouteWorkspace && m.SelectedSessionID() != "",
-			SelectedID:   m.SelectedSessionID(),
+			Sessions:     snapshot.Sessions,
+			Refresh:      snapshot.Refresh,
+			HasRefresh:   snapshot.HasRefresh,
+			SelectedOnly: snapshot.SelectedOnly,
+			SelectedID:   snapshot.SelectedID,
 		}
 	}
 }
@@ -553,20 +534,17 @@ func (m *Model) toggleKeepAliveAutoSendForSelected() {
 
 func (m Model) workspaceCanSendKeepAlive() bool {
 	state := m.activeKeepAliveState()
-	return state.State == keepalive.StateCountdown || state.State == keepalive.StateManualReady || m.keepAliveStatus == KeepAliveCountdown || m.keepAliveStatus == KeepAliveFailure
+	return state.State == keepalive.StateCountdown || state.State == keepalive.StateManualReady || isKeepAliveFailure(state.State)
 }
 
 func (m Model) workspaceCanCancelKeepAlive() bool {
 	state := m.activeKeepAliveState()
-	return state.State == keepalive.StateCountdown || state.State == keepalive.StateManualReady || state.State == keepalive.StateSending || state.State == keepalive.StateConfirming || m.keepAliveStatus != KeepAliveInactive
+	return state.State == keepalive.StateCountdown || state.State == keepalive.StateManualReady || state.State == keepalive.StateSending || state.State == keepalive.StateConfirming || isKeepAliveFailure(state.State)
 }
 
 func (m Model) sendKeepAliveNow() (tea.Model, tea.Cmd) {
 	selected := m.selectedSession()
 	if selected == nil {
-		if m.keepAliveStatus == KeepAliveCountdown || m.keepAliveStatus == KeepAliveFailure {
-			m.lastAction = "send_keepalive_now"
-		}
 		return m, nil
 	}
 	if reason := m.keepAliveUnavailableReason(*selected); reason != "" {
@@ -587,9 +565,6 @@ func (m Model) sendKeepAliveNow() (tea.Model, tea.Cmd) {
 func (m *Model) cancelKeepAlive() {
 	selected := m.selectedSession()
 	if selected == nil {
-		if m.keepAliveStatus != KeepAliveInactive {
-			m.lastAction = "cancel_keepalive"
-		}
 		return
 	}
 	state := m.KeepAliveState(selected.SessionID)

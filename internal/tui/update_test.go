@@ -17,13 +17,14 @@ import (
 func TestDisplayTickRecomputesTimeOnly(t *testing.T) {
 	now := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
 	last := now.Add(-5 * time.Minute)
-	deps := &fakeDeps{}
+	refreshCalls := 0
 	model := NewModel(Options{
 		Now: now,
 		Dependencies: Dependencies{
-			Discover: deps.discover,
-			Parse:    deps.parse,
-			Refresh:  deps.refresh,
+			RefreshSnapshot: func(source refresh.Source, generation int, selected *session.Session) RefreshSnapshot {
+				refreshCalls++
+				return RefreshSnapshot{}
+			},
 		},
 		Sessions: []session.Session{{
 			SessionID:     "11111111-1111-1111-1111-111111111111",
@@ -46,8 +47,8 @@ func TestDisplayTickRecomputesTimeOnly(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("DisplayTick returned command, want nil")
 	}
-	if deps.discoverCalls != 0 || deps.parseCalls != 0 || deps.refreshCalls != 0 {
-		t.Fatalf("display tick called deps: discover=%d parse=%d refresh=%d", deps.discoverCalls, deps.parseCalls, deps.refreshCalls)
+	if refreshCalls != 0 {
+		t.Fatalf("display tick called refresh %d time(s)", refreshCalls)
 	}
 	statuses := model.SessionStatuses()
 	if *statuses["11111111-1111-1111-1111-111111111111"].RemainingSeconds != 3299 {
@@ -175,11 +176,11 @@ func TestManualRefreshResetsNotificationSuppression(t *testing.T) {
 func TestWatcherEventsArriveAsMessages(t *testing.T) {
 	model := NewModel(Options{
 		Dependencies: Dependencies{
-			RefreshSessions: func(source refresh.Source, generation int) []session.Session {
+			RefreshSnapshot: func(source refresh.Source, generation int, selected *session.Session) RefreshSnapshot {
 				if source != refresh.SourceFsnotify {
 					t.Fatalf("source = %q, want fsnotify", source)
 				}
-				return []session.Session{{SessionID: "fsnotify", ShortID: "fsnotify"}}
+				return RefreshSnapshot{Sessions: []session.Session{{SessionID: "fsnotify", ShortID: "fsnotify"}}}
 			},
 		},
 	})
@@ -214,19 +215,19 @@ func TestSafetyRefreshProducesFreshGenerationCommand(t *testing.T) {
 	model := NewModel(Options{
 		RefreshGeneration: 4,
 		Dependencies: Dependencies{
-			RefreshSessions: func(source refresh.Source, generation int) []session.Session {
+			RefreshSnapshot: func(source refresh.Source, generation int, selected *session.Session) RefreshSnapshot {
 				if source != refresh.SourceSafety {
 					t.Fatalf("source = %q, want safety", source)
 				}
 				if generation != 5 {
 					t.Fatalf("generation = %d, want 5", generation)
 				}
-				return []session.Session{{SessionID: "safety", ShortID: "safety"}}
+				return RefreshSnapshot{Sessions: []session.Session{{SessionID: "safety", ShortID: "safety"}}}
 			},
 		},
 	})
 
-	updated, cmd := model.Update(SafetyRefreshMsg{})
+	updated, cmd := model.Update(RefreshTickMsg{Now: time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)})
 	model = updated.(Model)
 
 	if cmd == nil {
@@ -436,7 +437,13 @@ func TestAdvertisedShortcutsAreHandledForCurrentRoute(t *testing.T) {
 		}
 	}
 
-	model = NewModel(Options{SelectedID: "11111111", KeepAliveStatus: KeepAliveCountdown})
+	model = NewModel(Options{
+		SelectedID: "11111111",
+		Sessions:   []session.Session{{SessionID: "11111111", ShortID: "11111111"}},
+		KeepAliveStates: map[string]keepalive.SessionState{
+			"11111111": {SessionID: "11111111", State: keepalive.StateCountdown, InstanceToken: 1, MaxSends: 1},
+		},
+	})
 	for _, shortcut := range []string{"s", "x"} {
 		updated, _ := model.Update(keyRunes(shortcut))
 		model = updated.(Model)
@@ -459,14 +466,14 @@ func TestManualRefreshBypassesDebounceWithFreshGeneration(t *testing.T) {
 	model := NewModel(Options{
 		RefreshGeneration: 2,
 		Dependencies: Dependencies{
-			RefreshSessions: func(source refresh.Source, generation int) []session.Session {
+			RefreshSnapshot: func(source refresh.Source, generation int, selected *session.Session) RefreshSnapshot {
 				if source != refresh.SourceManual {
 					t.Fatalf("source = %q, want manual", source)
 				}
 				if generation != 3 {
 					t.Fatalf("generation = %d, want 3", generation)
 				}
-				return []session.Session{{SessionID: "manual", ShortID: "manual"}}
+				return RefreshSnapshot{Sessions: []session.Session{{SessionID: "manual", ShortID: "manual"}}}
 			},
 		},
 	})
@@ -523,7 +530,7 @@ func TestRefreshTickReparsesListAndWorkspaceSessions(t *testing.T) {
 		Now:      now,
 		Sessions: []session.Session{workspaceSession(now)},
 		Dependencies: Dependencies{
-			RefreshSnapshot: func(source refresh.Source, generation int) RefreshSnapshot {
+			RefreshSnapshot: func(source refresh.Source, generation int, selected *session.Session) RefreshSnapshot {
 				listCalls++
 				if source != refresh.SourceSafety {
 					t.Fatalf("list refresh source = %q, want safety", source)
@@ -550,12 +557,17 @@ func TestRefreshTickReparsesListAndWorkspaceSessions(t *testing.T) {
 		SelectedID: "workspace-id",
 		Sessions:   []session.Session{workspaceSession(now)},
 		Dependencies: Dependencies{
-			RefreshSelectedSnapshot: func(source refresh.Source, generation int, selected session.Session) RefreshSnapshot {
+			RefreshSnapshot: func(source refresh.Source, generation int, selected *session.Session) RefreshSnapshot {
 				selectedCalls++
-				if source != refresh.SourceSafety || selected.SessionID != "workspace-id" {
-					t.Fatalf("workspace refresh source=%q selected=%q", source, selected.SessionID)
+				if selected == nil || source != refresh.SourceSafety || selected.SessionID != "workspace-id" {
+					t.Fatalf("workspace refresh source=%q selected=%#v", source, selected)
 				}
-				return RefreshSnapshot{Sessions: []session.Session{workspaceSession(now.Add(time.Minute))}, HasRefresh: true}
+				return RefreshSnapshot{
+					Sessions:     []session.Session{workspaceSession(now.Add(time.Minute))},
+					HasRefresh:   true,
+					SelectedOnly: true,
+					SelectedID:   selected.SessionID,
+				}
 			},
 		},
 	})
@@ -573,6 +585,47 @@ func TestRefreshTickReparsesListAndWorkspaceSessions(t *testing.T) {
 	}
 }
 
+func TestRefreshSnapshotAppliesSelectedSessionSnapshot(t *testing.T) {
+	now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
+	initial := workspaceSession(now)
+	refreshed := initial
+	refreshed.Messages.LastUserExcerpt = "fresh selected session"
+	model := NewModel(Options{
+		Now:        now,
+		Sessions:   []session.Session{initial},
+		SelectedID: initial.SessionID,
+		Dependencies: Dependencies{
+			RefreshSnapshot: func(source refresh.Source, generation int, selected *session.Session) RefreshSnapshot {
+				if selected == nil || selected.SessionID != initial.SessionID {
+					t.Fatalf("selected snapshot input = %#v", selected)
+				}
+				return RefreshSnapshot{
+					Sessions:     []session.Session{refreshed},
+					Refresh:      RefreshViewState{EmptyState: EmptyNone},
+					HasRefresh:   true,
+					SelectedOnly: true,
+					SelectedID:   initial.SessionID,
+				}
+			},
+		},
+	})
+
+	updated, cmd := model.Update(ManualRefreshMsg{})
+	if cmd == nil {
+		t.Fatalf("manual refresh returned nil command")
+	}
+	msg := cmd()
+	result, ok := msg.(RefreshResultMsg)
+	if !ok {
+		t.Fatalf("message = %#v, want RefreshResultMsg", msg)
+	}
+	updated, _ = updated.Update(result)
+	got := updated.(Model).Sessions()[0].Messages.LastUserExcerpt
+	if got != "fresh selected session" {
+		t.Fatalf("last excerpt = %q, want refreshed selected session", got)
+	}
+}
+
 func TestDisplayTickDoesNotRefreshData(t *testing.T) {
 	now := time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)
 	refreshCalls := 0
@@ -580,7 +633,7 @@ func TestDisplayTickDoesNotRefreshData(t *testing.T) {
 		Now:      now,
 		Sessions: []session.Session{workspaceSession(now)},
 		Dependencies: Dependencies{
-			RefreshSnapshot: func(source refresh.Source, generation int) RefreshSnapshot {
+			RefreshSnapshot: func(source refresh.Source, generation int, selected *session.Session) RefreshSnapshot {
 				refreshCalls++
 				return RefreshSnapshot{Sessions: []session.Session{workspaceSession(now.Add(time.Minute))}, HasRefresh: true}
 			},
@@ -849,8 +902,8 @@ func TestListDirectKeysToggleAndActivate(t *testing.T) {
 		Now:      now,
 		Sessions: listViewSessions(now),
 		Dependencies: Dependencies{
-			RefreshSessions: func(source refresh.Source, generation int) []session.Session {
-				return listViewSessions(now.Add(time.Minute))
+			RefreshSnapshot: func(source refresh.Source, generation int, selected *session.Session) RefreshSnapshot {
+				return RefreshSnapshot{Sessions: listViewSessions(now.Add(time.Minute))}
 			},
 		},
 	})
@@ -1117,8 +1170,16 @@ func TestWorkspaceActionFeedbackForUpdateCopyAndCancelWatching(t *testing.T) {
 		SelectedID: "workspace-id",
 		Sessions:   []session.Session{workspaceSession(now)},
 		Dependencies: Dependencies{
-			RefreshSelectedSnapshot: func(source refresh.Source, generation int, selected session.Session) RefreshSnapshot {
-				return RefreshSnapshot{Sessions: []session.Session{workspaceSession(now.Add(time.Minute))}, HasRefresh: true}
+			RefreshSnapshot: func(source refresh.Source, generation int, selected *session.Session) RefreshSnapshot {
+				if selected == nil {
+					t.Fatalf("selected refresh input = nil")
+				}
+				return RefreshSnapshot{
+					Sessions:     []session.Session{workspaceSession(now.Add(time.Minute))},
+					HasRefresh:   true,
+					SelectedOnly: true,
+					SelectedID:   selected.SessionID,
+				}
 			},
 		},
 	})
@@ -1223,7 +1284,7 @@ func TestWorkspaceManualRefreshIsFocusableAndUsesSelectedIDSnapshot(t *testing.T
 		SelectedID: "workspace-id",
 		Sessions:   []session.Session{workspaceSession(now)},
 		Dependencies: Dependencies{
-			RefreshSnapshot: func(source refresh.Source, generation int) RefreshSnapshot {
+			RefreshSnapshot: func(source refresh.Source, generation int, selected *session.Session) RefreshSnapshot {
 				if source != refresh.SourceManual {
 					t.Fatalf("source = %q, want manual", source)
 				}
@@ -1263,14 +1324,19 @@ func TestWorkspaceManualRefreshPrefersSelectedPathSnapshot(t *testing.T) {
 		SelectedID: "workspace-id",
 		Sessions:   []session.Session{workspaceSession(now)},
 		Dependencies: Dependencies{
-			RefreshSelectedSnapshot: func(source refresh.Source, generation int, selected session.Session) RefreshSnapshot {
-				selectedCalls++
-				if selected.SessionID != "workspace-id" {
-					t.Fatalf("selected refresh got %q, want workspace-id", selected.SessionID)
+			RefreshSnapshot: func(source refresh.Source, generation int, selected *session.Session) RefreshSnapshot {
+				if selected != nil {
+					selectedCalls++
+					if selected.SessionID != "workspace-id" {
+						t.Fatalf("selected refresh got %q, want workspace-id", selected.SessionID)
+					}
+					return RefreshSnapshot{
+						Sessions:     []session.Session{workspaceSession(now.Add(time.Minute))},
+						HasRefresh:   true,
+						SelectedOnly: true,
+						SelectedID:   selected.SessionID,
+					}
 				}
-				return RefreshSnapshot{Sessions: []session.Session{workspaceSession(now.Add(time.Minute))}, HasRefresh: true}
-			},
-			RefreshSnapshot: func(source refresh.Source, generation int) RefreshSnapshot {
 				fullCalls++
 				return RefreshSnapshot{Sessions: []session.Session{listViewSession("other-id", "other", now, now, session.CacheWindow{Label: "1h", TTLSeconds: 3600, Known: true}, "", "")}, HasRefresh: true}
 			},
@@ -1301,13 +1367,18 @@ func TestWorkspaceManualRefreshUpdatesOnlySelectedSessionWhenSnapshotReturnsList
 			listViewSession("other-id", "other", now, now, session.CacheWindow{Label: "1h", TTLSeconds: 3600, Known: true}, "", ""),
 		},
 		Dependencies: Dependencies{
-			RefreshSnapshot: func(source refresh.Source, generation int) RefreshSnapshot {
+			RefreshSnapshot: func(source refresh.Source, generation int, selected *session.Session) RefreshSnapshot {
+				if selected == nil || selected.SessionID != "workspace-id" {
+					t.Fatalf("selected refresh input = %#v", selected)
+				}
 				return RefreshSnapshot{
 					Sessions: []session.Session{
 						listViewSession("other-id", "other-mutated", now.Add(time.Hour), now, session.CacheWindow{Label: "1h", TTLSeconds: 3600, Known: true}, "", ""),
 						workspaceSession(now.Add(time.Minute)),
 					},
-					HasRefresh: true,
+					HasRefresh:   true,
+					SelectedOnly: true,
+					SelectedID:   selected.SessionID,
 				}
 			},
 		},
@@ -1909,12 +1980,6 @@ func TestInitialRoutes(t *testing.T) {
 	}
 }
 
-type fakeDeps struct {
-	discoverCalls int
-	parseCalls    int
-	refreshCalls  int
-}
-
 type errForTest string
 
 func (e errForTest) Error() string {
@@ -1932,18 +1997,6 @@ func (r fakeKeepAliveRunner) Available() error {
 
 func (r fakeKeepAliveRunner) Send(context.Context, keepalive.RunRequest) keepalive.RunResult {
 	return keepalive.RunResult{StartedAt: r.startedAt, Err: r.err}
-}
-
-func (d *fakeDeps) discover() {
-	d.discoverCalls++
-}
-
-func (d *fakeDeps) parse() {
-	d.parseCalls++
-}
-
-func (d *fakeDeps) refresh() {
-	d.refreshCalls++
 }
 
 func keyRunes(value string) tea.KeyMsg {

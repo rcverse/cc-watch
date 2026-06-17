@@ -14,6 +14,7 @@ import (
 	"github.com/richardchen/cc-cache/internal/notify"
 	"github.com/richardchen/cc-cache/internal/refresh"
 	"github.com/richardchen/cc-cache/internal/session"
+	"github.com/richardchen/cc-cache/internal/snapshot"
 	"github.com/richardchen/cc-cache/internal/tui"
 )
 
@@ -27,9 +28,6 @@ type Dependencies struct {
 	DiscoverHome                 func(home string, limit int) (session.DiscoveryResult, error)
 	ParseFile                    func(path string) (session.Session, error)
 	StartTUI                     func(Command) error
-	StartWatcher                 func() error
-	StartNotifier                func() error
-	NewKeepAliveRunner           func() error
 	NotifyEvent                  func(notify.Event) notify.Result
 	ResetNotificationSuppression func()
 }
@@ -108,99 +106,98 @@ func buildTUIOptions(cmd Command, deps Dependencies) (tui.Options, error) {
 	if err != nil {
 		return tui.Options{}, err
 	}
-	cfgResult, err := config.Load(home)
-	if err != nil {
-		return tui.Options{}, err
-	}
 	if cmd.Mode == ModeConfig {
-		return tui.Options{
-			Now:                now,
-			Dependencies:       tuiDependencies(cmd, deps),
-			StartMode:          tui.StartConfig,
-			ReminderThresholds: cfgResult.Config.ReminderThresholds,
-			KeepAliveConfig:    cfgResult.Config.KeepAlive,
-			Refresh:            tui.RefreshViewState{},
-			StartDisplayTicker: true,
-			Config:             cfgResult.Config,
-		}, nil
+		result, err := snapshot.ConfigOnly(snapshot.Request{Home: home, Now: now, Limit: cmd.Limit}, snapshot.Loaders{
+			LoadConfig: config.Load,
+		})
+		if err != nil {
+			return tui.Options{}, err
+		}
+		return buildTUIOptionsFromSnapshot(cmd, deps, home, result, tui.StartConfig), nil
 	}
 
-	discoveryLimit := cmd.Limit
-	if cmd.ID != "" {
-		discoveryLimit = 0
-	}
-	discovery, err := deps.DiscoverHome(home, discoveryLimit)
+	result, err := snapshot.Build(snapshot.Request{
+		Home:   home,
+		Now:    now,
+		Limit:  cmd.Limit,
+		ID:     cmd.ID,
+		Remind: cmd.Remind,
+	}, snapshot.Loaders{
+		LoadConfig:   config.Load,
+		DiscoverHome: deps.DiscoverHome,
+		ParseFile:    deps.ParseFile,
+	})
 	if err != nil {
 		return tui.Options{}, err
 	}
+	return buildTUIOptionsFromSnapshot(cmd, deps, home, result, tui.StartList), nil
+}
 
+func buildTUIOptionsFromSnapshot(cmd Command, deps Dependencies, home string, result snapshot.Result, startMode tui.StartMode) tui.Options {
 	refreshState := tui.RefreshViewState{
-		ProjectsDir: discovery.ProjectsDir,
-	}
-	switch discovery.ErrorCode {
-	case "projects_dir_missing":
-		refreshState.EmptyState = tui.EmptyProjectsDir
+		ProjectsDir: result.ProjectsDir,
 	}
 
-	var sessions []session.Session
 	var selectedID string
 	var ambiguousID string
-	if cmd.ID != "" {
-		selectedFile, err := session.ResolvePartialID(discovery.Sessions, cmd.ID)
-		if err != nil {
-			var resolveErr *session.ResolveError
-			if errors.As(err, &resolveErr) && resolveErr.Code == "ambiguous_session_id" {
-				ambiguousID = cmd.ID
-				sessions = sessionFilesToSessions(resolveErr.Candidates)
-			} else {
-				refreshState.EmptyState = tui.EmptyNoSessions
-			}
-		} else {
-			selected, err := deps.ParseFile(selectedFile.Path)
-			if err != nil {
-				return tui.Options{}, err
-			}
-			selectedID = selected.SessionID
-			sessions = []session.Session{selected}
-		}
-	} else {
-		for _, file := range discovery.Sessions {
-			parsed, err := deps.ParseFile(file.Path)
-			if err != nil {
-				return tui.Options{}, err
-			}
-			sessions = append(sessions, parsed)
-		}
-		if len(sessions) == 0 && refreshState.EmptyState == tui.EmptyNone {
+	sessions := result.Sessions
+	if result.Selected != nil {
+		sessions = []session.Session{*result.Selected}
+		selectedID = result.Selected.SessionID
+	}
+	if result.Error != nil {
+		switch result.Error.Code {
+		case "ambiguous_session_id":
+			ambiguousID = result.Error.Query
+			sessions = result.Candidates
+		case "session_not_found":
+			sessions = nil
 			refreshState.EmptyState = tui.EmptyNoSessions
 		}
 	}
-
-	reminders := map[string]bool{}
-	if cmd.Remind {
-		for _, s := range sessions {
-			reminders[s.SessionID] = true
-		}
+	if refreshState.EmptyState == tui.EmptyNone {
+		refreshState.EmptyState = tuiEmptyState(result.EmptyState)
 	}
 
-	options := tui.Options{
-		Now:                now,
-		Dependencies:       tuiDependencies(cmd, deps),
+	return tui.Options{
+		Now:                result.GeneratedAt,
+		Dependencies:       tuiDependencies(cmd, deps, home),
 		Sessions:           sessions,
 		SelectedID:         selectedID,
 		AmbiguousID:        ambiguousID,
-		ReminderEnabled:    reminders,
-		ReminderThresholds: cfgResult.Config.ReminderThresholds,
-		KeepAliveConfig:    cfgResult.Config.KeepAlive,
+		ReminderEnabled:    tuiReminderEnabled(result.Reminder),
+		ReminderThresholds: result.Config.ReminderThresholds,
+		KeepAliveConfig:    result.Config.KeepAlive,
 		Refresh:            refreshState,
+		StartMode:          startMode,
 		StartDisplayTicker: true,
-		StartRefreshTicker: true,
-		Config:             cfgResult.Config,
+		StartRefreshTicker: startMode != tui.StartConfig,
+		Config:             result.Config,
 	}
-	return options, nil
 }
 
-func tuiDependencies(cmd Command, deps Dependencies) tui.Dependencies {
+func tuiEmptyState(state snapshot.EmptyState) tui.EmptyState {
+	switch state {
+	case snapshot.EmptyProjectsDir:
+		return tui.EmptyProjectsDir
+	case snapshot.EmptyNoSessions:
+		return tui.EmptyNoSessions
+	default:
+		return tui.EmptyNone
+	}
+}
+
+func tuiReminderEnabled(states map[string]snapshot.ReminderState) map[string]bool {
+	enabled := make(map[string]bool, len(states))
+	for id, state := range states {
+		if state.Enabled {
+			enabled[id] = true
+		}
+	}
+	return enabled
+}
+
+func tuiDependencies(cmd Command, deps Dependencies, home string) tui.Dependencies {
 	notifyEvent := deps.NotifyEvent
 	resetNotificationSuppression := deps.ResetNotificationSuppression
 	if notifyEvent == nil || resetNotificationSuppression == nil {
@@ -214,27 +211,38 @@ func tuiDependencies(cmd Command, deps Dependencies) tui.Dependencies {
 	}
 	runner := keepalive.NewSubprocessRunner()
 	return tui.Dependencies{
-		RefreshSelectedSnapshot: func(_ refresh.Source, _ int, selected session.Session) tui.RefreshSnapshot {
-			parsed, err := deps.ParseFile(selected.JSONLPath)
+		RefreshSnapshot: func(_ refresh.Source, _ int, selected *session.Session) tui.RefreshSnapshot {
+			if selected != nil {
+				parsed, err := deps.ParseFile(selected.JSONLPath)
+				if err != nil {
+					return tui.RefreshSnapshot{
+						SelectedOnly: true,
+						SelectedID:   selected.SessionID,
+					}
+				}
+				return tui.RefreshSnapshot{
+					Sessions:     []session.Session{parsed},
+					Refresh:      tui.RefreshViewState{EmptyState: tui.EmptyNone},
+					HasRefresh:   true,
+					SelectedOnly: true,
+					SelectedID:   selected.SessionID,
+				}
+			}
+			result, err := snapshot.Build(snapshot.Request{
+				Home:   home,
+				Now:    deps.Now(),
+				Limit:  cmd.Limit,
+				ID:     cmd.ID,
+				Remind: cmd.Remind,
+			}, snapshot.Loaders{
+				LoadConfig:   config.Load,
+				DiscoverHome: deps.DiscoverHome,
+				ParseFile:    deps.ParseFile,
+			})
 			if err != nil {
 				return tui.RefreshSnapshot{}
 			}
-			return tui.RefreshSnapshot{
-				Sessions:   []session.Session{parsed},
-				Refresh:    tui.RefreshViewState{EmptyState: tui.EmptyNone},
-				HasRefresh: true,
-			}
-		},
-		RefreshSnapshot: func(_ refresh.Source, _ int) tui.RefreshSnapshot {
-			options, err := buildTUIOptions(Command{Mode: cmd.Mode, Limit: cmd.Limit, ID: cmd.ID, Remind: cmd.Remind}, deps)
-			if err != nil {
-				return tui.RefreshSnapshot{}
-			}
-			return tui.RefreshSnapshot{
-				Sessions:   options.Sessions,
-				Refresh:    options.Refresh,
-				HasRefresh: true,
-			}
+			return tuiRefreshSnapshotFromResult(result)
 		},
 		CheckClaudeAvailable: func() error {
 			return runner.Available()
@@ -252,6 +260,28 @@ func tuiDependencies(cmd Command, deps Dependencies) tui.Dependencies {
 	}
 }
 
+func tuiRefreshSnapshotFromResult(result snapshot.Result) tui.RefreshSnapshot {
+	sessions := result.Sessions
+	refreshState := tui.RefreshViewState{
+		ProjectsDir: result.ProjectsDir,
+		EmptyState:  tuiEmptyState(result.EmptyState),
+	}
+	if result.Error != nil {
+		switch result.Error.Code {
+		case "ambiguous_session_id":
+			sessions = result.Candidates
+		case "session_not_found":
+			sessions = nil
+			refreshState.EmptyState = tui.EmptyNoSessions
+		}
+	}
+	return tui.RefreshSnapshot{
+		Sessions:   sessions,
+		Refresh:    refreshState,
+		HasRefresh: true,
+	}
+}
+
 func runJSON(cmd Command, stdout io.Writer, _ io.Writer, deps Dependencies) int {
 	deps = fillDependencies(deps)
 	now := deps.Now()
@@ -259,60 +289,30 @@ func runJSON(cmd Command, stdout io.Writer, _ io.Writer, deps Dependencies) int 
 	if err != nil {
 		return writeJSONError(stdout, now, cmd, nil, "config_error", err.Error(), cmd.ID)
 	}
-	cfgResult, err := config.Load(home)
+	result, err := snapshot.Build(snapshot.Request{
+		Home:   home,
+		Now:    now,
+		Limit:  cmd.Limit,
+		ID:     cmd.ID,
+		Remind: cmd.Remind,
+	}, snapshot.Loaders{
+		LoadConfig:   config.Load,
+		DiscoverHome: deps.DiscoverHome,
+		ParseFile:    deps.ParseFile,
+	})
 	if err != nil {
-		return writeJSONError(stdout, now, cmd, nil, "config_error", err.Error(), cmd.ID)
-	}
-	discoveryLimit := cmd.Limit
-	if cmd.ID != "" {
-		discoveryLimit = 0
-	}
-	discovery, err := deps.DiscoverHome(home, discoveryLimit)
-	if err != nil {
+		var buildErr *snapshot.BuildError
+		if errors.As(err, &buildErr) {
+			return writeJSONError(stdout, now, cmd, nil, buildErr.Code, buildErr.Error(), cmd.ID)
+		}
 		return writeJSONError(stdout, now, cmd, nil, "parse_error", err.Error(), cmd.ID)
 	}
-	configWarnings := configWarningMessages(cfgResult.Warnings)
-
-	if cmd.ID != "" {
-		selectedFile, err := session.ResolvePartialID(discovery.Sessions, cmd.ID)
-		if err != nil {
-			var resolveErr *session.ResolveError
-			if errors.As(err, &resolveErr) {
-				return writeJSONError(stdout, now, cmd, sessionFilesToSessions(resolveErr.Candidates), resolveErr.Code, resolveErr.Error(), resolveErr.Query)
-			}
-			return writeJSONError(stdout, now, cmd, nil, "session_not_found", err.Error(), cmd.ID)
-		}
-		selected, err := deps.ParseFile(selectedFile.Path)
-		if err != nil {
-			return writeJSONError(stdout, now, cmd, nil, "parse_error", err.Error(), cmd.ID)
-		}
-		return writeJSON(stdout, jsonout.State{
-			GeneratedAt:    now,
-			Query:          jsonout.Query{ID: cmd.ID, Limit: cmd.Limit},
-			ConfigWarnings: configWarnings,
-			Sessions:       []session.Session{selected},
-			Selected:       &selected,
-			Reminder:       reminderStates([]session.Session{selected}, cmd.Remind, cfgResult.Config.ReminderThresholds),
-			KeepAlive:      keepAliveStates([]session.Session{selected}, cfgResult.Config.KeepAlive),
-		}, 0)
+	state := jsonStateFromSnapshot(result)
+	exitCode := 0
+	if result.Error != nil {
+		exitCode = 1
 	}
-
-	sessions := make([]session.Session, 0, len(discovery.Sessions))
-	for _, file := range discovery.Sessions {
-		parsed, err := deps.ParseFile(file.Path)
-		if err != nil {
-			return writeJSONError(stdout, now, cmd, nil, "parse_error", err.Error(), file.SessionID)
-		}
-		sessions = append(sessions, parsed)
-	}
-	return writeJSON(stdout, jsonout.State{
-		GeneratedAt:    now,
-		Query:          jsonout.Query{Limit: cmd.Limit},
-		ConfigWarnings: configWarnings,
-		Sessions:       sessions,
-		Reminder:       reminderStates(sessions, cmd.Remind, cfgResult.Config.ReminderThresholds),
-		KeepAlive:      keepAliveStates(sessions, cfgResult.Config.KeepAlive),
-	}, 0)
+	return writeJSON(stdout, state, exitCode)
 }
 
 func fillDependencies(deps Dependencies) Dependencies {
@@ -353,6 +353,66 @@ func configWarningMessages(warnings []config.Warning) []string {
 	return messages
 }
 
+func jsonStateFromSnapshot(result snapshot.Result) jsonout.State {
+	sessions := result.Sessions
+	if result.Error != nil {
+		sessions = result.Candidates
+	}
+	return jsonout.State{
+		GeneratedAt:    result.GeneratedAt,
+		Query:          jsonout.Query{ID: result.QueryID, Limit: result.QueryLimit},
+		ConfigWarnings: configWarningMessages(result.ConfigWarnings),
+		Sessions:       sessions,
+		Selected:       result.Selected,
+		Reminder:       jsonReminderStates(result.Reminder),
+		KeepAlive:      jsonKeepAliveStates(result.KeepAlive),
+		Error:          jsonErrorFromSnapshot(result.Error),
+	}
+}
+
+func jsonErrorFromSnapshot(err *snapshot.Error) *jsonout.Error {
+	if err == nil {
+		return nil
+	}
+	return &jsonout.Error{
+		Code:    err.Code,
+		Message: err.Message,
+		Query:   err.Query,
+	}
+}
+
+func jsonReminderStates(states map[string]snapshot.ReminderState) map[string]jsonout.ReminderState {
+	result := make(map[string]jsonout.ReminderState, len(states))
+	for id, state := range states {
+		enabled := state.Enabled
+		result[id] = jsonout.ReminderState{
+			Available:  true,
+			Enabled:    &enabled,
+			Thresholds: append([]int(nil), state.Thresholds...),
+		}
+	}
+	return result
+}
+
+func jsonKeepAliveStates(states map[string]snapshot.KeepAliveState) map[string]jsonout.KeepAliveState {
+	result := make(map[string]jsonout.KeepAliveState, len(states))
+	for id, state := range states {
+		enabled := state.Enabled
+		autoSend := state.AutoSend
+		result[id] = jsonout.KeepAliveState{
+			Available: true,
+			Enabled:   &enabled,
+			AutoSend:  &autoSend,
+			State:     state.State,
+			Scope: &jsonout.KeepAliveScope{
+				Mode:     state.Mode,
+				MaxSends: state.MaxSends,
+			},
+		}
+	}
+	return result
+}
+
 func writeJSON(stdout io.Writer, state jsonout.State, exitCode int) int {
 	data, err := jsonout.Marshal(state)
 	if err != nil {
@@ -361,50 +421,4 @@ func writeJSON(stdout io.Writer, state jsonout.State, exitCode int) int {
 	}
 	fmt.Fprintln(stdout, string(data))
 	return exitCode
-}
-
-func sessionFilesToSessions(files []session.SessionFile) []session.Session {
-	sessions := make([]session.Session, 0, len(files))
-	for _, file := range files {
-		sessions = append(sessions, session.Session{
-			SessionID:      file.SessionID,
-			ShortID:        file.ShortID,
-			Project:        file.Project,
-			JSONLPath:      file.Path,
-			FileModifiedAt: file.ModTime,
-		})
-	}
-	return sessions
-}
-
-func reminderStates(sessions []session.Session, enabled bool, thresholds []int) map[string]jsonout.ReminderState {
-	states := make(map[string]jsonout.ReminderState, len(sessions))
-	for _, s := range sessions {
-		sessionEnabled := enabled
-		states[s.SessionID] = jsonout.ReminderState{
-			Available:  true,
-			Enabled:    &sessionEnabled,
-			Thresholds: append([]int(nil), thresholds...),
-		}
-	}
-	return states
-}
-
-func keepAliveStates(sessions []session.Session, cfg config.KeepAliveConfig) map[string]jsonout.KeepAliveState {
-	states := make(map[string]jsonout.KeepAliveState, len(sessions))
-	for _, s := range sessions {
-		sessionEnabled := false
-		autoSend := cfg.AutoSend
-		states[s.SessionID] = jsonout.KeepAliveState{
-			Available: true,
-			Enabled:   &sessionEnabled,
-			AutoSend:  &autoSend,
-			State:     "off",
-			Scope: map[string]any{
-				"mode":      cfg.Scope.Mode,
-				"max_sends": cfg.Scope.MaxSends,
-			},
-		}
-	}
-	return states
 }

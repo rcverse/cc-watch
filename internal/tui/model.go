@@ -29,15 +29,6 @@ const (
 	StartConfig StartMode = "config"
 )
 
-type KeepAliveStatus string
-
-const (
-	KeepAliveInactive   KeepAliveStatus = ""
-	KeepAliveCountdown  KeepAliveStatus = "countdown"
-	KeepAliveConfirming KeepAliveStatus = "confirming"
-	KeepAliveFailure    KeepAliveStatus = "failure"
-)
-
 type EmptyState string
 
 const (
@@ -56,12 +47,7 @@ type RefreshViewState struct {
 }
 
 type Dependencies struct {
-	Discover                     func()
-	Parse                        func()
-	Refresh                      func()
-	RefreshSessions              func(source refresh.Source, generation int) []session.Session
-	RefreshSnapshot              func(source refresh.Source, generation int) RefreshSnapshot
-	RefreshSelectedSnapshot      func(source refresh.Source, generation int, selected session.Session) RefreshSnapshot
+	RefreshSnapshot              func(source refresh.Source, generation int, selected *session.Session) RefreshSnapshot
 	CheckClaudeAvailable         func() error
 	KeepAliveRunner              keepalive.ClaudeRunner
 	ConfirmKeepAlive             func(context.Context, keepalive.ConfirmationTarget) (keepalive.ConfirmationResult, error)
@@ -71,9 +57,11 @@ type Dependencies struct {
 }
 
 type RefreshSnapshot struct {
-	Sessions   []session.Session
-	Refresh    RefreshViewState
-	HasRefresh bool
+	Sessions     []session.Session
+	Refresh      RefreshViewState
+	HasRefresh   bool
+	SelectedOnly bool
+	SelectedID   string
 }
 
 type NotificationStatus struct {
@@ -105,7 +93,6 @@ type Options struct {
 	SelectedID         string
 	AmbiguousID        string
 	StartMode          StartMode
-	KeepAliveStatus    KeepAliveStatus
 	Refresh            RefreshViewState
 	StartDisplayTicker bool
 	StartRefreshTicker bool
@@ -134,14 +121,12 @@ type Model struct {
 	selectedIndex        int
 	selectedID           string
 	ambiguousID          string
-	keepAliveStatus      KeepAliveStatus
 	lastAction           string
 	notice               Notice
 	refresh              RefreshViewState
 	lastRefreshSource    refresh.Source
 	lastBypassedDebounce bool
 	directWorkspace      bool
-	evidenceOffset       int
 	detailsOffset        int
 	sessionInfoExpanded  bool
 	gapSortNewest        bool
@@ -221,7 +206,6 @@ func NewModel(options Options) Model {
 		selectedIndex:      selectedIndex,
 		selectedID:         options.SelectedID,
 		ambiguousID:        options.AmbiguousID,
-		keepAliveStatus:    options.KeepAliveStatus,
 		refresh:            defaultRefresh(options.Refresh),
 		directWorkspace:    options.SelectedID != "",
 		startDisplayTicker: options.StartDisplayTicker,

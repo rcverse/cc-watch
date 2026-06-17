@@ -1,6 +1,10 @@
 package tui
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/richardchen/cc-cache/internal/keepalive"
+)
 
 func (m Model) helpText() string {
 	var b strings.Builder
@@ -32,12 +36,12 @@ func (m Model) helpText() string {
 }
 
 func (m Model) keepAliveHelpText() string {
-	switch m.keepAliveStatus {
-	case KeepAliveCountdown:
+	switch m.activeKeepAliveState().State {
+	case keepalive.StateCountdown:
 		return "KeepAlive countdown remains visible\ns send KeepAlive now\nx cancel/dismiss current KeepAlive instance\n"
-	case KeepAliveConfirming:
+	case keepalive.StateConfirming, keepalive.StateSending:
 		return "KeepAlive confirming remains visible\nx cancel/dismiss current KeepAlive instance\n"
-	case KeepAliveFailure:
+	case keepalive.StateErrorNoClaude, keepalive.StateErrorSubprocess, keepalive.StateErrorTimeout:
 		return "KeepAlive failure remains visible\nx cancel/dismiss current KeepAlive instance\n"
 	default:
 		return ""

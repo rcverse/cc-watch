@@ -1,6 +1,6 @@
 # cc-cache v2 Phase 11.8 Architecture Refactor Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Refactor the post-11.7 codebase into a smaller, sharper architecture before Phase 12 packaging, preserving public behavior while removing historical traces, duplicated session assembly, and shallow TUI seams.
 
@@ -238,7 +238,7 @@ but the app adapter behind it branches internally on `selected != nil`.
 **Files:**
 - Create: `internal/snapshot/snapshot_test.go`
 
-- [ ] **Step 1: Write failing snapshot tests**
+- [x] **Step 1: Write failing snapshot tests**
 
 Create `internal/snapshot/snapshot_test.go` with these tests:
 
@@ -480,7 +480,7 @@ func (f *snapshotFakeLoaders) Loaders() Loaders {
 }
 ```
 
-- [ ] **Step 2: Run snapshot red test**
+- [x] **Step 2: Run snapshot red test**
 
 Run:
 
@@ -496,7 +496,7 @@ Expected: fail with `package github.com/richardchen/cc-cache/internal/snapshot i
 - Create: `internal/snapshot/snapshot.go`
 - Test: `internal/snapshot/snapshot_test.go`
 
-- [ ] **Step 1: Implement snapshot interface**
+- [x] **Step 1: Implement snapshot interface**
 
 Create `internal/snapshot/snapshot.go` with the target interface from this plan and this implementation behavior:
 
@@ -550,7 +550,7 @@ The implementation may split helper functions, but keep them private and boring:
 
 Do not import `internal/jsonout` or `internal/tui`. Snapshot owns domain state only.
 
-- [ ] **Step 2: Run snapshot tests**
+- [x] **Step 2: Run snapshot tests**
 
 Run:
 
@@ -560,7 +560,7 @@ GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod g
 
 Expected: pass.
 
-- [ ] **Step 3: Run existing data packages**
+- [x] **Step 3: Run existing data packages**
 
 Run:
 
@@ -578,7 +578,7 @@ Expected: pass.
 - Modify: `internal/jsonout/json.go`
 - Modify: `internal/jsonout/json_test.go`
 
-- [ ] **Step 1: Add app regression tests for shared snapshot behavior**
+- [x] **Step 1: Add app regression tests for shared snapshot behavior**
 
 Add tests to `internal/app/cli_test.go`:
 
@@ -638,7 +638,7 @@ func TestConfigModeDoesNotDiscoverOrParseSessionsThroughSnapshot(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Refactor `runJSON` to use `snapshot.Build`**
+- [x] **Step 2: Refactor `runJSON` to use `snapshot.Build`**
 
 In `internal/app/app.go`:
 
@@ -672,7 +672,7 @@ if errors.As(err, &buildErr) {
 - Convert `snapshot.Result` into `jsonout.State` through a private app helper named `jsonStateFromSnapshot`.
 - Preserve `writeJSONError` for hard operational errors.
 
-- [ ] **Step 3: Refactor JSON runtime-state types away from app `map[string]any` construction**
+- [x] **Step 3: Refactor JSON runtime-state types away from app `map[string]any` construction**
 
 In `internal/jsonout/json.go`, replace `KeepAliveState.Scope any` with:
 
@@ -736,7 +736,7 @@ func TestKeepAliveScopeUsesPublicSnakeCaseKeys(t *testing.T) {
 }
 ```
 
-- [ ] **Step 4: Run JSON/app focused tests**
+- [x] **Step 4: Run JSON/app focused tests**
 
 Run:
 
@@ -756,7 +756,7 @@ Expected: pass with unchanged JSON schema assertions.
 - Modify: `internal/tui/update_test.go`
 - Modify: `internal/tui/render_test.go`
 
-- [ ] **Step 1: Add TUI snapshot mapping regressions**
+- [x] **Step 1: Add TUI snapshot mapping regressions**
 
 In `internal/app/cli_test.go`, add a no-match startup regression:
 
@@ -811,7 +811,7 @@ func TestTUIAmbiguousIDMapsToAmbiguousRouteCandidates(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Add TUI selected-refresh regression test**
+- [x] **Step 2: Add TUI selected-refresh regression test**
 
 In `internal/tui/update_test.go`, add a test that proves refresh receives a snapshot and preserves selected session behavior:
 
@@ -860,7 +860,7 @@ func TestRefreshSnapshotAppliesSelectedSessionSnapshot(t *testing.T) {
 
 This test proves the TUI callback receives the selected session. The app adapter test below proves selected workspace refresh parses `selected.JSONLPath` directly.
 
-- [ ] **Step 3: Add app selected-refresh-by-path regression**
+- [x] **Step 3: Add app selected-refresh-by-path regression**
 
 In `internal/app/cli_test.go`, add:
 
@@ -908,7 +908,7 @@ func TestWorkspaceManualRefreshParsesSelectedJSONLPathOnly(t *testing.T) {
 }
 ```
 
-- [ ] **Step 4: Narrow TUI refresh dependency interface**
+- [x] **Step 4: Narrow TUI refresh dependency interface**
 
 Replace the three refresh callbacks in `internal/tui/model.go`:
 
@@ -931,7 +931,7 @@ SelectedOnly bool
 SelectedID string
 ```
 
-- [ ] **Step 5: Refactor `scheduleRefresh`**
+- [x] **Step 5: Refactor `scheduleRefresh`**
 
 `scheduleRefresh` should:
 
@@ -942,7 +942,7 @@ SelectedID string
 
 Delete the fallback branches for `RefreshSessions` and `RefreshSelectedSnapshot`.
 
-- [ ] **Step 6: Refactor `tuiDependencies` to build snapshots**
+- [x] **Step 6: Refactor `tuiDependencies` to build snapshots**
 
 In `internal/app/app.go`, make `tuiDependencies` return one `RefreshSnapshot` callback:
 
@@ -950,7 +950,7 @@ In `internal/app/app.go`, make `tuiDependencies` return one `RefreshSnapshot` ca
 - When `selected != nil`, parse only `selected.JSONLPath` by using `deps.ParseFile(selected.JSONLPath)` and return `SelectedOnly: true`, `SelectedID: selected.SessionID`.
 - Do not rediscover sessions in the selected workspace refresh path.
 
-- [ ] **Step 7: Run focused TUI/app tests**
+- [x] **Step 7: Run focused TUI/app tests**
 
 Run:
 
@@ -973,7 +973,7 @@ Expected: pass.
 - Modify: `internal/tui/help_test.go`
 - Modify: `internal/tui/update_test.go`
 
-- [ ] **Step 1: Delete app dependency anchors and unused app dependency fields**
+- [x] **Step 1: Delete app dependency anchors and unused app dependency fields**
 
 Remove:
 
@@ -987,7 +987,7 @@ from `internal/app.Dependencies`.
 
 Remove tests that only assert those unused hooks are not called. Keep tests that prove JSON mode does not start TUI or KeepAlive automation.
 
-- [ ] **Step 2: Delete unused TUI dependency hooks**
+- [x] **Step 2: Delete unused TUI dependency hooks**
 
 Remove from `internal/tui.Dependencies`:
 
@@ -999,7 +999,7 @@ Refresh  func()
 
 Update any tests that used these as counters to assert the new snapshot callback instead.
 
-- [ ] **Step 3: Remove `SafetyRefreshMsg` if tests prove it is only a test seam**
+- [x] **Step 3: Remove `SafetyRefreshMsg` if tests prove it is only a test seam**
 
 Delete:
 
@@ -1011,7 +1011,7 @@ and the `case SafetyRefreshMsg:` update branch.
 
 Replace tests that send `SafetyRefreshMsg{}` with `RefreshTickMsg{Now: now}` or direct `ManualRefreshMsg{}` depending on the behavior under test.
 
-- [ ] **Step 4: Remove legacy `KeepAliveStatus`**
+- [x] **Step 4: Remove legacy `KeepAliveStatus`**
 
 Delete `KeepAliveStatus` constants and `Options.KeepAliveStatus`.
 
@@ -1034,11 +1034,11 @@ func (m Model) keepAliveHelpText() string {
 
 Update help tests to seed `KeepAliveStates` instead of `KeepAliveStatus`.
 
-- [ ] **Step 5: Remove historical `evidenceOffset`**
+- [x] **Step 5: Remove historical `evidenceOffset`**
 
 Delete `evidenceOffset` from `Model`. No replacement field should be added.
 
-- [ ] **Step 6: Verify dead-code deletion**
+- [x] **Step 6: Verify dead-code deletion**
 
 Run:
 
@@ -1048,7 +1048,7 @@ rg -n "dependencyAnchors|StartWatcher|StartNotifier|NewKeepAliveRunner|Discover\
 
 Expected: no matches except this plan file if searching the whole repo.
 
-- [ ] **Step 7: Run focused tests**
+- [x] **Step 7: Run focused tests**
 
 Run:
 
@@ -1063,7 +1063,7 @@ Expected: pass.
 **Files:**
 - Create: `CONTEXT.md`
 
-- [ ] **Step 1: Add small domain glossary**
+- [x] **Step 1: Add small domain glossary**
 
 Create `CONTEXT.md`:
 
@@ -1097,7 +1097,7 @@ The bounded, visible, cancellable automation state for optionally sending a conf
 A TUI route's local focus, render, and action behavior. List, Workspace, Ambiguous, and Config are route modules.
 ```
 
-- [ ] **Step 2: Verify glossary is concise**
+- [x] **Step 2: Verify glossary is concise**
 
 Run:
 
@@ -1113,7 +1113,7 @@ Expected: line count under 80.
 - Modify: `docs/superpowers/plans/cc-cache-v2/PLAN.md`
 - Modify: `docs/superpowers/progress/cc-cache-v2-progress.md`
 
-- [ ] **Step 1: Add Phase 11.8 to plan index**
+- [x] **Step 1: Add Phase 11.8 to plan index**
 
 In `docs/superpowers/plans/cc-cache-v2/PLAN.md`, add Phase 11.8 between Phase 11.7 and Phase 12:
 
@@ -1121,7 +1121,7 @@ In `docs/superpowers/plans/cc-cache-v2/PLAN.md`, add Phase 11.8 between Phase 11
 - [Phase 11.8: Architecture Refactor](phase-11.8-architecture-refactor.md)
 ```
 
-- [ ] **Step 2: Update progress current state**
+- [x] **Step 2: Update progress current state**
 
 In `docs/superpowers/progress/cc-cache-v2-progress.md`, set:
 
@@ -1135,7 +1135,7 @@ In `docs/superpowers/progress/cc-cache-v2-progress.md`, set:
 
 Add Phase 11.8 to the phase checklist between 11.7 and 12.
 
-- [ ] **Step 3: Add verification ledger row before stopping**
+- [x] **Step 3: Add verification ledger row before stopping**
 
 After implementation verification succeeds, add a ledger row summarizing:
 
@@ -1151,7 +1151,7 @@ After implementation verification succeeds, add a ledger row summarizing:
 **Files:**
 - No new files.
 
-- [ ] **Step 1: Run all focused tests**
+- [x] **Step 1: Run all focused tests**
 
 Run:
 
@@ -1161,7 +1161,7 @@ GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod g
 
 Expected: pass.
 
-- [ ] **Step 2: Run full suite**
+- [x] **Step 2: Run full suite**
 
 Run:
 
@@ -1171,7 +1171,7 @@ GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod g
 
 Expected: pass.
 
-- [ ] **Step 3: Run whitespace check**
+- [x] **Step 3: Run whitespace check**
 
 Run:
 
@@ -1181,7 +1181,7 @@ git diff --check
 
 Expected: no output.
 
-- [ ] **Step 4: Build throwaway binary**
+- [x] **Step 4: Build throwaway binary**
 
 Run:
 
@@ -1191,7 +1191,7 @@ GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod g
 
 Expected: command exits 0 and writes `/private/tmp/cc-cache-phase118/cc-cache`.
 
-- [ ] **Step 5: JSON smoke**
+- [x] **Step 5: JSON smoke**
 
 Run:
 
@@ -1201,7 +1201,7 @@ HOME="$PWD/internal/session/testdata/smoke-home" /private/tmp/cc-cache-phase118/
 
 Expected: exits 0, emits `schema_version: 1`, and includes `sessions` plus `error: null`.
 
-- [ ] **Step 6: Confirm no forbidden actions occurred**
+- [x] **Step 6: Confirm no forbidden actions occurred**
 
 Run:
 

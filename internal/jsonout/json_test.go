@@ -115,7 +115,7 @@ func TestSessionObjectShapeIncludesParserReminderAndKeepAliveState(t *testing.T)
 				Enabled:   boolPtr(false),
 				AutoSend:  boolPtr(true),
 				State:     "off",
-				Scope:     map[string]any{"mode": "max_sends", "max_sends": 1},
+				Scope:     &KeepAliveScope{Mode: "max_sends", MaxSends: 1},
 			},
 		},
 	})
@@ -283,6 +283,48 @@ func TestAllowedErrorShapesForNoMatchAndAmbiguousID(t *testing.T) {
 	}
 	if ambiguousDoc["error"].(map[string]any)["code"] != "ambiguous_session_id" {
 		t.Fatalf("ambiguous error = %#v", ambiguousDoc["error"])
+	}
+}
+
+func TestKeepAliveScopeUsesPublicSnakeCaseKeys(t *testing.T) {
+	enabled := false
+	autoSend := true
+	data, err := Marshal(State{
+		GeneratedAt: time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC),
+		Sessions: []session.Session{{
+			SessionID: "scope-id",
+			ShortID:   "scope-id",
+			CacheWindow: session.CacheWindow{
+				Known:      true,
+				Label:      "1h",
+				TTLSeconds: 3600,
+			},
+		}},
+		KeepAlive: map[string]KeepAliveState{
+			"scope-id": {
+				Available: true,
+				Enabled:   &enabled,
+				AutoSend:  &autoSend,
+				State:     "off",
+				Scope:     &KeepAliveScope{Mode: "per_session", MaxSends: 1},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	sessionDoc := doc["sessions"].([]any)[0].(map[string]any)
+	keepAlive := sessionDoc["keep_alive"].(map[string]any)
+	scope := keepAlive["scope"].(map[string]any)
+	if _, ok := scope["MaxSends"]; ok {
+		t.Fatalf("scope contains Go field name MaxSends: %#v", scope)
+	}
+	if scope["mode"] != "per_session" || scope["max_sends"].(float64) != 1 {
+		t.Fatalf("scope = %#v, want snake-case mode/max_sends", scope)
 	}
 }
 

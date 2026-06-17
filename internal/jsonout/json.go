@@ -44,8 +44,13 @@ type KeepAliveState struct {
 	Enabled    *bool
 	AutoSend   *bool
 	State      string
-	Scope      any
+	Scope      *KeepAliveScope
 	LastResult any
+}
+
+type KeepAliveScope struct {
+	Mode     string `json:"mode"`
+	MaxSends int    `json:"max_sends"`
 }
 
 type Error struct {
@@ -224,12 +229,12 @@ type reminderEventDocument struct {
 }
 
 type keepAliveDocument struct {
-	Available  bool   `json:"available"`
-	Enabled    *bool  `json:"enabled"`
-	AutoSend   *bool  `json:"auto_send"`
-	State      string `json:"state"`
-	Scope      any    `json:"scope"`
-	LastResult any    `json:"last_result"`
+	Available  bool            `json:"available"`
+	Enabled    *bool           `json:"enabled"`
+	AutoSend   *bool           `json:"auto_send"`
+	State      string          `json:"state"`
+	Scope      *KeepAliveScope `json:"scope"`
+	LastResult any             `json:"last_result"`
 }
 
 type errorDocument struct {
