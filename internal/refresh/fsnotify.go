@@ -20,8 +20,8 @@ func NewFSNotifyFS() (*FSNotifyFS, error) {
 	}
 	fs := &FSNotifyFS{
 		watcher: watcher,
-		events:  make(chan RawEvent),
-		errs:    make(chan error),
+		events:  make(chan RawEvent, 64),
+		errs:    make(chan error, 16),
 	}
 	go fs.forward()
 	return fs, nil
@@ -67,20 +67,65 @@ func (fs *FSNotifyFS) Close() error {
 }
 
 func (fs *FSNotifyFS) forward() {
-	for {
+	rawEvents := make(chan RawEvent)
+	rawErrs := make(chan error)
+	done := make(chan struct{})
+	go func() {
+		forwardWatchStreams(rawEvents, rawErrs, fs.events, fs.errs)
+		close(done)
+	}()
+	watcherEvents := fs.watcher.Events
+	watcherErrs := fs.watcher.Errors
+	for watcherEvents != nil || watcherErrs != nil {
 		select {
-		case event, ok := <-fs.watcher.Events:
+		case event, ok := <-watcherEvents:
 			if !ok {
-				close(fs.events)
-				return
+				close(rawEvents)
+				watcherEvents = nil
+				continue
 			}
-			fs.events <- RawEvent{Path: event.Name, Op: fsnotifyOp(event.Op)}
-		case err, ok := <-fs.watcher.Errors:
+			select {
+			case rawEvents <- RawEvent{Path: event.Name, Op: fsnotifyOp(event.Op)}:
+			default:
+			}
+		case err, ok := <-watcherErrs:
 			if !ok {
-				close(fs.errs)
-				return
+				close(rawErrs)
+				watcherErrs = nil
+				continue
 			}
-			fs.errs <- err
+			select {
+			case rawErrs <- err:
+			default:
+			}
+		}
+	}
+	<-done
+}
+
+func forwardWatchStreams(rawEvents <-chan RawEvent, rawErrs <-chan error, events chan<- RawEvent, errs chan<- error) {
+	defer close(events)
+	defer close(errs)
+	for rawEvents != nil || rawErrs != nil {
+		select {
+		case event, ok := <-rawEvents:
+			if !ok {
+				rawEvents = nil
+				continue
+			}
+			select {
+			case events <- event:
+			default:
+			}
+		case err, ok := <-rawErrs:
+			if !ok {
+				rawErrs = nil
+				continue
+			}
+			select {
+			case errs <- err:
+			default:
+			}
 		}
 	}
 }

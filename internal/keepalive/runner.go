@@ -34,6 +34,11 @@ type ClaudeRunner interface {
 	Send(context.Context, RunRequest) RunResult
 }
 
+type RunnerExecution struct {
+	Result            RunResult
+	ClaudeUnavailable bool
+}
+
 type SubprocessRunner struct {
 	LookPath func(string) (string, error)
 	Command  func(context.Context, string, ...string) (string, string, int, error)
@@ -107,14 +112,24 @@ func (m *Manager) Run(ctx context.Context, action Action, runner ClaudeRunner, n
 	if action.Kind != ActionStartRunner || state.State != StateSending || state.InstanceToken != action.InstanceToken {
 		return RunResult{StartedAt: now}
 	}
+	execution := ExecuteRunner(ctx, action, runner, now)
+	m.ApplyRunnerExecution(action, execution)
+	return execution.Result
+}
+
+func ExecuteRunner(ctx context.Context, action Action, runner ClaudeRunner, now time.Time) RunnerExecution {
 	if runner == nil {
 		err := ErrClaudeUnavailable
-		m.MarkNoClaude(action.SessionID, action.InstanceToken, err.Error())
-		return RunResult{StartedAt: now, Err: err}
+		return RunnerExecution{
+			Result:            RunResult{StartedAt: now, Err: err},
+			ClaudeUnavailable: true,
+		}
 	}
 	if err := runner.Available(); err != nil {
-		m.MarkNoClaude(action.SessionID, action.InstanceToken, err.Error())
-		return RunResult{StartedAt: now, Err: err}
+		return RunnerExecution{
+			Result:            RunResult{StartedAt: now, Err: err},
+			ClaudeUnavailable: true,
+		}
 	}
 	result := runner.Send(ctx, RunRequest{SessionID: action.SessionID, Message: action.Message})
 	if result.StartedAt.IsZero() {
@@ -123,12 +138,29 @@ func (m *Manager) Run(ctx context.Context, action Action, runner ClaudeRunner, n
 	if result.Limit && result.Err == nil {
 		result.Err = ErrClaudeLimit
 	}
+	return RunnerExecution{Result: result}
+}
+
+func (m *Manager) ApplyRunnerExecution(action Action, execution RunnerExecution) SessionState {
+	state := m.State(action.SessionID)
+	if action.Kind != ActionStartRunner || state.State != StateSending || state.InstanceToken != action.InstanceToken {
+		return state
+	}
+	if execution.ClaudeUnavailable {
+		reason := ErrClaudeUnavailable.Error()
+		if execution.Result.Err != nil {
+			reason = execution.Result.Err.Error()
+		}
+		m.MarkNoClaude(action.SessionID, action.InstanceToken, reason)
+		return m.State(action.SessionID)
+	}
+	result := execution.Result
 	if result.Err != nil || result.ExitCode != 0 || result.Limit {
 		m.MarkSubprocessFailure(action.SessionID, action.InstanceToken, failureMessage(result))
-		return result
+		return m.State(action.SessionID)
 	}
 	m.MarkSendStarted(action.SessionID, action.InstanceToken, result.StartedAt)
-	return result
+	return m.State(action.SessionID)
 }
 
 func runCommand(ctx context.Context, name string, args ...string) (string, string, int, error) {

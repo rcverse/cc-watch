@@ -17,12 +17,13 @@ const (
 type Parser func(source string) []session.Session
 
 type Options struct {
-	Debounce        time.Duration
-	SafetyInterval  time.Duration
-	Parser          Parser
-	ProjectsDir     string
-	InitialNow      time.Time
-	InitialSessions []session.Session
+	Debounce          time.Duration
+	SafetyInterval    time.Duration
+	Parser            Parser
+	ProjectsDir       string
+	InitialNow        time.Time
+	InitialSessions   []session.Session
+	InitialGeneration int
 }
 
 type Decision struct {
@@ -30,6 +31,7 @@ type Decision struct {
 	Source           Source
 	Generation       int
 	BypassedDebounce bool
+	DebounceToken    int
 }
 
 type Result struct {
@@ -45,18 +47,21 @@ type Coordinator struct {
 	now               time.Time
 	sessions          []session.Session
 	pendingDebounce   bool
+	debounceToken     int
 	currentGeneration int
 	appliedGeneration int
 }
 
 func NewCoordinator(options Options) *Coordinator {
 	return &Coordinator{
-		debounce:       options.Debounce,
-		safetyInterval: options.SafetyInterval,
-		parser:         options.Parser,
-		projectsDir:    options.ProjectsDir,
-		now:            options.InitialNow,
-		sessions:       cloneSessions(options.InitialSessions),
+		debounce:          options.Debounce,
+		safetyInterval:    options.SafetyInterval,
+		parser:            options.Parser,
+		projectsDir:       options.ProjectsDir,
+		now:               options.InitialNow,
+		sessions:          cloneSessions(options.InitialSessions),
+		currentGeneration: options.InitialGeneration,
+		appliedGeneration: options.InitialGeneration,
 	}
 }
 
@@ -65,12 +70,13 @@ func (c *Coordinator) OnWatcherEvents(events []NormalizedEvent) Decision {
 		return Decision{}
 	}
 	c.pendingDebounce = true
-	return Decision{Source: SourceFsnotify}
+	c.debounceToken++
+	return Decision{Source: SourceFsnotify, DebounceToken: c.debounceToken}
 }
 
-func (c *Coordinator) OnDebounceElapsed(now time.Time) Decision {
+func (c *Coordinator) OnDebounceElapsed(now time.Time, token int) Decision {
 	c.now = now
-	if !c.pendingDebounce {
+	if !c.pendingDebounce || token != c.debounceToken {
 		return Decision{}
 	}
 	c.pendingDebounce = false

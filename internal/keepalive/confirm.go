@@ -12,6 +12,8 @@ import (
 
 var ErrConfirmationTimeout = errors.New("keepalive confirmation timed out")
 
+const ConfirmationTimeout = 20 * time.Second
+
 type ConfirmationResult struct {
 	Confirmed   bool
 	ConfirmedAt time.Time

@@ -8,7 +8,7 @@
 
 **Architecture:** Keep parsing, config, refresh, notification, KeepAlive automation, JSON output, and TUI rendering in separate Go packages under `internal/`, with `cmd/cc-cache` limited to CLI bootstrap. Parser parity is completed and verified before TUI build-out. Existing Python v1 remains callable until the Go binary is built, verified, and explicitly installed.
 
-**Tech Stack:** Go 1.23+, Bubbletea, bubbles, lipgloss, fsnotify, Go standard-library JSONL/config/subprocess handling, `osascript` on macOS, `notify-send` on Linux, local binary install first, optional goreleaser/GitHub Release later.
+**Tech Stack:** Go 1.23+, Bubbletea, bubbles, lipgloss, fsnotify, Go standard-library JSONL/config/subprocess handling, `osascript` on macOS, local binary install first. Linux, Homebrew, goreleaser, and GitHub Release publishing are out of scope unless separately approved.
 
 ---
 
@@ -37,14 +37,15 @@
 ## Source Of Truth
 
 - **Product source of truth:** `PRD.md`.
+- **Current product boundary:** `docs/superpowers/specs/2026-06-18-cc-cache-v2-product-reality.md`.
 - **Design source of truth:** `docs/superpowers/specs/2026-06-02-cc-cache-v2-design.md`.
 - **Meta plan source of truth:** this file, `docs/superpowers/plans/cc-cache-v2/PLAN.md`.
 - **Phase checklist source of truth:** `docs/superpowers/plans/cc-cache-v2/phase-XX-*.md`.
 - **Progress source of truth:** `docs/superpowers/progress/cc-cache-v2-progress.md`.
 - **Execution protocol source of truth:** `docs/superpowers/runbooks/2026-06-03-cc-cache-v2-implementation-runbook.md`.
 - **ADR source of truth:** date-prefixed decision files under `docs/adr/`, created only for decisions named in this plan or newly discovered ambiguity that affects migration safety, architecture, user data, subprocess automation, packaging, or public CLI behavior.
-- **Code/test source of truth once implemented:** Go source and tests under `cmd/`, `internal/`, `testdata/`, local binary install behavior in `install.sh`, optional release config in `.goreleaser.yaml` if public release work is later enabled, and user docs in `README.md` / `BOOTSTRAP.md`.
-- **Explicitly excluded as source of truth:** retired implementation plans, including existing files under `docs/superpowers/plans/` from 2026-06-02, and historical v1 planning text in `BOOTSTRAP.md`.
+- **Code/test source of truth once implemented:** Go source and tests under `cmd/`, `internal/`, `testdata/`, local binary install behavior in `install.sh`, and user docs in `README.md`.
+- **Explicitly excluded as source of truth:** retired implementation plans and historical v1 planning text.
 
 ## Current Repo Observations
 
@@ -53,7 +54,7 @@
 - The live command path currently resolves to `/Users/richardchen/.local/bin/cc-cache`, and that path is a symlink to `/Users/richardchen/Dev/cc-cache/cc_cache.py`.
 - No symlinks exist inside the repository.
 - There is no Git remote configured, so public release metadata cannot be inferred from `git remote`.
-- Current tracked files are `.gitignore`, `BOOTSTRAP.md`, `PRD.md`, `README.md`, `cc_cache.py`, `docs/superpowers/specs/2026-06-02-cc-cache-v2-design.md`, and `install.sh`.
+- Current legacy files include `cc_cache.py` and `install.sh`; current v2 source lives under `cmd/`, `internal/`, and `docs/`.
 - Current working tree before this plan had unrelated changes: modified `PRD.md`, modified `docs/superpowers/specs/2026-06-02-cc-cache-v2-design.md`, untracked `docs/cc_cache_v2_audit.md`, untracked `docs/superpowers/plans/`, and untracked `docs/superpowers/specs/archive/`.
 
 ## Planning Assumptions And Uncertainties
@@ -64,7 +65,7 @@
 - Parser parity means v2 Go parsing behavior matches the documented v1-compatible rules, not every ANSI rendering detail of `cc_cache.py`.
 - Use one repository for governance: v2 Go code, v1 archive, docs, installer, tests, and release metadata all live in `/Users/richardchen/Dev/cc-cache`.
 - Use Go module path `github.com/richardchen/cc-cache` unless the user explicitly changes it before Phase 1.
-- Defer Homebrew tap work until local binary install is verified and the user explicitly asks for public release distribution.
+- Defer Homebrew, goreleaser, GitHub Release, Linux, and Windows work until the user explicitly re-approves that scope.
 - The exact safety refresh interval is intentionally not a public CLI option. The implementation must choose an internal value by ADR because stale refresh behavior affects user trust and watcher load.
 - The user's environment may not have Go installed. Implementation must verify or install Go tooling before `go mod init`; do not assume a working Go toolchain.
 - No real Claude KeepAlive send is part of implementation verification. This is a test-driven safety decision: subprocess behavior is tested through fakes and deterministic fixture session files.
@@ -110,10 +111,7 @@
 - `internal/config/config_test.go` - defaults, validation, save/cancel/reset tests.
 - `internal/jsonout/json.go` - stable JSON output structs and encoding.
 - `internal/jsonout/json_test.go` - schema and degraded-state output tests.
-- `internal/notify/notifier.go` - notifier interface and platform selection.
-- `internal/notify/macos.go` - `osascript` notification implementation.
-- `internal/notify/linux.go` - `notify-send` notification implementation.
-- `internal/notify/noop.go` - unsupported-platform degraded notifier.
+- `internal/notify/notifier.go` - notifier interface, macOS `osascript` command construction, delivery, and failure suppression.
 - `internal/notify/notifier_test.go` - escaping, failure suppression, and event wording tests.
 - `internal/refresh/watcher.go` - fsnotify watcher setup and event normalization.
 - `internal/refresh/refresh.go` - debounced data refresh and safety refresh coordination.
@@ -124,11 +122,14 @@
 - `internal/keepalive/runner.go` - Claude CLI runner interface and real subprocess runner.
 - `internal/keepalive/confirm.go` - session-specific JSONL confirmation watcher.
 - `internal/keepalive/keepalive_test.go` - state, timing, scope, cancellation, and failure tests.
-- `internal/reminder/reminder.go` - runtime reminder state and threshold crossing behavior.
-- `internal/reminder/reminder_test.go` - one-shot threshold and `--remind` behavior tests.
 - `internal/tui/model.go` - Bubbletea root model, shared state, and routing.
 - `internal/tui/messages.go` - explicit Bubbletea messages for ticks, watcher events, refresh results, notifications, and KeepAlive events.
 - `internal/tui/update.go` - root update loop and command production.
+- `internal/tui/live_refresh.go` - Bubble Tea adapter for refresh watcher results.
+- `internal/tui/reminder_runtime.go` - TUI-local reminder threshold runtime.
+- `internal/tui/route_actions.go` - route-local focused action dispatch.
+- `internal/tui/snapshot_options.go` - snapshot-to-TUI option projection.
+- `internal/tui/workspace_keepalive.go` - Workspace KeepAlive view-state helpers.
 - `internal/tui/view.go` - root view composition.
 - `internal/tui/styles.go` - lipgloss semantic color/style roles.
 - `internal/tui/list.go` - List View model/render/update.
@@ -136,14 +137,14 @@
 - `internal/tui/config_editor.go` - Config Editor model/render/update.
 - `internal/tui/help.go` - help overlay rendering and shortcut copy.
 - `internal/tui/render_test.go` - render assertions for required wording and degraded states.
-- `internal/tui/update_test.go` - focus, shortcut, and state transition tests.
+- `internal/tui/update_test.go` - shared update, focus, shortcut, and state transition tests.
+- `internal/tui/update_config_test.go`, `internal/tui/update_keepalive_test.go`, `internal/tui/update_refresh_test.go` - focused Config, KeepAlive, and Refresh update tests.
 - `.goreleaser.yaml` - optional release build configuration after local binary install is verified.
 
 ### Modify
 
 - `install.sh` - after v2 binary verification, install the compiled Go binary to `$HOME/.local/bin/cc-cache` without breaking the existing v1 symlink before switchover.
 - `README.md` - replace stale v1/v2 usage with actual v2 CLI, install, JSON, config, KeepAlive safety, and rollback notes.
-- `BOOTSTRAP.md` - replace stale Python/Rich v2 notes with the Go/Bubbletea source-of-truth handoff.
 - `.gitignore` - add Go build, coverage, and local release artifacts without hiding source fixtures.
 - `PRD.md` and `docs/superpowers/specs/2026-06-02-cc-cache-v2-design.md` - do not modify unless implementation reveals a product/design conflict that requires user-approved source-of-truth change.
 - `cc_cache.py` - leave in place during v2 implementation. Remove or replace only after ADR approval and verified command-path switchover; the default plan is to keep it as a legacy v1 entry point through the first v2 release.

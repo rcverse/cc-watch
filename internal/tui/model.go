@@ -64,6 +64,11 @@ type RefreshSnapshot struct {
 	SelectedID   string
 }
 
+type RefreshTiming struct {
+	Debounce       time.Duration
+	SafetyInterval time.Duration
+}
+
 type NotificationStatus struct {
 	Event        notify.Event
 	Notification notify.Notification
@@ -90,12 +95,15 @@ type Options struct {
 	KeepAliveManager   *keepalive.Manager
 	KeepAliveStates    map[string]keepalive.SessionState
 	RefreshGeneration  int
+	RefreshTiming      RefreshTiming
 	SelectedID         string
 	AmbiguousID        string
 	StartMode          StartMode
 	Refresh            RefreshViewState
 	StartDisplayTicker bool
 	StartRefreshTicker bool
+	LiveRefresh        tea.Cmd
+	CloseLiveRefresh   func() error
 	Config             config.Config
 }
 
@@ -114,6 +122,10 @@ type Model struct {
 	keepAliveConfig      config.KeepAliveConfig
 	keepAliveManager     *keepalive.Manager
 	refreshGeneration    int
+	refreshCoordinator   *refresh.Coordinator
+	refreshTiming        RefreshTiming
+	refreshDebounceToken int
+	liveRefresh          tea.Cmd
 	watcherEvents        []WatcherEventMsg
 	notificationStatuses []NotificationStatus
 	helpOpen             bool
@@ -188,6 +200,20 @@ func NewModel(options Options) Model {
 			keepAliveManager.Enable(s, now)
 		}
 	}
+	refreshTiming := options.RefreshTiming
+	if refreshTiming.Debounce <= 0 {
+		refreshTiming.Debounce = 300 * time.Millisecond
+	}
+	if refreshTiming.SafetyInterval <= 0 {
+		refreshTiming.SafetyInterval = 30 * time.Second
+	}
+	refreshCoordinator := refresh.NewCoordinator(refresh.Options{
+		Debounce:          refreshTiming.Debounce,
+		SafetyInterval:    refreshTiming.SafetyInterval,
+		InitialNow:        now,
+		InitialSessions:   sessions,
+		InitialGeneration: options.RefreshGeneration,
+	})
 	model := Model{
 		width:              width,
 		height:             height,
@@ -203,6 +229,9 @@ func NewModel(options Options) Model {
 		keepAliveConfig:    keepAliveConfig,
 		keepAliveManager:   keepAliveManager,
 		refreshGeneration:  options.RefreshGeneration,
+		refreshCoordinator: refreshCoordinator,
+		refreshTiming:      refreshTiming,
+		liveRefresh:        options.LiveRefresh,
 		selectedIndex:      selectedIndex,
 		selectedID:         options.SelectedID,
 		ambiguousID:        options.AmbiguousID,
@@ -224,7 +253,10 @@ func (m Model) Init() tea.Cmd {
 		commands = append(commands, displayTickCommand())
 	}
 	if m.startRefreshTicker {
-		commands = append(commands, refreshTickCommand())
+		commands = append(commands, refreshTickCommand(m.refreshTiming.SafetyInterval))
+	}
+	if m.liveRefresh != nil {
+		commands = append(commands, m.liveRefresh)
 	}
 	return tea.Batch(commands...)
 }
@@ -279,6 +311,10 @@ func (m Model) LastRefreshSource() refresh.Source {
 
 func (m Model) LastRefreshBypassedDebounce() bool {
 	return m.lastBypassedDebounce
+}
+
+func (m Model) RefreshDebounceToken() int {
+	return m.refreshDebounceToken
 }
 
 func (m Model) SelectedSessionID() string {

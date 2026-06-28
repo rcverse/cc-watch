@@ -1,9 +1,9 @@
 # cc-cache v2 — Design Specification
 
-**Status:** Design draft; implementation planning is blocked until this spec is approved.
+**Status:** Historical design detail; current scope is constrained by `2026-06-18-cc-cache-v2-product-reality.md`.
 **Date:** 2026-06-02
 **Stack:** Go 1.23+ + Bubbletea + lipgloss + fsnotify
-**Distribution target:** GitHub Releases + Homebrew tap via goreleaser
+**Distribution target:** simple local macOS install
 
 ---
 
@@ -42,10 +42,10 @@ This design spec is the source of truth for v2 implementation details.
 | Styling | lipgloss | Terminal layout and state styling without a custom renderer |
 | Components | bubbles | Inputs, lists, spinners where useful |
 | JSONL parsing | Go standard library | Avoid unnecessary dependencies |
-| File events | fsnotify | Event acceleration for macOS/Linux filesystems |
-| Notifications | `osascript` on macOS, `notify-send` on Linux | Native enough for v2; macOS is the priority |
+| File events | fsnotify | Event acceleration for macOS session files |
+| Notifications | `osascript` on macOS | Native notification path for the supported product target |
 | Keep-alive execution | Claude CLI subprocess | Runs only under bounded user-configured scope |
-| Packaging | goreleaser + Homebrew tap | Standard Go CLI distribution path |
+| Packaging | local macOS binary install | First supported distribution path |
 
 Go remains the right fit for the v2 TUI. A future native macOS app should be treated as a separate Swift client that consumes cc-cache data, not as a reason to move the TUI core out of Go.
 
@@ -757,7 +757,7 @@ At narrow widths, density wins over completeness. The list must keep the action-
 
 ```text
 + cc-cache ----------------------------- 5 sessions 14:32:18 +
-| Watcher ok  Notify degraded: notify-send failed             |
+| Watcher ok  Notify degraded: osascript failed               |
 +-------------------------------------------------------------+
 | > d4b247b7 workspace-api  1h active   05m44s  KA 24s 0/1   |
 |   TTL 90%  hit 82%  last: "write the implementation..."    |
@@ -1235,8 +1235,7 @@ Requirements:
 - If notification execution fails, show a visible degraded state in the TUI.
 - Record recent notification attempts/results in an in-memory status area so users can distinguish "event did not happen" from "notification could not be delivered".
 - Suppress repeated failure notifications/status churn for the same command failure until the next distinct event or manual refresh.
-- On Linux, `notify-send` may not work in tmux/headless desktop contexts. This is a known degraded state, not guaranteed behavior.
-- macOS is the priority platform.
+- macOS is the supported product platform. Linux notification behavior is out of scope unless re-approved.
 
 Notification wording must preserve Reminder vs KeepAlive separation:
 
@@ -1311,16 +1310,14 @@ This is the extension point for scripts and a future native macOS app. The nativ
 
 ## 14. Packaging
 
-v2 targets:
+v2 currently targets:
 
 - macOS arm64;
-- macOS amd64;
-- Linux amd64;
-- Linux arm64.
+- macOS amd64.
 
 Go minimum is 1.23+ unless dependencies are deliberately pinned to support an older Go version.
 
-Homebrew distribution must include an actual tap/formula publishing path. A placeholder formula is not enough for implementation readiness.
+Simple local install is the first supported distribution path. Homebrew, goreleaser, GitHub Release publishing, and Linux packages are out of scope unless re-approved.
 
 ---
 
@@ -1335,4 +1332,4 @@ Implementation planning may begin only after this design resolves:
 - keybinding conflicts;
 - notification degraded states;
 - Go version/dependency floor;
-- packaging contract.
+- local install contract.

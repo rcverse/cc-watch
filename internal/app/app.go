@@ -28,6 +28,8 @@ type Dependencies struct {
 	DiscoverHome                 func(home string, limit int) (session.DiscoveryResult, error)
 	ParseFile                    func(path string) (session.Session, error)
 	StartTUI                     func(Command) error
+	NewLiveWatcher               func(projectsDir string) (tui.Watcher, func() error, error)
+	RunTUIProgram                func(tui.Options) error
 	NotifyEvent                  func(notify.Event) notify.Result
 	ResetNotificationSuppression func()
 }
@@ -95,12 +97,19 @@ func runTUI(cmd Command, deps Dependencies) error {
 	if err != nil {
 		return err
 	}
+	if options.CloseLiveRefresh != nil {
+		defer func() { _ = options.CloseLiveRefresh() }()
+	}
+	if deps.RunTUIProgram != nil {
+		return deps.RunTUIProgram(options)
+	}
 	model := tui.NewModel(options)
 	_, err = tea.NewProgram(model).Run()
 	return err
 }
 
 func buildTUIOptions(cmd Command, deps Dependencies) (tui.Options, error) {
+	deps = fillDependencies(deps)
 	now := deps.Now()
 	home, err := deps.HomeDir()
 	if err != nil {
@@ -134,67 +143,38 @@ func buildTUIOptions(cmd Command, deps Dependencies) (tui.Options, error) {
 }
 
 func buildTUIOptionsFromSnapshot(cmd Command, deps Dependencies, home string, result snapshot.Result, startMode tui.StartMode) tui.Options {
-	refreshState := tui.RefreshViewState{
-		ProjectsDir: result.ProjectsDir,
-	}
-
-	var selectedID string
-	var ambiguousID string
-	sessions := result.Sessions
-	if result.Selected != nil {
-		sessions = []session.Session{*result.Selected}
-		selectedID = result.Selected.SessionID
-	}
-	if result.Error != nil {
-		switch result.Error.Code {
-		case "ambiguous_session_id":
-			ambiguousID = result.Error.Query
-			sessions = result.Candidates
-		case "session_not_found":
-			sessions = nil
-			refreshState.EmptyState = tui.EmptyNoSessions
+	options := tui.OptionsFromSnapshot(tui.SnapshotOptionsInput{
+		Result:       result,
+		Dependencies: tuiDependencies(cmd, deps, home),
+		StartMode:    startMode,
+	})
+	if startMode != tui.StartConfig && result.ProjectsDir != "" {
+		watcher, closer, err := deps.NewLiveWatcher(result.ProjectsDir)
+		if err != nil {
+			options.Refresh.Watcher = refresh.State{
+				Status:              refresh.StatusDegraded,
+				Messages:            []string{err.Error()},
+				SafetyRefreshActive: true,
+			}
+		} else {
+			options.LiveRefresh = tui.LiveRefreshCommand(watcher)
+			options.CloseLiveRefresh = closer
 		}
 	}
-	if refreshState.EmptyState == tui.EmptyNone {
-		refreshState.EmptyState = tuiEmptyState(result.EmptyState)
-	}
-
-	return tui.Options{
-		Now:                result.GeneratedAt,
-		Dependencies:       tuiDependencies(cmd, deps, home),
-		Sessions:           sessions,
-		SelectedID:         selectedID,
-		AmbiguousID:        ambiguousID,
-		ReminderEnabled:    tuiReminderEnabled(result.Reminder),
-		ReminderThresholds: result.Config.ReminderThresholds,
-		KeepAliveConfig:    result.Config.KeepAlive,
-		Refresh:            refreshState,
-		StartMode:          startMode,
-		StartDisplayTicker: true,
-		StartRefreshTicker: startMode != tui.StartConfig,
-		Config:             result.Config,
-	}
+	return options
 }
 
-func tuiEmptyState(state snapshot.EmptyState) tui.EmptyState {
-	switch state {
-	case snapshot.EmptyProjectsDir:
-		return tui.EmptyProjectsDir
-	case snapshot.EmptyNoSessions:
-		return tui.EmptyNoSessions
-	default:
-		return tui.EmptyNone
+func defaultLiveWatcher(projectsDir string) (tui.Watcher, func() error, error) {
+	fs, err := refresh.NewFSNotifyFS()
+	if err != nil {
+		return nil, nil, err
 	}
-}
-
-func tuiReminderEnabled(states map[string]snapshot.ReminderState) map[string]bool {
-	enabled := make(map[string]bool, len(states))
-	for id, state := range states {
-		if state.Enabled {
-			enabled[id] = true
-		}
+	watcher, err := refresh.NewWatcher(projectsDir, fs)
+	if err != nil {
+		_ = fs.Close()
+		return nil, nil, err
 	}
-	return enabled
+	return watcher, fs.Close, nil
 }
 
 func tuiDependencies(cmd Command, deps Dependencies, home string) tui.Dependencies {
@@ -242,7 +222,7 @@ func tuiDependencies(cmd Command, deps Dependencies, home string) tui.Dependenci
 			if err != nil {
 				return tui.RefreshSnapshot{}
 			}
-			return tuiRefreshSnapshotFromResult(result)
+			return tui.RefreshSnapshotFromSnapshotResult(result)
 		},
 		CheckClaudeAvailable: func() error {
 			return runner.Available()
@@ -257,28 +237,6 @@ func tuiDependencies(cmd Command, deps Dependencies, home string) tui.Dependenci
 		},
 		NotifyEvent:                  notifyEvent,
 		ResetNotificationSuppression: resetNotificationSuppression,
-	}
-}
-
-func tuiRefreshSnapshotFromResult(result snapshot.Result) tui.RefreshSnapshot {
-	sessions := result.Sessions
-	refreshState := tui.RefreshViewState{
-		ProjectsDir: result.ProjectsDir,
-		EmptyState:  tuiEmptyState(result.EmptyState),
-	}
-	if result.Error != nil {
-		switch result.Error.Code {
-		case "ambiguous_session_id":
-			sessions = result.Candidates
-		case "session_not_found":
-			sessions = nil
-			refreshState.EmptyState = tui.EmptyNoSessions
-		}
-	}
-	return tui.RefreshSnapshot{
-		Sessions:   sessions,
-		Refresh:    refreshState,
-		HasRefresh: true,
 	}
 }
 
@@ -328,6 +286,9 @@ func fillDependencies(deps Dependencies) Dependencies {
 	}
 	if deps.ParseFile == nil {
 		deps.ParseFile = defaults.ParseFile
+	}
+	if deps.NewLiveWatcher == nil {
+		deps.NewLiveWatcher = defaultLiveWatcher
 	}
 	return deps
 }

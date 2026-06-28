@@ -470,13 +470,13 @@ func TestListViewRequiredStates(t *testing.T) {
 				Width: 120,
 				Refresh: RefreshViewState{
 					Watcher:                  refresh.State{Status: refresh.StatusPartial, Messages: []string{"permission denied"}, SafetyRefreshActive: true},
-					NotificationDegraded:     "notify-send failed",
+					NotificationDegraded:     "osascript failed",
 					ClaudeUnavailableMessage: "claude not found",
 				},
 				Sessions:         []session.Session{listViewSession("armed-id", "armed", now, now.Add(-1*time.Minute), session.CacheWindow{Label: "1h", TTLSeconds: 3600, Known: true}, "", "")},
 				KeepAliveEnabled: map[string]bool{"armed-id": true},
 			},
-			want: []string{"watcher partial", "permission denied", "notifications degraded: notify-send failed", "claude unavailable: claude not found"},
+			want: []string{"watcher partial", "permission denied", "notifications degraded: osascript failed", "claude unavailable: claude not found"},
 		},
 		{
 			name: "parse warnings",
@@ -509,7 +509,7 @@ func TestNotificationDeliveryFailureIsVisibleAsDegradedStateAndStatus(t *testing
 		Event: notify.Event{Kind: notify.EventReminderThresholdCrossed, ThresholdPercent: 20},
 		Result: notify.Result{
 			Degraded: true,
-			Message:  "notify-send failed",
+			Message:  "osascript failed",
 		},
 	})
 	model = updated.(Model)
@@ -517,7 +517,7 @@ func TestNotificationDeliveryFailureIsVisibleAsDegradedStateAndStatus(t *testing
 	view := model.View()
 	for _, want := range []string{
 		"notification failed: Reminder alarm",
-		"notify-send failed",
+		"osascript failed",
 		"No Claude message was sent",
 	} {
 		if !strings.Contains(view, want) {

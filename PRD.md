@@ -1,22 +1,25 @@
 # cc-cache — Product Requirements Document
 
 **Version:** 2.0 target
-**Status:** v2 design synced
+**Status:** v2 product reality synced
 **Owner:** Richard Chen
-**Last updated:** 2026-06-03
+**Last updated:** 2026-06-18
 
 Detailed implementation and UI contract:
 `docs/superpowers/specs/2026-06-02-cc-cache-v2-design.md`
+
+Current product boundary:
+`docs/superpowers/specs/2026-06-18-cc-cache-v2-product-reality.md`
 
 ---
 
 ## 1. Product Summary
 
-cc-cache is a terminal TUI for inspecting Claude Code session cache health and managing bounded reminder and KeepAlive workflows.
+cc-cache is a lightweight macOS terminal TUI and JSON API for inspecting Claude Code session cache health and managing bounded Reminder and KeepAlive workflows.
 
 It reads Claude Code JSONL session files from `~/.claude/projects/`, shows whether session cache windows are active, expired, or unknown, and helps users avoid accidental cache expiry during long work sessions.
 
-v2 is a Go rewrite using Bubbletea, lipgloss, fsnotify, OS notifications, and the Claude CLI subprocess only for explicit bounded KeepAlive behavior.
+v2 is a Go rewrite using Bubbletea, lipgloss, fsnotify-backed live refresh, native macOS notifications, and the Claude CLI subprocess only for explicit bounded KeepAlive behavior.
 
 ---
 
@@ -44,7 +47,7 @@ The result is uncertainty, surprise cold starts, and unsafe ad hoc keep-alive be
 5. **Bounded KeepAlive:** KeepAlive is visible, cancellable, scoped, and evidence-confirmed.
 6. **Reliable live refresh:** filesystem events accelerate updates, while safety refresh and manual refresh cover missed events.
 7. **Stable machine output:** `--json` gives scripts and future clients a stable interface.
-8. **Installable single binary:** v2 ships through GitHub Releases and a Homebrew tap.
+8. **Simple local install:** v2 ships first as a verified local macOS binary.
 
 ---
 
@@ -55,8 +58,9 @@ The result is uncertainty, surprise cold starts, and unsafe ad hoc keep-alive be
 - No public watch mode or configurable watch interval.
 - No unbounded or hidden KeepAlive loop.
 - No network/API calls to Anthropic.
-- No Windows support target for v2.
+- No Linux or Windows support target for v2 unless explicitly re-approved.
 - No mouse-first interaction requirement.
+- No GitHub Release, goreleaser, or Homebrew tap publishing until separately approved.
 
 ---
 
@@ -362,7 +366,7 @@ Notifications are always attempted for Reminder and KeepAlive events while cc-ca
 
 Requirements:
 
-- macOS uses `osascript`; Linux uses `notify-send`.
+- macOS uses `osascript`. Linux notification support is out of scope unless re-approved.
 - Notification title/body must be escaped safely.
 - Notification failure must show as a degraded state in the TUI.
 - The TUI must distinguish "event happened" from "notification delivery failed".
@@ -443,22 +447,20 @@ JSON output is the integration seam for scripts and future clients.
 | Components | bubbles |
 | JSONL parsing | Go standard library |
 | File events | fsnotify |
-| Notifications | `osascript` on macOS, `notify-send` on Linux |
+| Notifications | `osascript` on macOS |
 | KeepAlive execution | Claude CLI subprocess |
-| Packaging | goreleaser + Homebrew tap |
+| Packaging | simple local macOS binary install |
 
 ---
 
 ## 16. Packaging
 
-v2 targets:
+v2 currently targets:
 
 - macOS arm64;
-- macOS amd64;
-- Linux amd64;
-- Linux arm64.
+- macOS amd64.
 
-Distribution must use GitHub Releases and a Homebrew tap via goreleaser.
+Simple local install is the first distribution path. GitHub Releases, goreleaser, Homebrew tap publishing, and Linux packages are out of scope unless separately approved.
 
 ---
 
@@ -478,4 +480,4 @@ v2 is product-complete when:
 - Go parser parity is verified before TUI build-out.
 - Watcher/Bubbletea integration uses explicit messages.
 - `--json` remains stable and includes degraded state.
-- Packaging produces installable macOS/Linux binaries and a Homebrew path.
+- Packaging produces a verified local macOS binary install path.

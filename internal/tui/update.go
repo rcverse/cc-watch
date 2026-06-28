@@ -40,15 +40,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(commands...)
 	case RefreshTickMsg:
 		m.now = typed.Now
-		updated, cmd := m.scheduleRefresh(refresh.SourceSafety, false)
+		decision := m.refreshCoordinator.OnSafetyTick(typed.Now)
+		updated, cmd := m.scheduleRefreshDecision(decision)
 		m = updated.(Model)
 		if m.startRefreshTicker {
-			return m, tea.Batch(cmd, refreshTickCommand())
+			return m, tea.Batch(cmd, refreshTickCommand(m.refreshTiming.SafetyInterval))
 		}
 		return m, cmd
 	case WatcherEventMsg:
 		m.watcherEvents = append(m.watcherEvents, typed)
 		return m.scheduleRefresh(refresh.SourceFsnotify, false)
+	case RefreshWatcherEventsMsg:
+		m.refresh.Watcher = typed.State
+		decision := m.refreshCoordinator.OnWatcherEvents(typed.Events)
+		m.refreshDebounceToken = decision.DebounceToken
+		if m.liveRefresh != nil {
+			return m, tea.Batch(refreshDebounceCommand(m.refreshTiming.Debounce, m.refreshDebounceToken), m.liveRefresh)
+		}
+		return m, refreshDebounceCommand(m.refreshTiming.Debounce, m.refreshDebounceToken)
+	case RefreshWatcherDegradedMsg:
+		m.refresh.Watcher = typed.State
+		if m.liveRefresh != nil {
+			return m, m.liveRefresh
+		}
+		return m, nil
+	case RefreshWatcherClosedMsg:
+		m.refresh.Watcher = typed.State
+		return m, nil
+	case RefreshDebounceElapsedMsg:
+		decision := m.refreshCoordinator.OnDebounceElapsed(typed.Now, typed.Token)
+		return m.scheduleRefreshDecision(decision)
 	case RefreshResultMsg:
 		if typed.Generation < m.refreshGeneration {
 			return m, nil
@@ -101,17 +122,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastAction = ErrKeepAliveStaleMessage.Error()
 			return m, nil
 		}
-		if typed.Err != nil {
-			if errors.Is(typed.Err, keepalive.ErrClaudeUnavailable) {
-				m.keepAliveManager.MarkNoClaude(typed.SessionID, typed.InstanceToken, typed.Reason)
-			} else {
-				m.keepAliveManager.MarkSubprocessFailure(typed.SessionID, typed.InstanceToken, typed.Reason)
-			}
-			return m, nil
-		} else {
-			m.keepAliveManager.MarkSendStarted(typed.SessionID, typed.InstanceToken, typed.StartedAt)
-		}
-		if m.KeepAliveState(typed.SessionID).State == keepalive.StateConfirming {
+		state := m.keepAliveManager.ApplyRunnerExecution(typed.Action, typed.Execution)
+		if state.State == keepalive.StateConfirming {
 			return m, m.keepAliveConfirmationCommand(typed)
 		}
 		return m, nil
@@ -144,7 +156,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.setNotice("updating sessions", RoleInfo, 3*time.Second)
 		}
-		return m.scheduleRefresh(refresh.SourceManual, true)
+		decision := m.refreshCoordinator.OnManualRefresh()
+		return m.scheduleRefreshDecision(decision)
 	case tea.KeyMsg:
 		return m.updateKey(typed)
 	case tea.WindowSizeMsg:
@@ -161,28 +174,16 @@ func (m *Model) reminderNotificationCommands() []tea.Cmd {
 		return nil
 	}
 	var commands []tea.Cmd
-	for _, s := range m.sessions {
-		if !m.reminderEnabled[s.SessionID] {
-			continue
-		}
-		status := s.StatusAt(m.now)
-		if status.State != session.StatusActive || status.RemainingSeconds == nil || s.CacheWindow.TTLSeconds <= 0 {
-			continue
-		}
-		remainingPercent := float64(*status.RemainingSeconds) / float64(s.CacheWindow.TTLSeconds) * 100
-		for _, threshold := range m.reminderThresholds {
-			if remainingPercent > float64(threshold) || m.reminderAlreadyFired(s.SessionID, threshold) {
-				continue
-			}
-			m.markReminderFired(s.SessionID, threshold)
-			event := notify.Event{
-				Kind:             notify.EventReminderThresholdCrossed,
-				SessionID:        s.SessionID,
-				Project:          s.Project,
-				ThresholdPercent: threshold,
-			}
-			commands = append(commands, m.notificationCommand(event))
-		}
+	runtime := newReminderRuntime(m.reminderThresholds, m.reminderEnabled, m.reminderFired)
+	events := runtime.check(m.now, m.sessions)
+	m.reminderFired = runtime.fired
+	for _, event := range events {
+		commands = append(commands, m.notificationCommand(notify.Event{
+			Kind:             notify.EventReminderThresholdCrossed,
+			SessionID:        event.sessionID,
+			Project:          event.project,
+			ThresholdPercent: event.thresholdPercent,
+		}))
 	}
 	return commands
 }
@@ -194,19 +195,6 @@ func (m Model) notificationCommand(event notify.Event) tea.Cmd {
 			Result: m.deps.NotifyEvent(event),
 		}
 	}
-}
-
-func (m Model) reminderAlreadyFired(sessionID string, threshold int) bool {
-	return m.reminderFired[sessionID][threshold]
-}
-
-func (m *Model) markReminderFired(sessionID string, threshold int) {
-	fired := m.reminderFired[sessionID]
-	if fired == nil {
-		fired = map[int]bool{}
-	}
-	fired[threshold] = true
-	m.reminderFired[sessionID] = fired
 }
 
 func (m *Model) applyNotificationResult(msg NotificationResultMsg) {
@@ -231,10 +219,22 @@ func (m *Model) applyNotificationResult(msg NotificationResultMsg) {
 }
 
 func (m Model) scheduleRefresh(source refresh.Source, bypassedDebounce bool) (tea.Model, tea.Cmd) {
-	m.refreshGeneration++
-	m.lastRefreshSource = source
-	m.lastBypassedDebounce = bypassedDebounce
-	generation := m.refreshGeneration
+	decision := m.refreshCoordinator.NextRefresh(source)
+	decision.BypassedDebounce = bypassedDebounce
+	return m.scheduleRefreshDecision(decision)
+}
+
+func (m Model) scheduleRefreshDecision(decision refresh.Decision) (tea.Model, tea.Cmd) {
+	if !decision.ShouldRefresh {
+		return m, nil
+	}
+	m.refreshGeneration = decision.Generation
+	m.lastRefreshSource = decision.Source
+	m.lastBypassedDebounce = decision.BypassedDebounce
+	return m.refreshCommand(decision.Source, decision.Generation)
+}
+
+func (m Model) refreshCommand(source refresh.Source, generation int) (tea.Model, tea.Cmd) {
 	refreshSnapshot := m.deps.RefreshSnapshot
 	selected := m.selectedSession()
 	if refreshSnapshot == nil {
@@ -410,75 +410,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) activateFocused() (tea.Model, tea.Cmd) {
-	action := m.FocusedAction()
-	switch action {
-	case "session":
-		if m.route == RouteList || m.route == RouteAmbiguous {
-			if selected := m.selectedSession(); selected != nil {
-				m.route = RouteWorkspace
-				m.selectedID = selected.SessionID
-				m.lastAction = "open_session"
-				return m, nil
-			}
-		}
-		m.lastAction = "activate_session"
-		return m, nil
-	case "reminder":
-		m.toggleReminderForSelected()
-		return m, nil
-	case "keepalive":
-		m.toggleKeepAliveForSelected()
-		return m, nil
-	case "keepalive_autosend":
-		m.toggleKeepAliveAutoSendForSelected()
-		return m, nil
-	case "keepalive_send_now":
-		return m.sendKeepAliveNow()
-	case "keepalive_cancel", "keepalive_stop_waiting":
-		m.cancelKeepAlive()
-		return m, nil
-	case "keepalive_acknowledge":
-		if selected := m.selectedSession(); selected != nil {
-			m.keepAliveManager.Acknowledge(selected.SessionID)
-			m.lastAction = "acknowledge_keepalive"
-			m.focusIndex = m.defaultFocusIndex()
-		}
-		return m, nil
-	case "config_reminder_thresholds", "config_trigger", "config_countdown", "config_message", "config_max_sends":
-		m.startConfigEdit(action)
-		return m, nil
-	case "config_autosend":
-		m.toggleConfigAutoSend()
-		return m, nil
-	case "config_save":
-		return m.saveConfig()
-	case "config_reset":
-		return m.resetConfigDefaults()
-	case "config_cancel":
-		return m.cancelConfig()
-	case "copy_id":
-		m.lastAction = "copy_session_id"
-		if selected := m.selectedSession(); selected != nil {
-			m.setNotice("Session ID shown: "+selected.SessionID, RoleInfo, 3*time.Second)
-		}
-		return m, nil
-	case "refresh":
-		return m.Update(ManualRefreshMsg{})
-	case "help":
-		m.helpOpen = !m.helpOpen
-		m.lastAction = "toggle_help"
-		return m, nil
-	case "back":
-		m.route = RouteList
-		m.lastAction = "back_to_list"
-		return m, nil
-	case "quit":
-		m.lastAction = "quit"
-		return m, tea.Quit
-	default:
-		m.lastAction = "activate_" + action
-		return m, nil
-	}
+	return m.activateFocusedAction(m.FocusedAction())
 }
 
 func (m Model) withKeepAliveActions(actions []keepalive.Action) (tea.Model, tea.Cmd) {
@@ -530,16 +462,6 @@ func (m *Model) toggleKeepAliveAutoSendForSelected() {
 		}
 	}
 	m.lastAction = "toggle_keepalive_autosend"
-}
-
-func (m Model) workspaceCanSendKeepAlive() bool {
-	state := m.activeKeepAliveState()
-	return state.State == keepalive.StateCountdown || state.State == keepalive.StateManualReady || isKeepAliveFailure(state.State)
-}
-
-func (m Model) workspaceCanCancelKeepAlive() bool {
-	state := m.activeKeepAliveState()
-	return state.State == keepalive.StateCountdown || state.State == keepalive.StateManualReady || state.State == keepalive.StateSending || state.State == keepalive.StateConfirming || isKeepAliveFailure(state.State)
 }
 
 func (m Model) sendKeepAliveNow() (tea.Model, tea.Cmd) {
@@ -634,20 +556,21 @@ func (m Model) keepAliveRunnerCommand(action keepalive.Action) tea.Cmd {
 	target := keepalive.NewConfirmationTarget(selected.JSONLPath, time.Time{})
 	return func() tea.Msg {
 		startedAt := m.now
-		if runner == nil {
-			err := keepalive.ErrClaudeUnavailable
-			return KeepAliveRunnerResultMsg{SessionID: action.SessionID, InstanceToken: action.InstanceToken, StartedAt: startedAt, Err: err, Reason: err.Error(), Generation: generation, SelectedID: selectedID, ConfirmationTarget: target}
-		}
-		result := runner.Send(context.Background(), keepalive.RunRequest{SessionID: action.SessionID, Message: action.Message})
-		if result.StartedAt.IsZero() {
-			result.StartedAt = startedAt
-		}
+		execution := keepalive.ExecuteRunner(context.Background(), action, runner, startedAt)
+		result := execution.Result
 		target.After = result.StartedAt
-		reason := ""
-		if result.Err != nil || result.ExitCode != 0 || result.Limit {
-			reason = keepAliveFailureReason(result)
+		return KeepAliveRunnerResultMsg{
+			SessionID:          action.SessionID,
+			InstanceToken:      action.InstanceToken,
+			StartedAt:          result.StartedAt,
+			Err:                result.Err,
+			Reason:             keepAliveFailureReason(result),
+			Action:             action,
+			Execution:          execution,
+			Generation:         generation,
+			SelectedID:         selectedID,
+			ConfirmationTarget: target,
 		}
-		return KeepAliveRunnerResultMsg{SessionID: action.SessionID, InstanceToken: action.InstanceToken, StartedAt: result.StartedAt, Err: result.Err, Reason: reason, Generation: generation, SelectedID: selectedID, ConfirmationTarget: target}
 	}
 }
 
@@ -656,7 +579,7 @@ func (m Model) keepAliveConfirmationCommand(msg KeepAliveRunnerResultMsg) tea.Cm
 	generation := msg.Generation
 	selectedID := msg.SelectedID
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), keepalive.ConfirmationTimeout)
 		defer cancel()
 		var result keepalive.ConfirmationResult
 		var err error
@@ -688,8 +611,14 @@ func displayTickCommand() tea.Cmd {
 	})
 }
 
-func refreshTickCommand() tea.Cmd {
-	return tea.Tick(5*time.Second, func(t time.Time) tea.Msg {
+func refreshDebounceCommand(delay time.Duration, token int) tea.Cmd {
+	return tea.Tick(delay, func(t time.Time) tea.Msg {
+		return RefreshDebounceElapsedMsg{Now: t.UTC(), Token: token}
+	})
+}
+
+func refreshTickCommand(interval time.Duration) tea.Cmd {
+	return tea.Tick(interval, func(t time.Time) tea.Msg {
 		return RefreshTickMsg{Now: t.UTC()}
 	})
 }

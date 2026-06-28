@@ -2,7 +2,6 @@ package notify
 
 import (
 	"errors"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -31,41 +30,8 @@ func TestAppleScriptTitleAndBodyEscaping(t *testing.T) {
 	}
 }
 
-func TestLinuxCommandUsesSeparateArguments(t *testing.T) {
-	notification := Notification{
-		Title: `KeepAlive countdown`,
-		Body:  `Message may be sent; rm -rf should remain plain text`,
-	}
-
-	name, args := LinuxCommand(notification)
-
-	if name != "notify-send" {
-		t.Fatalf("command = %q, want notify-send", name)
-	}
-	want := []string{notification.Title, notification.Body}
-	if !reflect.DeepEqual(args, want) {
-		t.Fatalf("args = %#v, want %#v", args, want)
-	}
-}
-
-func TestUnsupportedNotifierReturnsDegradedState(t *testing.T) {
-	notifier := NewPlatformNotifier("plan9", nil)
-
-	result := notifier.Notify(Event{Kind: EventReminderThresholdCrossed, ThresholdPercent: 20})
-
-	if result.Delivered {
-		t.Fatal("unsupported notifier delivered notification")
-	}
-	if !result.Degraded {
-		t.Fatal("unsupported notifier did not report degraded state")
-	}
-	if !strings.Contains(result.Message, "notifications unsupported") {
-		t.Fatalf("message = %q, want unsupported wording", result.Message)
-	}
-}
-
 func TestRepeatedIdenticalFailureIsSuppressedUntilDistinctEventOrManualRefresh(t *testing.T) {
-	failing := &fakeNotifier{err: errors.New("notify-send failed")}
+	failing := &fakeNotifier{err: errors.New("osascript failed")}
 	manager := NewManager(failing)
 	event := Event{Kind: EventReminderThresholdCrossed, SessionID: "one", ThresholdPercent: 20}
 
@@ -107,9 +73,9 @@ func TestRepeatedIdenticalFailureIsSuppressedUntilDistinctEventOrManualRefresh(t
 
 func TestSuccessfulDistinctEventResetsFailureSuppression(t *testing.T) {
 	notifier := &sequenceNotifier{results: []Result{
-		{Degraded: true, Message: "notify-send failed", Err: errors.New("notify-send failed")},
+		{Degraded: true, Message: "osascript failed", Err: errors.New("osascript failed")},
 		{Delivered: true, Message: "delivered"},
-		{Degraded: true, Message: "notify-send failed", Err: errors.New("notify-send failed")},
+		{Degraded: true, Message: "osascript failed", Err: errors.New("osascript failed")},
 	}}
 	manager := NewManager(notifier)
 	failedEvent := Event{Kind: EventReminderThresholdCrossed, SessionID: "one", ThresholdPercent: 20}

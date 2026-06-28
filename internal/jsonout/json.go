@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/richardchen/cc-cache/internal/refresh"
-	"github.com/richardchen/cc-cache/internal/reminder"
 	"github.com/richardchen/cc-cache/internal/session"
 )
 
@@ -36,7 +35,15 @@ type ReminderState struct {
 	Available  bool
 	Enabled    *bool
 	Thresholds []int
-	Fired      []reminder.Event
+	Fired      []ReminderEvent
+}
+
+type ReminderEvent struct {
+	Kind             string
+	SessionID        string
+	ThresholdPercent int
+	RemainingPercent float64
+	OccurredAt       time.Time
 }
 
 type KeepAliveState struct {

@@ -1,9 +1,8 @@
 package refresh
 
 import (
+	"errors"
 	"fmt"
-
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 type Status string
@@ -63,14 +62,14 @@ type NormalizedEvent struct {
 	Path string
 }
 
-type WatcherEventsMsg struct {
+type WatcherResult struct {
 	Events []NormalizedEvent
 	State  State
+	Err    error
+	Closed bool
 }
 
-type WatcherDegradedMsg struct {
-	State State
-}
+var ErrWatcherClosed = errors.New("refresh watcher closed")
 
 func NewWatcher(projectsDir string, fs WatchFS) (*Watcher, error) {
 	watcher := &Watcher{
@@ -128,16 +127,24 @@ func (w *Watcher) State() State {
 	}
 }
 
-func (w *Watcher) NextMessage() tea.Msg {
+func (w *Watcher) Next() WatcherResult {
 	select {
-	case event := <-w.fs.Events():
-		return WatcherEventsMsg{
+	case event, ok := <-w.fs.Events():
+		if !ok {
+			w.MarkRuntimeError(ErrWatcherClosed)
+			return WatcherResult{State: w.State(), Err: ErrWatcherClosed, Closed: true}
+		}
+		return WatcherResult{
 			Events: w.Normalize([]RawEvent{event}),
 			State:  w.State(),
 		}
-	case err := <-w.fs.Errors():
+	case err, ok := <-w.fs.Errors():
+		if !ok {
+			w.MarkRuntimeError(ErrWatcherClosed)
+			return WatcherResult{State: w.State(), Err: ErrWatcherClosed, Closed: true}
+		}
 		w.MarkRuntimeError(err)
-		return WatcherDegradedMsg{State: w.State()}
+		return WatcherResult{State: w.State(), Err: err}
 	}
 }
 

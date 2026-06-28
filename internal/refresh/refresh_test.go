@@ -2,6 +2,8 @@ package refresh
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -99,6 +101,34 @@ func TestWatcherNormalizesEventsAndAddsCreatedDirectories(t *testing.T) {
 	}
 }
 
+func TestWatcherNextReturnsDomainResultWithoutTeaDependency(t *testing.T) {
+	events := make(chan RawEvent, 1)
+	errs := make(chan error, 1)
+	projectsDir := t.TempDir()
+	fs := &fakeWatchFS{
+		dirs:   []string{projectsDir},
+		events: events,
+		errs:   errs,
+	}
+	watcher, err := NewWatcher(projectsDir, fs)
+	if err != nil {
+		t.Fatalf("NewWatcher returned error: %v", err)
+	}
+
+	events <- RawEvent{Path: projectsDir + "/session.jsonl", Op: OpWrite}
+
+	result := watcher.Next()
+	if len(result.Events) != 1 {
+		t.Fatalf("len(result.Events) = %d, want 1: %#v", len(result.Events), result)
+	}
+	if result.Events[0].Kind != EventWritten {
+		t.Fatalf("event kind = %q, want %q", result.Events[0].Kind, EventWritten)
+	}
+	if result.State.Status != StatusOK {
+		t.Fatalf("state = %#v, want ok", result.State)
+	}
+}
+
 func TestNewDirectoryWatchFailureDegradesWithoutStoppingSafetyRefresh(t *testing.T) {
 	projectsDir := "/tmp/home/.claude/projects"
 	newDir := projectsDir + "/-tmp-new"
@@ -139,6 +169,129 @@ func TestWatcherCloseOrErrorAfterStartupDegradesState(t *testing.T) {
 	}
 }
 
+func TestWatcherNextClosedChannelsReturnClosedResult(t *testing.T) {
+	events := make(chan RawEvent)
+	errs := make(chan error)
+	close(events)
+	close(errs)
+	watcher, err := NewWatcher("/tmp/projects", &fakeWatchFS{
+		dirs:   []string{"/tmp/projects"},
+		events: events,
+		errs:   errs,
+	})
+	if err != nil {
+		t.Fatalf("NewWatcher returned error: %v", err)
+	}
+
+	result := watcher.Next()
+	if !result.Closed {
+		t.Fatal("Closed = false, want true")
+	}
+	if !errors.Is(result.Err, ErrWatcherClosed) {
+		t.Fatalf("Err = %v, want ErrWatcherClosed", result.Err)
+	}
+	if result.State.Status != StatusDegraded {
+		t.Fatalf("status = %q, want degraded", result.State.Status)
+	}
+}
+
+func TestFSNotifyCloseClosesForwardedEventsEvenWithoutReceiver(t *testing.T) {
+	fs, err := NewFSNotifyFS()
+	if err != nil {
+		t.Fatalf("NewFSNotifyFS returned error: %v", err)
+	}
+	dir := t.TempDir()
+	if err := fs.Watch(dir); err != nil {
+		t.Fatalf("Watch returned error: %v", err)
+	}
+	for i := 0; i < 64; i++ {
+		path := filepath.Join(dir, "session.jsonl")
+		if err := os.WriteFile(path, []byte("event"), 0o644); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+	}
+
+	if err := fs.Close(); err != nil {
+		t.Fatalf("Close returned error: %v", err)
+	}
+
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case _, ok := <-fs.Events():
+			if !ok {
+				return
+			}
+		case <-deadline:
+			t.Fatal("Events channel did not close after Close")
+		}
+	}
+}
+
+func TestForwarderClosesBothOutputsWhenEitherInputClosesFirst(t *testing.T) {
+	tests := []struct {
+		name       string
+		closeFirst string
+	}{
+		{name: "events first", closeFirst: "events"},
+		{name: "errors first", closeFirst: "errors"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rawEvents := make(chan RawEvent)
+			rawErrs := make(chan error)
+			events := make(chan RawEvent, 1)
+			errs := make(chan error, 1)
+			done := make(chan struct{})
+			go func() {
+				forwardWatchStreams(rawEvents, rawErrs, events, errs)
+				close(done)
+			}()
+
+			if tt.closeFirst == "events" {
+				close(rawEvents)
+				close(rawErrs)
+			} else {
+				close(rawErrs)
+				close(rawEvents)
+			}
+
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("forwarder did not exit")
+			}
+			assertClosedRawEventChannel(t, events)
+			assertClosedErrorChannel(t, errs)
+		})
+	}
+}
+
+func assertClosedRawEventChannel(t *testing.T, ch <-chan RawEvent) {
+	t.Helper()
+	select {
+	case _, ok := <-ch:
+		if ok {
+			t.Fatal("events channel still open")
+		}
+	default:
+		t.Fatal("events channel not closed")
+	}
+}
+
+func assertClosedErrorChannel(t *testing.T, ch <-chan error) {
+	t.Helper()
+	select {
+	case _, ok := <-ch:
+		if ok {
+			t.Fatal("errors channel still open")
+		}
+	default:
+		t.Fatal("errors channel not closed")
+	}
+}
+
 func TestCoordinatorDebounceSafetyManualAndGenerationOrdering(t *testing.T) {
 	parser := &fakeParser{
 		results: map[string][]session.Session{
@@ -164,8 +317,16 @@ func TestCoordinatorDebounceSafetyManualAndGenerationOrdering(t *testing.T) {
 	if coordinator.PendingDebounceCount() != 1 {
 		t.Fatalf("pending debounce count = %d, want coalesced 1", coordinator.PendingDebounceCount())
 	}
+	if first.DebounceToken == second.DebounceToken {
+		t.Fatalf("debounce token did not advance: first=%d second=%d", first.DebounceToken, second.DebounceToken)
+	}
 
-	debounced := coordinator.OnDebounceElapsed(time.Date(2026, 6, 4, 12, 0, 1, 0, time.UTC))
+	stale := coordinator.OnDebounceElapsed(time.Date(2026, 6, 4, 12, 0, 1, 0, time.UTC), first.DebounceToken)
+	if stale.ShouldRefresh {
+		t.Fatalf("stale debounce decision = %#v, want no refresh", stale)
+	}
+
+	debounced := coordinator.OnDebounceElapsed(time.Date(2026, 6, 4, 12, 0, 1, 0, time.UTC), second.DebounceToken)
 	if !debounced.ShouldRefresh || debounced.Source != SourceFsnotify || debounced.Generation != 1 {
 		t.Fatalf("debounced decision = %#v, want fsnotify generation 1", debounced)
 	}
@@ -225,7 +386,7 @@ func TestOlderIssuedResultCannotApplyBeforeNewerResultReturns(t *testing.T) {
 	}
 }
 
-func TestWatcherEmitsBubbleteaMessagesFromEventAndErrorStreams(t *testing.T) {
+func TestWatcherNextReturnsEventAndErrorResults(t *testing.T) {
 	projectsDir := "/tmp/home/.claude/projects"
 	events := make(chan RawEvent, 1)
 	errs := make(chan error, 1)
@@ -240,23 +401,18 @@ func TestWatcherEmitsBubbleteaMessagesFromEventAndErrorStreams(t *testing.T) {
 	}
 
 	events <- RawEvent{Path: projectsDir + "/session.jsonl", Op: OpWrite}
-	msg := watcher.NextMessage()
-	eventMsg, ok := msg.(WatcherEventsMsg)
-	if !ok {
-		t.Fatalf("message = %#v, want WatcherEventsMsg", msg)
-	}
-	if len(eventMsg.Events) != 1 || eventMsg.Events[0].Kind != EventWritten {
-		t.Fatalf("events = %#v, want written event", eventMsg.Events)
+	result := watcher.Next()
+	if len(result.Events) != 1 || result.Events[0].Kind != EventWritten {
+		t.Fatalf("events = %#v, want written event", result.Events)
 	}
 
 	errs <- errors.New("watcher closed")
-	msg = watcher.NextMessage()
-	degradedMsg, ok := msg.(WatcherDegradedMsg)
-	if !ok {
-		t.Fatalf("message = %#v, want WatcherDegradedMsg", msg)
+	result = watcher.Next()
+	if result.Err == nil || result.Err.Error() != "watcher closed" {
+		t.Fatalf("Err = %v, want watcher error", result.Err)
 	}
-	if degradedMsg.State.Status != StatusDegraded {
-		t.Fatalf("state = %#v, want degraded", degradedMsg.State)
+	if result.State.Status != StatusDegraded {
+		t.Fatalf("state = %#v, want degraded", result.State)
 	}
 }
 

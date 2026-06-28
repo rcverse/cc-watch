@@ -235,6 +235,114 @@ func TestTUIDispatchForwardsPublicCLICommands(t *testing.T) {
 	}
 }
 
+func TestTUIOptionsStartLiveRefreshForListAndWorkspaceOnly(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	deps := fakeDeps(t)
+	deps.Now = func() time.Time { return now }
+	deps.NewLiveWatcher = func(projectsDir string) (tui.Watcher, func() error, error) {
+		if projectsDir != "/tmp/home/.claude/projects" {
+			t.Fatalf("projectsDir = %q, want fixture projects dir", projectsDir)
+		}
+		return fakeLiveWatcher{}, func() error { return nil }, nil
+	}
+	deps.DiscoverHome = func(home string, limit int) (session.DiscoveryResult, error) {
+		return session.DiscoveryResult{
+			ProjectsDir: "/tmp/home/.claude/projects",
+			Sessions: []session.SessionFile{{
+				SessionID: "session-id",
+				ShortID:   "session",
+				Project:   "tmp",
+				Path:      "/tmp/home/.claude/projects/-tmp/session.jsonl",
+				ModTime:   now,
+			}},
+		}, nil
+	}
+	deps.ParseFile = func(path string) (session.Session, error) {
+		return session.Session{SessionID: "session-id", ShortID: "session", JSONLPath: path, Project: "tmp"}, nil
+	}
+
+	list, err := buildTUIOptions(Command{Mode: ModeTUI, Limit: 5}, deps.Dependencies)
+	if err != nil {
+		t.Fatalf("buildTUIOptions list returned error: %v", err)
+	}
+	if list.LiveRefresh == nil {
+		t.Fatal("list LiveRefresh = nil, want watcher command")
+	}
+	if list.CloseLiveRefresh == nil {
+		t.Fatal("list CloseLiveRefresh = nil, want watcher cleanup")
+	}
+
+	workspace, err := buildTUIOptions(Command{Mode: ModeTUI, Limit: 5, ID: "session"}, deps.Dependencies)
+	if err != nil {
+		t.Fatalf("buildTUIOptions workspace returned error: %v", err)
+	}
+	if workspace.LiveRefresh == nil {
+		t.Fatal("workspace LiveRefresh = nil, want watcher command")
+	}
+	if workspace.CloseLiveRefresh == nil {
+		t.Fatal("workspace CloseLiveRefresh = nil, want watcher cleanup")
+	}
+
+	configOptions, err := buildTUIOptions(Command{Mode: ModeConfig, Limit: 5}, deps.Dependencies)
+	if err != nil {
+		t.Fatalf("buildTUIOptions config returned error: %v", err)
+	}
+	if configOptions.LiveRefresh != nil {
+		t.Fatal("config LiveRefresh != nil, want no watcher command")
+	}
+	if configOptions.CloseLiveRefresh != nil {
+		t.Fatal("config CloseLiveRefresh != nil, want no watcher cleanup")
+	}
+}
+
+func TestRunTUIClosesLiveRefresh(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	deps := fakeDeps(t)
+	deps.StartTUI = nil
+	deps.Now = func() time.Time { return now }
+	closed := false
+	deps.NewLiveWatcher = func(projectsDir string) (tui.Watcher, func() error, error) {
+		return fakeLiveWatcher{}, func() error {
+			closed = true
+			return nil
+		}, nil
+	}
+	deps.RunTUIProgram = func(options tui.Options) error {
+		if options.LiveRefresh == nil {
+			t.Fatal("RunTUIProgram received nil LiveRefresh")
+		}
+		return nil
+	}
+	deps.DiscoverHome = func(home string, limit int) (session.DiscoveryResult, error) {
+		return session.DiscoveryResult{
+			ProjectsDir: "/tmp/home/.claude/projects",
+			Sessions: []session.SessionFile{{
+				SessionID: "session-id",
+				ShortID:   "session",
+				Project:   "tmp",
+				Path:      "/tmp/home/.claude/projects/-tmp/session.jsonl",
+				ModTime:   now,
+			}},
+		}, nil
+	}
+	deps.ParseFile = func(path string) (session.Session, error) {
+		return session.Session{SessionID: "session-id", ShortID: "session", JSONLPath: path, Project: "tmp"}, nil
+	}
+
+	if err := runTUI(Command{Mode: ModeTUI, Limit: 5}, deps.Dependencies); err != nil {
+		t.Fatalf("runTUI returned error: %v", err)
+	}
+	if !closed {
+		t.Fatal("live refresh closer was not called")
+	}
+}
+
+type fakeLiveWatcher struct{}
+
+func (fakeLiveWatcher) Next() refresh.WatcherResult {
+	return refresh.WatcherResult{State: refresh.State{Status: refresh.StatusOK, SafetyRefreshActive: true}}
+}
+
 func TestTUIStartupWithIDSelectsMatchingSession(t *testing.T) {
 	now := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
 	deps := fakeDeps(t)

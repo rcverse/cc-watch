@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/richardchen/cc-cache/internal/refresh"
-	"github.com/richardchen/cc-cache/internal/reminder"
 	"github.com/richardchen/cc-cache/internal/session"
 )
 
@@ -100,7 +99,7 @@ func TestSessionObjectShapeIncludesParserReminderAndKeepAliveState(t *testing.T)
 				Available:  true,
 				Enabled:    boolPtr(true),
 				Thresholds: []int{20, 10},
-				Fired: []reminder.Event{{
+				Fired: []ReminderEvent{{
 					Kind:             "reminder_threshold_crossed",
 					SessionID:        s.SessionID,
 					ThresholdPercent: 20,
@@ -173,7 +172,7 @@ func TestRefreshAndNotificationDegradedStatesAreEncoded(t *testing.T) {
 		Notifications: NotificationState{
 			Status:   "degraded",
 			Degraded: true,
-			Recent:   []string{"notify-send unavailable"},
+			Recent:   []string{"osascript unavailable"},
 		},
 	})
 	if err != nil {

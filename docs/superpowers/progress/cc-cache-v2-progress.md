@@ -6,11 +6,11 @@ Update this file before ending any implementation context.
 
 ## Current State
 
-- Current phase: Phase 11.8 - Architecture Refactor
-- Current phase file: `docs/superpowers/plans/cc-cache-v2/phase-11.8-architecture-refactor.md`
-- Current step: Phase 11.8 complete; stop before Phase 12
-- Status: complete pending next user instruction
-- Last updated: 2026-06-17
+- Current phase: Phase 11.9 - Architecture Simplification
+- Current phase file: `docs/superpowers/plans/cc-cache-v2/phase-11.9-architecture-simplification.md`
+- Current step: Final verification complete; ready for Phase 12 local macOS install planning
+- Status: complete
+- Last updated: 2026-06-28
 
 ## Phase Status
 
@@ -30,7 +30,7 @@ Update this file before ending any implementation context.
 - [x] Phase 11.6 - Adaptive Terminal Elegance
 - [x] Phase 11.7 - TUI Interaction Architecture Refactor
 - [x] Phase 11.8 - Architecture Refactor
-- [ ] Phase 11.9 - Architecture Simplification
+- [x] Phase 11.9 - Architecture Simplification
 - [ ] Phase 12 - Packaging, Install, And Release Path
 - [ ] Phase 13 - Documentation Updates
 - [ ] Phase 14 - Final Acceptance Verification
@@ -117,6 +117,9 @@ Update this file before ending any implementation context.
 | 2026-06-13 | Phase 11.7 follow-up | `GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go test ./internal/tui`; `GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go test ./internal/notify`; `GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go test ./internal/tui ./internal/app`; `GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go test -count=1 ./...`; `git diff --check`; build `/private/tmp/cc-cache-phase117-fixes/cc-cache` | pass | Screenshot-driven stabilization fixed closed/consistent workspace card frames, semantic label/status coloring, KeepAlive card placement above Controls, stable shortcut focus, expired-session KeepAlive denial, visible update/show-ID/cancel feedback, non-scrollable details focus, list config entrance, no-gap details copy, and shorter native reminder notification wording. |
 | 2026-06-13 | Phase 11.7 stabilization review | `GOCACHE=/private/tmp/cc-cache-go-build go test ./internal/tui`; `GOCACHE=/private/tmp/cc-cache-go-build go test ./internal/app ./internal/notify`; `GOCACHE=/private/tmp/cc-cache-go-build go test -count=1 ./...`; `git diff --check`; `GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go build -o /private/tmp/cc-cache-phase117-refactor/cc-cache ./cmd/cc-cache` | pass | Fresh-context review findings integrated: expired KeepAlive state is centrally gated, refresh reorder preserves visible List cursor/selection by ID, KeepAlive card is informational with Controls owning focusable actions, notices are transient, Config edits prefill and validate empty message, sort label moved next to details heading, domain semantic label colors added, and old evidence/card-action helpers removed. |
 | 2026-06-17 | Phase 11.8 | `GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go test ./internal/snapshot ./internal/app ./internal/jsonout ./internal/tui`; `GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go test -count=1 ./...`; `git diff --check`; `GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go build -o /private/tmp/cc-cache-phase118/cc-cache ./cmd/cc-cache`; fixture HOME JSON smoke | pass | Snapshot module owns config/discovery/partial-ID/parse/runtime projection for startup and JSON; TUI refresh uses one snapshot callback while selected workspace refresh parses `selected.JSONLPath` directly; historical dead code deleted; no installed command path changed and no real Claude send run. |
+| 2026-06-18 | Pre-11.9 docs | Product-reality docs self-review scans; `git diff --check` | pass | Added active product boundary spec; aligned README/PRD/design/meta-plan/progress/11.9 plan around lightweight macOS scope, stable JSON API, live refresh as required behavior, simple local install, and no Linux/Homebrew/public-release scope unless re-approved. |
+| 2026-06-28 | Phase 11.9 Gates A-F | `env GOCACHE=/private/tmp/cc-cache-go-build go test ./internal/tui -run 'TestOptionsFromSnapshot|TestRefreshSnapshotFromSnapshotResult'`; `env GOCACHE=/private/tmp/cc-cache-go-build go test ./internal/app -run 'TestTUIStartup|TestTUIID|TestTUIAmbiguous|TestConfigMode|TestWorkspaceManualRefresh'`; `env GOCACHE=/private/tmp/cc-cache-go-build go test ./internal/app ./internal/tui`; plus focused refresh, KeepAlive, reminder, notification, and TUI split tests during gate execution | pass | Architecture simplification kept live refresh in scope, moved snapshot projection into TUI, extracted route/KeepAlive helpers, collapsed macOS notification implementation, deleted standalone reminder package, and preserved selected workspace refresh from `selected.JSONLPath`. |
+| 2026-06-28 | Phase 11.9 final | `env GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go test ./internal/refresh ./internal/app ./internal/tui ./internal/keepalive ./internal/notify ./internal/jsonout ./internal/snapshot`; `env GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go test -count=1 ./...`; `rg -n 'internal/reminder|reminder\.|LinuxCommand|UnsupportedNotifier|notify-send' internal cmd --glob '*.go'`; `rg -n 'NewWatcher|NewFSNotifyFS|NewCoordinator|RefreshWatcherEventsMsg|RefreshDebounceElapsedMsg|LiveRefreshCommand' internal cmd --glob '*.go'`; `env GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go build -o /private/tmp/cc-cache-phase119/cc-cache ./cmd/cc-cache`; `env HOME=/Users/richardchen/Dev/cc-cache/internal/session/testdata/smoke-home /private/tmp/cc-cache-phase119/cc-cache --json` | pass | Focused packages and full suite passed; dead historical symbols had no matches; live refresh symbols remain wired; throwaway binary and JSON smoke passed; no installed command path changed and no real Claude send run. |
 
 ## Review Ledger
 
@@ -142,6 +145,8 @@ Update this file before ending any implementation context.
 | 2026-06-17 | Phase 11.8 Gate B | read-only spec and code-quality reviewers | Found stale `KeepAliveStatus` compile references, selected workspace refresh parse failure could clear sessions, list refresh rebuilt full TUI options, and old JSON helper functions remained. | Removed legacy status references, added selected-refresh parse-failure regression, preserved selected scope on parse failure, converted list refresh directly from snapshot result, and deleted old helper functions. |
 | 2026-06-17 | Phase 11.8 Gate C | strict read-only code-quality/dead-code reviewer | Found stale progress handoff in the review snapshot; no code issues found and deletion-target scan was clean. | Handoff had already been updated after the review snapshot started; current progress state and handoff now both point to completed Phase 11.8 and next Phase 12. |
 | 2026-06-17 | Phase 11.8 final | read-only final reviewers | First final review found ambiguous `--id --remind` candidates lost Reminder enablement; second final review found no issues. | Added regression coverage, projected runtime state for ambiguous candidates, reran focused/full verification/build/JSON smoke, and confirmed no remaining final-review findings. |
+| 2026-06-28 | Phase 11.9 plan | architecture and strict code-quality plan reviewers | Initial review found the plan risked deleting live refresh behavior before the product boundary was clarified. | Replanned 11.9 around first-principles product reality: macOS-only, automatic live refresh, stable JSON API, reminders, bounded KeepAlive, and simple local install. |
+| 2026-06-28 | Phase 11.9 Gates B-D | read-only architecture and code-quality reviewers | Found debounce semantics and fsnotify channel-close risks during Gate B; Gate C/D reviews found no remaining blocking issues after fixes. | Added tokenized debounce stale-event handling, buffered/nonblocking fsnotify forwarding with full close handling, and kept KeepAlive/notification deletions scoped to tested dead historical code. |
 
 ## Decisions And Blockers
 
@@ -157,4 +162,4 @@ Update this file before ending any implementation context.
 
 ## Last Context Handoff
 
-Phase 11.8 is implemented, final-reviewed, and final verification passed. `internal/snapshot` now owns startup and JSON config/discovery/partial-ID/parse/default runtime projection. App JSON and TUI startup route through snapshots, list refresh builds from `snapshot.Build`, and selected workspace refresh preserves the direct `selected.JSONLPath` parse path without rediscovery, including a parse-failure regression that preserves selected scope. Ambiguous `--id --remind` candidates preserve Reminder enablement. Historical dependency anchors, unused app dependency fields, old TUI refresh hooks, `SafetyRefreshMsg`, legacy `KeepAliveStatus`, `evidenceOffset`, and duplicate JSON helper functions were removed. `CONTEXT.md` was added as a concise domain glossary, and the Phase 11.8 checklist/progress ledger were updated. Phase 11.9 planning is written for architecture simplification before Phase 12. Next phase is Phase 11.9 - Architecture Simplification; do not replace `$HOME/.local/bin/cc-cache` or publish releases without explicit approval.
+Phase 11.9 deepened Refresh Runtime production wiring, kept live refresh in scope, improved KeepAlive Runtime locality, removed false Reminder/notification depth, split oversized TUI test surfaces, and preserved CLI/JSON/config/parser/KeepAlive safety contracts. Next phase is local macOS install planning; do not replace `$HOME/.local/bin/cc-cache` without explicit approval.

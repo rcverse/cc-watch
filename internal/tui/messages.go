@@ -23,6 +23,24 @@ type WatcherEventMsg struct {
 	Op   string
 }
 
+type RefreshWatcherEventsMsg struct {
+	Events []refresh.NormalizedEvent
+	State  refresh.State
+}
+
+type RefreshWatcherDegradedMsg struct {
+	State refresh.State
+}
+
+type RefreshWatcherClosedMsg struct {
+	State refresh.State
+}
+
+type RefreshDebounceElapsedMsg struct {
+	Now   time.Time
+	Token int
+}
+
 type RefreshResultMsg struct {
 	Generation   int
 	Sessions     []session.Session
@@ -57,6 +75,8 @@ type KeepAliveRunnerResultMsg struct {
 	StartedAt          time.Time
 	Err                error
 	Reason             string
+	Action             keepalive.Action
+	Execution          keepalive.RunnerExecution
 	Generation         int
 	SelectedID         string
 	ConfirmationTarget keepalive.ConfirmationTarget

@@ -1,0 +1,120 @@
+package tui
+
+import (
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+func (m Model) activateFocusedAction(action string) (tea.Model, tea.Cmd) {
+	switch m.route {
+	case RouteList, RouteAmbiguous:
+		return m.activateListAction(action)
+	case RouteWorkspace:
+		return m.activateWorkspaceAction(action)
+	case RouteConfig:
+		return m.activateConfigAction(action)
+	default:
+		return m.activateSharedAction(action)
+	}
+}
+
+func (m Model) activateListAction(action string) (tea.Model, tea.Cmd) {
+	switch action {
+	case "session":
+		if selected := m.selectedSession(); selected != nil {
+			m.route = RouteWorkspace
+			m.selectedID = selected.SessionID
+			m.lastAction = "open_session"
+			return m, nil
+		}
+		m.lastAction = "activate_session"
+		return m, nil
+	case "reminder":
+		m.toggleReminderForSelected()
+		return m, nil
+	case "keepalive":
+		m.toggleKeepAliveForSelected()
+		return m, nil
+	default:
+		return m.activateSharedAction(action)
+	}
+}
+
+func (m Model) activateWorkspaceAction(action string) (tea.Model, tea.Cmd) {
+	switch action {
+	case "reminder":
+		m.toggleReminderForSelected()
+		return m, nil
+	case "keepalive":
+		m.toggleKeepAliveForSelected()
+		return m, nil
+	case "keepalive_autosend":
+		m.toggleKeepAliveAutoSendForSelected()
+		return m, nil
+	case "keepalive_send_now":
+		return m.sendKeepAliveNow()
+	case "keepalive_cancel", "keepalive_stop_waiting":
+		m.cancelKeepAlive()
+		return m, nil
+	case "keepalive_acknowledge":
+		if selected := m.selectedSession(); selected != nil {
+			m.keepAliveManager.Acknowledge(selected.SessionID)
+			m.lastAction = "acknowledge_keepalive"
+			m.focusIndex = m.defaultFocusIndex()
+		}
+		return m, nil
+	case "copy_id":
+		m.lastAction = "copy_session_id"
+		if selected := m.selectedSession(); selected != nil {
+			m.setNotice("Session ID shown: "+selected.SessionID, RoleInfo, 3*time.Second)
+		}
+		return m, nil
+	case "back":
+		m.route = RouteList
+		m.lastAction = "back_to_list"
+		return m, nil
+	default:
+		return m.activateSharedAction(action)
+	}
+}
+
+func (m Model) activateConfigAction(action string) (tea.Model, tea.Cmd) {
+	switch action {
+	case "config_reminder_thresholds", "config_trigger", "config_countdown", "config_message", "config_max_sends":
+		m.startConfigEdit(action)
+		return m, nil
+	case "config_autosend":
+		m.toggleConfigAutoSend()
+		return m, nil
+	case "config_save":
+		return m.saveConfig()
+	case "config_reset":
+		return m.resetConfigDefaults()
+	case "config_cancel":
+		return m.cancelConfig()
+	default:
+		return m.activateSharedAction(action)
+	}
+}
+
+func (m Model) activateSharedAction(action string) (tea.Model, tea.Cmd) {
+	switch action {
+	case "refresh":
+		return m.Update(ManualRefreshMsg{})
+	case "config":
+		m.route = RouteConfig
+		m.focusIndex = m.defaultFocusIndex()
+		return m, nil
+	case "help":
+		m.helpOpen = !m.helpOpen
+		m.lastAction = "toggle_help"
+		return m, nil
+	case "quit":
+		m.lastAction = "quit"
+		return m, tea.Quit
+	default:
+		m.lastAction = "activate_" + action
+		return m, nil
+	}
+}

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/richardchen/cc-cache/internal/keepalive"
 	"github.com/richardchen/cc-cache/internal/session"
@@ -293,17 +292,6 @@ func (m Model) workspaceControls(s session.Session) string {
 	return b.String()
 }
 
-func (m Model) activeKeepAliveCard(s session.Session) string {
-	if m.keepAliveUnavailableReason(s) != "" {
-		return ""
-	}
-	state := m.KeepAliveState(s.SessionID)
-	if state.State == "" || state.State == keepalive.StateOff {
-		return ""
-	}
-	return m.keepAliveCard(s, state)
-}
-
 type workspaceControlAction struct {
 	id     string
 	label  string
@@ -391,121 +379,6 @@ func onOffText(enabled bool, risky bool) string {
 		return onText(risky)
 	}
 	return offText()
-}
-
-func autoSendWorkspaceDetail(enabled bool) string {
-	if enabled {
-		return "sends Claude message after countdown"
-	}
-	return "manual prompt only"
-}
-
-func autoSendWorkspaceDetailForState(state keepalive.SessionState) string {
-	switch state.State {
-	case keepalive.StateSending:
-		return "disabled while sending"
-	case keepalive.StateConfirming:
-		return "disabled while confirming"
-	case keepalive.StateErrorNoClaude, keepalive.StateErrorSubprocess, keepalive.StateErrorTimeout:
-		return "disabled after failure"
-	default:
-		return autoSendWorkspaceDetail(state.AutoSend)
-	}
-}
-
-func keepAliveControlState(state keepalive.SessionState) string {
-	styles := DefaultStyles()
-	switch state.State {
-	case keepalive.StateMonitoringIdle:
-		return styles.Render(RoleSuccess, "armed")
-	case keepalive.StateCountdown:
-		return styles.Render(RoleWarning, "countdown")
-	case keepalive.StateManualReady:
-		return styles.Render(RoleWarning, "ready")
-	case keepalive.StateSending:
-		return styles.Render(RoleWarning, "sending")
-	case keepalive.StateConfirming:
-		return styles.Render(RoleWarning, "confirming")
-	case keepalive.StateSuccess:
-		return styles.Render(RoleSuccess, "done")
-	case keepalive.StateScopeComplete:
-		return styles.Render(RoleMuted, "complete")
-	case keepalive.StateErrorNoClaude, keepalive.StateErrorSubprocess, keepalive.StateErrorTimeout:
-		return styles.Render(RoleDanger, "failed")
-	default:
-		return offText()
-	}
-}
-
-func keepAliveControlDetail(state keepalive.SessionState) string {
-	if state.State == keepalive.StateMonitoringIdle {
-		if state.AutoSend {
-			return "countdown will start near expiry"
-		}
-		return "manual prompt near expiry"
-	}
-	return "see KeepAlive state below"
-}
-
-func (m Model) keepAliveCard(s session.Session, state keepalive.SessionState) string {
-	var b strings.Builder
-	badge := keepAliveBadge(state.State)
-	switch state.State {
-	case keepalive.StateMonitoringIdle:
-		if state.AutoSend {
-			fmt.Fprintf(&b, "Next         Countdown at %s if session is still active\n", m.nextKeepAliveTime(s))
-		} else {
-			fmt.Fprintf(&b, "Next         Manual prompt at %s if session is still active\n", m.nextKeepAliveTime(s))
-		}
-		fmt.Fprintf(&b, "Msg Preview  %q\n", m.keepAliveConfig.Message)
-		fmt.Fprintf(&b, "Scope        %d / %d sends · auto-send %s\n", state.ScopeUsed, maxSends(state), autoSendBox(state.AutoSend))
-	case keepalive.StateCountdown:
-		fmt.Fprintf(&b, "Next         Send now or cancel before countdown ends\n")
-		fmt.Fprintf(&b, "Msg Preview  %q\n", m.keepAliveConfig.Message)
-		if seconds := m.countdowns[s.SessionID]; seconds > 0 {
-			percent := float64(seconds) / float64(maxInt(m.keepAliveConfig.CountdownSeconds, 1)) * 100
-			fmt.Fprintf(&b, "Scope        %d / %d sends · %s %ds remaining\n", state.ScopeUsed, maxSends(state), ProgressBar(percent, 12), seconds)
-		} else {
-			fmt.Fprintf(&b, "Scope        %d / %d sends\n", state.ScopeUsed, maxSends(state))
-		}
-	case keepalive.StateManualReady:
-		fmt.Fprintf(&b, "Next         Send now or dismiss\n")
-		fmt.Fprintf(&b, "Msg Preview  %q\n", m.keepAliveConfig.Message)
-		fmt.Fprintf(&b, "Scope        %d / %d sends · auto-send off\n", state.ScopeUsed, maxSends(state))
-		if state.SafetyDisabled {
-			fmt.Fprintf(&b, "Reason       Auto-send disabled because safety margin cannot be preserved\n")
-		}
-	case keepalive.StateSending:
-		fmt.Fprintf(&b, "Next         Waiting for Claude CLI\n")
-		fmt.Fprintf(&b, "Msg Preview  %q\n", m.keepAliveConfig.Message)
-		fmt.Fprintf(&b, "Scope        %d / %d sends · send started\n", state.ScopeUsed, maxSends(state))
-	case keepalive.StateConfirming:
-		fmt.Fprintf(&b, "Next         Watching this session JSONL\n")
-		fmt.Fprintf(&b, "Msg Preview  %q\n", m.keepAliveConfig.Message)
-		fmt.Fprintf(&b, "Scope        %d / %d sends · awaiting confirmation\n", state.ScopeUsed, maxSends(state))
-	case keepalive.StateSuccess:
-		fmt.Fprintf(&b, "Next         Monitoring complete or re-armed by scope\n")
-		fmt.Fprintf(&b, "Msg Preview  %q\n", m.keepAliveConfig.Message)
-		fmt.Fprintf(&b, "Scope        %d / %d sends used · %s\n", state.ScopeUsed, maxSends(state), successEvidence(state))
-	case keepalive.StateErrorNoClaude, keepalive.StateErrorSubprocess, keepalive.StateErrorTimeout:
-		reason := state.LastFailure
-		if reason == "" {
-			reason = string(state.State)
-		}
-		fmt.Fprintf(&b, "Next         Use manual fallback or re-enable after fixing\n")
-		fmt.Fprintf(&b, "Msg Preview  %q\n", m.keepAliveConfig.Message)
-		fmt.Fprintf(&b, "Scope        %d / %d sends used · failed: %s\n", state.ScopeUsed, maxSends(state), reason)
-		fmt.Fprintf(&b, "Fallback     %s\n", keepalive.ManualFallbackCommand(s.SessionID, m.keepAliveConfig.Message).Display)
-	case keepalive.StateScopeComplete:
-		fmt.Fprintf(&b, "Next         Turn KeepAlive off or wait for a new eligible cache window\n")
-		fmt.Fprintf(&b, "Msg Preview  %q\n", m.keepAliveConfig.Message)
-		fmt.Fprintf(&b, "Scope        %d / %d sends used · no more automatic sends\n", state.ScopeUsed, maxSends(state))
-	case keepalive.StateCancelledInstance:
-		fmt.Fprintf(&b, "Next         Waiting for a new eligible cache window\n")
-		fmt.Fprintf(&b, "Msg Preview  %q\n", m.keepAliveConfig.Message)
-		fmt.Fprintf(&b, "Scope        %d / %d sends · cancelled\n", state.ScopeUsed, maxSends(state))
-	}
-	return m.renderWorkspacePanel("KeepAlive · "+badge, b.String())
 }
 
 func (m Model) workspaceFooter() string {
@@ -640,53 +513,6 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
-}
-
-func (m Model) activeKeepAliveState() keepalive.SessionState {
-	selected := m.selectedSession()
-	if selected == nil {
-		return keepalive.SessionState{State: keepalive.StateOff}
-	}
-	return m.KeepAliveState(selected.SessionID)
-}
-
-func (m Model) nextKeepAliveTime(s session.Session) string {
-	if s.LastMessageAt == nil {
-		return "unknown"
-	}
-	ttl := s.CacheWindow.TTLSeconds
-	if !s.CacheWindow.Known || ttl <= 0 {
-		ttl = 300
-	}
-	trigger := m.keepAliveConfig.TriggerBeforeExpiryMinutes * 60
-	ttlTrigger := ttl / 5
-	if ttlTrigger < trigger {
-		trigger = ttlTrigger
-	}
-	return s.LastMessageAt.Add(time.Duration(ttl-trigger) * time.Second).Format("15:04:05")
-}
-
-func keepAliveBadge(state keepalive.State) string {
-	switch state {
-	case keepalive.StateMonitoringIdle:
-		return "watching"
-	case keepalive.StateCountdown:
-		return "countdown"
-	case keepalive.StateManualReady:
-		return "manual prompt"
-	case keepalive.StateSending:
-		return "sending"
-	case keepalive.StateConfirming:
-		return "confirming"
-	case keepalive.StateSuccess:
-		return "done"
-	case keepalive.StateScopeComplete:
-		return "scope complete"
-	case keepalive.StateErrorNoClaude, keepalive.StateErrorSubprocess, keepalive.StateErrorTimeout:
-		return "failed"
-	default:
-		return string(state)
-	}
 }
 
 func thresholdSummary(thresholds []int) string {

@@ -3,7 +3,8 @@ package notify
 import (
 	"errors"
 	"fmt"
-	"runtime"
+	"os/exec"
+	"strings"
 )
 
 type EventKind string
@@ -52,6 +53,13 @@ type Notifier interface {
 
 type Runner func(name string, args ...string) error
 
+type CommandBuilder func(Notification) (string, []string)
+
+type CommandNotifier struct {
+	build  CommandBuilder
+	runner Runner
+}
+
 type Manager struct {
 	notifier           Notifier
 	attempts           []Attempt
@@ -61,6 +69,37 @@ type Manager struct {
 
 func NewManager(notifier Notifier) *Manager {
 	return &Manager{notifier: notifier}
+}
+
+func NewCommandNotifier(build CommandBuilder, runner Runner) CommandNotifier {
+	return CommandNotifier{build: build, runner: runner}
+}
+
+func ExecRunner(name string, args ...string) error {
+	return exec.Command(name, args...).Run()
+}
+
+func MacOSCommand(notification Notification) (string, []string) {
+	script := `display notification "` + escapeAppleScript(notification.Body) + `" with title "` + escapeAppleScript(notification.Title) + `"`
+	return "osascript", []string{"-e", script}
+}
+
+func escapeAppleScript(value string) string {
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	return strings.ReplaceAll(value, `"`, `\"`)
+}
+
+func (n CommandNotifier) Notify(event Event) Result {
+	notification := FormatEvent(event)
+	name, args := n.build(notification)
+	if n.runner == nil {
+		err := errors.New("notification runner unavailable")
+		return Result{Degraded: true, Message: err.Error(), Err: err}
+	}
+	if err := n.runner(name, args...); err != nil {
+		return Result{Degraded: true, Message: err.Error(), Err: err}
+	}
+	return Result{Delivered: true, Message: "delivered"}
 }
 
 func (m *Manager) Notify(event Event) Result {
@@ -164,17 +203,7 @@ func FormatEvent(event Event) Notification {
 }
 
 func NewPlatformNotifier(goos string, runner Runner) Notifier {
-	if goos == "" {
-		goos = runtime.GOOS
-	}
-	switch goos {
-	case "darwin":
-		return NewCommandNotifier(MacOSCommand, runner)
-	case "linux":
-		return NewCommandNotifier(LinuxCommand, runner)
-	default:
-		return UnsupportedNotifier{GOOS: goos}
-	}
+	return NewCommandNotifier(MacOSCommand, runner)
 }
 
 func eventKey(event Event) string {
