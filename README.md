@@ -36,7 +36,20 @@ go run ./cmd/cc-cache --json
 go run ./cmd/cc-cache
 ```
 
-Do not replace `$HOME/.local/bin/cc-cache` until the local install phase is explicitly approved. The legacy Python v1 entry point remains in the repo for rollback during migration.
+## Local Install
+
+Phase 12 adds a simple local macOS install script:
+
+```bash
+./install.sh --dry-run
+./install.sh --yes
+```
+
+The script builds the Go binary and installs a copied executable to `$HOME/.local/bin/cc-cache`.
+It does not publish releases, install Homebrew formulae, or remove the v1 archive.
+Run `./install.sh --yes` only when you are ready to replace the local command path.
+
+The legacy Python v1 entry point remains in the repo for rollback during migration.
 
 ## Source Of Truth
 
@@ -53,6 +66,6 @@ cc-cache/
 ├── archive/v1/         # preserved Python v1
 ├── cc_cache.py         # legacy v1 entry point during migration
 ├── docs/               # ADRs, specs, plans, progress
-├── install.sh          # legacy installer until v2 local install is approved
+├── install.sh          # local macOS v2 installer
 └── PRD.md
 ```

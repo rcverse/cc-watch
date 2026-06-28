@@ -1,13 +1,107 @@
 #!/usr/bin/env bash
-# Install cc-cache by symlinking cc_cache.py into ~/.local/bin/
-set -e
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage: ./install.sh [--yes] [--dry-run]
+
+Build and install the cc-cache v2 Go binary to:
+  $HOME/.local/bin/cc-cache
+
+Options:
+  --yes      required to write the installed command
+  --dry-run  show what would happen without writing
+  --help     show this help
+
+Environment:
+  CC_CACHE_BUILD_DIR  override build output directory (default: ./dist)
+USAGE
+}
+
+YES=0
+DRY_RUN=0
+for arg in "$@"; do
+  case "$arg" in
+    --yes)
+      YES=1
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "unknown argument: $arg" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TARGET="$HOME/.local/bin/cc-cache"
+BUILD_DIR="${CC_CACHE_BUILD_DIR:-$SCRIPT_DIR/dist}"
+case "$BUILD_DIR" in
+  /*) ;;
+  *) BUILD_DIR="$SCRIPT_DIR/$BUILD_DIR" ;;
+esac
+while [ "$BUILD_DIR" != "/" ] && [ "${BUILD_DIR%/}" != "$BUILD_DIR" ]; do
+  BUILD_DIR="${BUILD_DIR%/}"
+done
+BINARY="$BUILD_DIR/cc-cache"
+BIN_DIR="$HOME/.local/bin"
+TARGET="$BIN_DIR/cc-cache"
 
-mkdir -p "$HOME/.local/bin"
-ln -sf "$SCRIPT_DIR/cc_cache.py" "$TARGET"
-chmod +x "$SCRIPT_DIR/cc_cache.py"
+if [ "$BINARY" = "$TARGET" ]; then
+  echo "build output must not equal install target: $TARGET" >&2
+  echo "Choose a different CC_CACHE_BUILD_DIR or unset it." >&2
+  exit 2
+fi
 
-echo "✓ Installed: cc-cache → $SCRIPT_DIR/cc_cache.py"
-echo "  Make sure ~/.local/bin is on your PATH."
+echo "cc-cache v2 local installer"
+echo "repo:    $SCRIPT_DIR"
+echo "binary:  $BINARY"
+echo "target:  $TARGET"
+
+if [ -e "$TARGET" ] || [ -L "$TARGET" ]; then
+  if [ -L "$TARGET" ]; then
+    CURRENT_TARGET="$(readlink "$TARGET")"
+    echo "current: symlink -> $CURRENT_TARGET"
+  else
+    echo "current: existing file"
+  fi
+else
+  echo "current: not installed"
+fi
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  echo "dry run: would build and install cc-cache v2"
+  exit 0
+fi
+
+if [ "$YES" -ne 1 ]; then
+  echo "refusing to install without --yes" >&2
+  echo "Run './install.sh --yes' only after you are ready to replace the local command path." >&2
+  exit 2
+fi
+
+mkdir -p "$BUILD_DIR" "$BIN_DIR"
+
+GOCACHE="${GOCACHE:-/private/tmp/cc-cache-go-build}" \
+GOMODCACHE="${GOMODCACHE:-/private/tmp/cc-cache-go-mod}" \
+  go build -C "$SCRIPT_DIR" -o "$BINARY" ./cmd/cc-cache
+
+"$BINARY" --version >/dev/null
+"$BINARY" --help >/dev/null
+
+TMP_TARGET="$TARGET.tmp.$$"
+cp "$BINARY" "$TMP_TARGET"
+chmod 0755 "$TMP_TARGET"
+if [ -L "$TARGET" ]; then
+  rm "$TARGET"
+fi
+mv -f "$TMP_TARGET" "$TARGET"
+
+echo "installed: $TARGET"
+"$TARGET" --version

@@ -6,11 +6,11 @@ Update this file before ending any implementation context.
 
 ## Current State
 
-- Current phase: Phase 11.9 - Architecture Simplification
-- Current phase file: `docs/superpowers/plans/cc-cache-v2/phase-11.9-architecture-simplification.md`
-- Current step: Final verification complete; ready for Phase 12 local macOS install planning
+- Current phase: Phase 12 - Local macOS Install
+- Current phase file: `docs/superpowers/plans/cc-cache-v2/phase-12-packaging-install.md`
+- Current step: Final verification complete; ready for Phase 13 documentation updates
 - Status: complete
-- Last updated: 2026-06-28
+- Last updated: 2026-06-29
 
 ## Phase Status
 
@@ -31,7 +31,7 @@ Update this file before ending any implementation context.
 - [x] Phase 11.7 - TUI Interaction Architecture Refactor
 - [x] Phase 11.8 - Architecture Refactor
 - [x] Phase 11.9 - Architecture Simplification
-- [ ] Phase 12 - Packaging, Install, And Release Path
+- [x] Phase 12 - Packaging, Install, And Release Path
 - [ ] Phase 13 - Documentation Updates
 - [ ] Phase 14 - Final Acceptance Verification
 
@@ -120,6 +120,7 @@ Update this file before ending any implementation context.
 | 2026-06-18 | Pre-11.9 docs | Product-reality docs self-review scans; `git diff --check` | pass | Added active product boundary spec; aligned README/PRD/design/meta-plan/progress/11.9 plan around lightweight macOS scope, stable JSON API, live refresh as required behavior, simple local install, and no Linux/Homebrew/public-release scope unless re-approved. |
 | 2026-06-28 | Phase 11.9 Gates A-F | `env GOCACHE=/private/tmp/cc-cache-go-build go test ./internal/tui -run 'TestOptionsFromSnapshot|TestRefreshSnapshotFromSnapshotResult'`; `env GOCACHE=/private/tmp/cc-cache-go-build go test ./internal/app -run 'TestTUIStartup|TestTUIID|TestTUIAmbiguous|TestConfigMode|TestWorkspaceManualRefresh'`; `env GOCACHE=/private/tmp/cc-cache-go-build go test ./internal/app ./internal/tui`; plus focused refresh, KeepAlive, reminder, notification, and TUI split tests during gate execution | pass | Architecture simplification kept live refresh in scope, moved snapshot projection into TUI, extracted route/KeepAlive helpers, collapsed macOS notification implementation, deleted standalone reminder package, and preserved selected workspace refresh from `selected.JSONLPath`. |
 | 2026-06-28 | Phase 11.9 final | `env GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go test ./internal/refresh ./internal/app ./internal/tui ./internal/keepalive ./internal/notify ./internal/jsonout ./internal/snapshot`; `env GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go test -count=1 ./...`; `rg -n 'internal/reminder|reminder\.|LinuxCommand|UnsupportedNotifier|notify-send' internal cmd --glob '*.go'`; `rg -n 'NewWatcher|NewFSNotifyFS|NewCoordinator|RefreshWatcherEventsMsg|RefreshDebounceElapsedMsg|LiveRefreshCommand' internal cmd --glob '*.go'`; `env GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go build -o /private/tmp/cc-cache-phase119/cc-cache ./cmd/cc-cache`; `env HOME=/Users/richardchen/Dev/cc-cache/internal/session/testdata/smoke-home /private/tmp/cc-cache-phase119/cc-cache --json` | pass | Focused packages and full suite passed; dead historical symbols had no matches; live refresh symbols remain wired; throwaway binary and JSON smoke passed; no installed command path changed and no real Claude send run. |
+| 2026-06-29 | Phase 12 | `git check-ignore internal/session/testdata/smoke-home/.claude/projects/-tmp-cc-cache/11111111-1111-1111-1111-111111111111.jsonl`; `GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go build -o dist/cc-cache ./cmd/cc-cache`; `dist/cc-cache --version`; `dist/cc-cache --help`; `HOME=/Users/richardchen/Dev/cc-cache/internal/session/testdata/smoke-home dist/cc-cache --json`; `scripts/test-install.sh`; `GOCACHE=/private/tmp/cc-cache-go-build GOMODCACHE=/private/tmp/cc-cache-go-mod go test -count=1 ./...`; `command -v cc-cache`; `ls -l "$HOME/.local/bin/cc-cache"`; `git diff --check` | pass | Local macOS installer builds and installs a copied Go binary only under temporary HOME tests; dry-run and no-approval paths are safe; exact and trailing-slash build-dir/target collisions are rejected before build/write; real installed command remains the v1 symlink; public release/Homebrew/goreleaser work remains deferred. |
 
 ## Review Ledger
 
@@ -147,6 +148,7 @@ Update this file before ending any implementation context.
 | 2026-06-17 | Phase 11.8 final | read-only final reviewers | First final review found ambiguous `--id --remind` candidates lost Reminder enablement; second final review found no issues. | Added regression coverage, projected runtime state for ambiguous candidates, reran focused/full verification/build/JSON smoke, and confirmed no remaining final-review findings. |
 | 2026-06-28 | Phase 11.9 plan | architecture and strict code-quality plan reviewers | Initial review found the plan risked deleting live refresh behavior before the product boundary was clarified. | Replanned 11.9 around first-principles product reality: macOS-only, automatic live refresh, stable JSON API, reminders, bounded KeepAlive, and simple local install. |
 | 2026-06-28 | Phase 11.9 Gates B-D | read-only architecture and code-quality reviewers | Found debounce semantics and fsnotify channel-close risks during Gate B; Gate C/D reviews found no remaining blocking issues after fixes. | Added tokenized debounce stale-event handling, buffered/nonblocking fsnotify forwarding with full close handling, and kept KeepAlive/notification deletions scoped to tested dead historical code. |
+| 2026-06-29 | Phase 12 | read-only installer reviewers | Found `CC_CACHE_BUILD_DIR` could equal the install target, including a trailing-slash variant, causing `go build` to write through an existing symlink before symlink removal. | Added sentinel symlink regressions for exact and trailing-slash build-dir/target collisions, normalized trailing slashes, rejected `BINARY == TARGET` before build/write, reran installer harness/full suite, and passed focused re-review. |
 
 ## Decisions And Blockers
 
@@ -162,4 +164,4 @@ Update this file before ending any implementation context.
 
 ## Last Context Handoff
 
-Phase 11.9 deepened Refresh Runtime production wiring, kept live refresh in scope, improved KeepAlive Runtime locality, removed false Reminder/notification depth, split oversized TUI test surfaces, and preserved CLI/JSON/config/parser/KeepAlive safety contracts. Next phase is local macOS install planning; do not replace `$HOME/.local/bin/cc-cache` without explicit approval.
+Phase 12 implemented a simple local macOS install path. `install.sh` builds the Go binary and installs a copied executable only when run with `--yes`; implementation verification used temporary `HOME` values only and did not replace the real `$HOME/.local/bin/cc-cache`, which still points to `cc_cache.py`. Reviewer-found symlink overwrite risks were fixed with build-target collision guards and sentinel regressions. Next phase is Phase 13 documentation updates.
