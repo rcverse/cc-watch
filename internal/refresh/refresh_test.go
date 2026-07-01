@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/richardchen/cc-watch/internal/session"
 )
 
@@ -239,7 +240,7 @@ func TestForwarderClosesBothOutputsWhenEitherInputClosesFirst(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rawEvents := make(chan RawEvent)
+			rawEvents := make(chan fsnotify.Event)
 			rawErrs := make(chan error)
 			events := make(chan RawEvent, 1)
 			errs := make(chan error, 1)

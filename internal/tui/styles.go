@@ -96,7 +96,7 @@ func RenderPanelWidth(title string, body string, width int) string {
 	if width < 24 {
 		width = 24
 	}
-	titleWidth := visibleWidth(stripANSI(title))
+	titleWidth := visibleWidth(title)
 	if width < titleWidth+1 {
 		width = titleWidth + 1
 	}
@@ -104,12 +104,12 @@ func RenderPanelWidth(title string, body string, width int) string {
 	b.WriteString("╭─ ")
 	b.WriteString(title)
 	b.WriteString(" ")
-	b.WriteString(strings.Repeat("─", maxInt(width-titleWidth-1, 0)))
+	b.WriteString(strings.Repeat("─", max(width-titleWidth-1, 0)))
 	b.WriteString("╮\n")
 	for _, line := range strings.Split(strings.TrimRight(body, "\n"), "\n") {
 		b.WriteString("│ ")
 		b.WriteString(line)
-		b.WriteString(strings.Repeat(" ", maxInt(width-visibleWidth(stripANSI(line)), 0)))
+		b.WriteString(strings.Repeat(" ", max(width-visibleWidth(line), 0)))
 		b.WriteString(" │\n")
 	}
 	b.WriteString("╰")
@@ -191,18 +191,5 @@ func visibleWidth(s string) int {
 }
 
 func maxLineWidth(title string, body string) int {
-	width := visibleWidth(stripANSI(title))
-	for _, line := range strings.Split(strings.TrimRight(body, "\n"), "\n") {
-		if w := visibleWidth(stripANSI(line)); w > width {
-			width = w
-		}
-	}
-	return width
-}
-
-func maxInt(a int, b int) int {
-	if a > b {
-		return a
-	}
-	return b
+	return max(visibleWidth(title), visibleWidth(body))
 }

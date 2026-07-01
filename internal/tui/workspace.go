@@ -23,7 +23,7 @@ func (m Model) workspaceView() string {
 	b.WriteString("\n")
 	b.WriteString(truncateANSI(styles.Render(RoleIdentity, title), m.width))
 	b.WriteString("\n")
-	b.WriteString(styles.Render(RoleSeparator, strings.Repeat("─", maxInt(minInt(m.width, 76)-2, 12))))
+	b.WriteString(styles.Render(RoleSeparator, strings.Repeat("─", max(min(m.width, 76)-2, 12))))
 	b.WriteString("\n")
 	if banner := m.listDegradedBanner(); banner != "" {
 		b.WriteString(banner)
@@ -56,7 +56,7 @@ func (m Model) cacheStatusCard(s session.Session) string {
 		percent := cappedPercent(*status.PercentElapsed)
 		ttlLine = fmt.Sprintf("%s %s  %.0f%%  %s  %s", padANSI(styles.Render(statusRole(status), state), 10), ProgressBar(percent, 20), percent, cacheStatusTime(status), cacheTierText(s))
 	}
-	fmt.Fprintf(&b, "%s\n", truncateANSI(ttlLine, maxInt(m.width-4, 20)))
+	fmt.Fprintf(&b, "%s\n", truncateANSI(ttlLine, max(m.width-4, 20)))
 	return m.renderWorkspacePanel("Cache Status", b.String())
 }
 
@@ -69,9 +69,9 @@ func (m Model) sessionInfoCard(s session.Session) string {
 	}
 	var b strings.Builder
 	styles := DefaultStyles()
-	fmt.Fprintf(&b, "%s   %s\n", styles.Render(RoleMuted, "Session ID"), truncateMiddle(s.SessionID, maxInt(m.width-18, 24)))
-	fmt.Fprintf(&b, "%s     %s  %s\n", styles.Render(RoleMuted, "Messages"), messageLabel("first"), messageText(truncateEnd(emptyDash(displayExcerpt(s.Messages.FirstUserExcerpt)), maxInt(m.width-27, 18))))
-	fmt.Fprintf(&b, "             %s  %s\n", messageLabel("last"), messageText(truncateEnd(emptyDash(displayExcerpt(s.Messages.LastUserExcerpt)), maxInt(m.width-27, 18))))
+	fmt.Fprintf(&b, "%s   %s\n", styles.Render(RoleMuted, "Session ID"), truncateMiddle(s.SessionID, max(m.width-18, 24)))
+	fmt.Fprintf(&b, "%s     %s  %s\n", styles.Render(RoleMuted, "Messages"), messageLabel("first"), messageText(truncateEnd(emptyDash(displayExcerpt(s.Messages.FirstUserExcerpt)), max(m.width-27, 18))))
+	fmt.Fprintf(&b, "             %s  %s\n", messageLabel("last"), messageText(truncateEnd(emptyDash(displayExcerpt(s.Messages.LastUserExcerpt)), max(m.width-27, 18))))
 	fmt.Fprintf(&b, "%s       writes %d  reads %d  hit %s %.0f%%\n", styles.Render(RoleMuted, "Tokens"), s.TokenStats.CacheWrites, s.TokenStats.CacheReads, HitRateProgressBar(s.TokenStats.HitRate, 8), s.TokenStats.HitRate)
 	fmt.Fprintf(&b, "%s         %s  %s\n", styles.Render(RoleMuted, "Gaps"), gapSummary(s), styles.Render(RoleMuted, "v details"))
 	return m.renderWorkspacePanel("Session Info", b.String())
@@ -80,7 +80,7 @@ func (m Model) sessionInfoCard(s session.Session) string {
 func (m Model) compactSessionInfoCard(s session.Session) string {
 	var b strings.Builder
 	styles := DefaultStyles()
-	fmt.Fprintf(&b, "%s   %s\n", styles.Render(RoleMuted, "Session ID"), truncateMiddle(s.SessionID, maxInt(m.width-18, 24)))
+	fmt.Fprintf(&b, "%s   %s\n", styles.Render(RoleMuted, "Session ID"), truncateMiddle(s.SessionID, max(m.width-18, 24)))
 	fmt.Fprintf(&b, "%s       writes %d  reads %d  hit %.0f%%\n", styles.Render(RoleMuted, "Tokens"), s.TokenStats.CacheWrites, s.TokenStats.CacheReads, s.TokenStats.HitRate)
 	return m.renderWorkspacePanel("Session Info", b.String())
 }
@@ -97,11 +97,11 @@ func (m Model) sessionInfoDetailsCard(s session.Session) string {
 		title = DefaultStyles().Render(RoleIdentity, "› "+title)
 	}
 	styles := DefaultStyles()
-	fmt.Fprintf(&b, "%s   %s\n", styles.Render(RoleMuted, "Session ID"), truncateMiddle(s.SessionID, maxInt(m.width-18, 24)))
-	fmt.Fprintf(&b, "%s        %s\n", styles.Render(RoleMuted, "JSONL"), truncateMiddle(s.JSONLPath, maxInt(m.width-18, 24)))
+	fmt.Fprintf(&b, "%s   %s\n", styles.Render(RoleMuted, "Session ID"), truncateMiddle(s.SessionID, max(m.width-18, 24)))
+	fmt.Fprintf(&b, "%s        %s\n", styles.Render(RoleMuted, "JSONL"), truncateMiddle(s.JSONLPath, max(m.width-18, 24)))
 	fmt.Fprintf(&b, "%s      parsed %s · file modified %s\n", styles.Render(RoleMuted, "Updated"), m.now.Local().Format("15:04:05"), s.FileModifiedAt.Local().Format("15:04:05"))
-	fmt.Fprintf(&b, "%s     %s  %s\n", styles.Render(RoleMuted, "Messages"), messageLabel("first"), messageText(truncateEnd(emptyDash(displayExcerpt(s.Messages.FirstUserExcerpt)), maxInt(m.width-27, 18))))
-	fmt.Fprintf(&b, "             %s  %s\n", messageLabel("last"), messageText(truncateEnd(emptyDash(displayExcerpt(s.Messages.LastUserExcerpt)), maxInt(m.width-27, 18))))
+	fmt.Fprintf(&b, "%s     %s  %s\n", styles.Render(RoleMuted, "Messages"), messageLabel("first"), messageText(truncateEnd(emptyDash(displayExcerpt(s.Messages.FirstUserExcerpt)), max(m.width-27, 18))))
+	fmt.Fprintf(&b, "             %s  %s\n", messageLabel("last"), messageText(truncateEnd(emptyDash(displayExcerpt(s.Messages.LastUserExcerpt)), max(m.width-27, 18))))
 	fmt.Fprintf(&b, "%s  writes %d · reads %d · hit %s %.0f%% · output %d\n", styles.Render(RoleMuted, "Token Stats"), s.TokenStats.CacheWrites, s.TokenStats.CacheReads, HitRateProgressBar(s.TokenStats.HitRate, 10), s.TokenStats.HitRate, s.TokenStats.OutputTokens)
 	fmt.Fprintf(&b, "%s\n", styles.Render(RoleMuted, "Mid-session Gaps >1min · "+m.gapSortLabel()))
 	gaps := m.visibleDetailGaps(s)
@@ -109,7 +109,7 @@ func (m Model) sessionInfoDetailsCard(s session.Session) string {
 		fmt.Fprintf(&b, "%s\n", styles.Render(RoleMuted, "No mid-session gaps found."))
 	} else {
 		for _, gap := range gaps {
-			fmt.Fprintf(&b, "%s\n", truncateANSI(formatGapLine(gap, s, m.gapSortNewest), maxInt(m.width-4, 20)))
+			fmt.Fprintf(&b, "%s\n", truncateANSI(formatGapLine(gap, s, m.gapSortNewest), max(m.width-4, 20)))
 		}
 	}
 	if total := len(s.Gaps); total > len(gaps) {
@@ -127,7 +127,7 @@ func (m Model) renderWorkspacePanel(title string, body string) string {
 }
 
 func (m Model) workspacePanelWidth() int {
-	return maxInt(minInt(m.width-4, maxPanelBodyWidth), 24)
+	return max(min(m.width-4, maxPanelBodyWidth), 24)
 }
 
 func (m Model) workspacePanelGap() string {
@@ -546,13 +546,6 @@ func (m Model) actionBanner() string {
 		return ""
 	}
 	return DefaultStyles().Render(m.notice.Role, m.notice.Message)
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func thresholdSummary(thresholds []int) string {

@@ -90,7 +90,7 @@ func (m Model) keepAliveCard(s session.Session, state keepalive.SessionState) st
 		fmt.Fprintf(&b, "Next         Send now or cancel before countdown ends\n")
 		fmt.Fprintf(&b, "Msg Preview  %q\n", m.keepAliveConfig.Message)
 		if seconds := m.countdowns[s.SessionID]; seconds > 0 {
-			percent := float64(seconds) / float64(maxInt(m.keepAliveConfig.CountdownSeconds, 1)) * 100
+			percent := float64(seconds) / float64(max(m.keepAliveConfig.CountdownSeconds, 1)) * 100
 			fmt.Fprintf(&b, "Countdown    %s %ds remaining\n", ProgressBar(percent, 12), seconds)
 			fmt.Fprintf(&b, "Scope        %d / %d sends\n", state.ScopeUsed, maxSends(state))
 		} else {

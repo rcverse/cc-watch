@@ -51,8 +51,8 @@ func Validate(cfg Config) error {
 func EffectiveKeepAliveSummary(cfg Config) KeepAliveSummary {
 	trigger := cfg.KeepAlive.TriggerBeforeExpiryMinutes * 60
 	summary := KeepAliveSummary{
-		EffectiveTriggerSeconds1Hour:   minInt(trigger, 3600/5),
-		EffectiveTriggerSeconds5Minute: minInt(trigger, 300/5),
+		EffectiveTriggerSeconds1Hour:   min(trigger, 3600/5),
+		EffectiveTriggerSeconds5Minute: min(trigger, 300/5),
 	}
 	summary.EffectiveCountdown1Hour, summary.AutoSendDisabledFor1Hour = effectiveCountdown(cfg.KeepAlive.CountdownSeconds, summary.EffectiveTriggerSeconds1Hour)
 	summary.EffectiveCountdown5Minute, summary.AutoSendDisabledFor5Minute = effectiveCountdown(cfg.KeepAlive.CountdownSeconds, summary.EffectiveTriggerSeconds5Minute)
@@ -88,11 +88,4 @@ func effectiveCountdown(configuredCountdown, effectiveTrigger int) (int, bool) {
 		return latestSafeCountdown, true
 	}
 	return configuredCountdown, false
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

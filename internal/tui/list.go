@@ -52,7 +52,7 @@ func (m Model) listHeader() string {
 	styles := DefaultStyles()
 	width := m.listWidth()
 	title := truncateANSI(styles.Render(RoleIdentity, "Claude Code Watch"), width)
-	return "\n" + title + "\n" + styles.Render(RoleSeparator, strings.Repeat("─", maxInt(minInt(width, 68)-2, 12))) + "\n"
+	return "\n" + title + "\n" + styles.Render(RoleSeparator, strings.Repeat("─", max(min(width, 68)-2, 12))) + "\n"
 }
 
 func (m Model) listDegradedBanner() string {
@@ -97,7 +97,7 @@ func (m Model) listDegradedBanner() string {
 	var lines []string
 	width := m.listWidth()
 	for _, message := range messages {
-		lines = append(lines, styles.Render(RoleWarning, truncateEnd(prefix+message, maxInt(width-2, 20))))
+		lines = append(lines, styles.Render(RoleWarning, truncateEnd(prefix+message, max(width-2, 20))))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -108,7 +108,7 @@ func (m Model) emptyStateBlock(title string, body string, path string) string {
 	fmt.Fprintf(&b, "  %s\n", styles.Render(RoleIdentity, title))
 	fmt.Fprintf(&b, "     %s\n", body)
 	if path != "" {
-		fmt.Fprintf(&b, "     %s  %s\n", styles.Render(RoleMuted, "path"), truncateMiddle(path, maxInt(m.listWidth()-17, 16)))
+		fmt.Fprintf(&b, "     %s  %s\n", styles.Render(RoleMuted, "path"), truncateMiddle(path, max(m.listWidth()-17, 16)))
 	}
 	b.WriteString("\n")
 	for _, action := range emptyFocusActions {
@@ -151,7 +151,7 @@ func (m Model) ambiguousListView() string {
 	width := m.listWidth()
 	b.WriteString(styles.Render(RoleIdentity, "Claude Code Watch / choose session"))
 	b.WriteString("\n")
-	b.WriteString(styles.Render(RoleSeparator, strings.Repeat("─", maxInt(minInt(width, 68)-2, 12))))
+	b.WriteString(styles.Render(RoleSeparator, strings.Repeat("─", max(min(width, 68)-2, 12))))
 	b.WriteString("\n\n")
 	fmt.Fprintf(&b, "  partial id %s matched more than one session\n\n", styles.Render(RoleWarning, m.refreshQuery()))
 	for i, s := range m.sessions {
@@ -215,12 +215,12 @@ func (m Model) renderListRow(index int, s session.Session) string {
 	firstExcerpt := displayExcerpt(s.Messages.FirstUserExcerpt)
 	lastExcerpt := displayExcerpt(s.Messages.LastUserExcerpt)
 	if firstExcerpt != "" {
-		fmt.Fprintf(&b, "  %s  %s\n", messageLabel("first"), messageText(truncateEnd(firstExcerpt, maxInt(width-16, 18))))
+		fmt.Fprintf(&b, "  %s  %s\n", messageLabel("first"), messageText(truncateEnd(firstExcerpt, max(width-16, 18))))
 	}
 	if lastExcerpt != "" {
-		available := maxInt(width-13, 18)
+		available := max(width-13, 18)
 		if width < 90 {
-			available = maxInt(width-13, 18)
+			available = max(width-13, 18)
 		}
 		fmt.Fprintf(&b, "  %s  %s\n", messageLabel("last"), messageText(truncateEnd(lastExcerpt, available)))
 	}
@@ -271,7 +271,7 @@ func (m Model) listPaginationLine() string {
 }
 
 func (m Model) listWidth() int {
-	return maxInt(minInt(m.width, maxVisualLineWidth), 24)
+	return max(min(m.width, maxVisualLineWidth), 24)
 }
 
 func cacheDisplay(s session.Session) string {

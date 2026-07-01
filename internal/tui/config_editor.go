@@ -109,7 +109,7 @@ func (m Model) renderConfigPanel(title string, body string) string {
 }
 
 func (m Model) configPanelBodyWidth() int {
-	return maxInt(minInt(m.width-4, maxPanelBodyWidth), 24)
+	return max(min(m.width-4, maxPanelBodyWidth), 24)
 }
 
 func truncateBodyLines(body string, width int) string {

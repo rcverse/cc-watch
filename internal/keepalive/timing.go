@@ -33,7 +33,7 @@ func EvaluateTiming(s session.Session, now time.Time, cfg config.KeepAliveConfig
 		remaining = 0
 	}
 
-	trigger := minInt(cfg.TriggerBeforeExpiryMinutes*60, ttl/5)
+	trigger := min(cfg.TriggerBeforeExpiryMinutes*60, ttl/5)
 	if trigger <= 0 {
 		trigger = remaining
 	}
@@ -72,11 +72,4 @@ func effectiveCountdown(configuredCountdown, sendWindow int) (int, bool, bool) {
 		return latestSafeCountdown, false, true
 	}
 	return configuredCountdown, false, false
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

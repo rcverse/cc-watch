@@ -181,7 +181,7 @@ func tuiDependencies(cmd Command, deps Dependencies, home string) tui.Dependenci
 	notifyEvent := deps.NotifyEvent
 	resetNotificationSuppression := deps.ResetNotificationSuppression
 	if notifyEvent == nil || resetNotificationSuppression == nil {
-		manager := notify.NewManager(notify.NewPlatformNotifier("", notify.ExecRunner))
+		manager := notify.NewManager(notify.NewPlatformNotifier(notify.ExecRunner))
 		if notifyEvent == nil {
 			notifyEvent = manager.Notify
 		}

@@ -202,7 +202,7 @@ func FormatEvent(event Event) Notification {
 	}
 }
 
-func NewPlatformNotifier(goos string, runner Runner) Notifier {
+func NewPlatformNotifier(runner Runner) Notifier {
 	return NewCommandNotifier(MacOSCommand, runner)
 }
 
