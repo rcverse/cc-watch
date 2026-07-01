@@ -8,9 +8,9 @@ Update this file before ending any implementation context.
 
 - Current phase: Phase 14 - Final Acceptance Verification
 - Current phase file: `docs/superpowers/plans/cc-watch-v2/phase-14-final-acceptance.md`
-- Current step: Post-acceptance List View width cap and keyboard/dead-code audit complete; v2 remains ready for user-approved local command switchover as a separate operator action
+- Current step: Post-acceptance List/Workspace title spacing alignment complete; v2 remains ready for user-approved local command switchover as a separate operator action
 - Status: complete
-- Last updated: 2026-07-01
+- Last updated: 2026-07-02
 
 ## Phase Status
 
@@ -146,6 +146,7 @@ Update this file before ending any implementation context.
 | 2026-06-30 | Post-acceptance README tone rewrite | Rewrote `README.md` tone for a sharper opening, friendlier section copy, and lighter wording while preserving usage, config, and KeepAlive mechanism detail; legacy product-name scan for README; `git diff --check -- README.md` | pass | Opening now starts with `Know when your Claude Code cache is alive, fading, or gone.` README keeps detailed CLI/config/KeepAlive content with less stiff prose. |
 | 2026-06-30 | Post-acceptance rename audit and TUI navigation cleanup | Exact old-name scan; red/green checks for list-opened config `Esc` returning to List View, wide Workspace panels staying <=80 columns, and wide Config panels staying <=80 columns; `env GOCACHE=/private/tmp/cc-watch-go-build GOMODCACHE=/private/tmp/cc-watch-go-mod go test ./internal/tui`; `env GOCACHE=/private/tmp/cc-watch-go-build GOMODCACHE=/private/tmp/cc-watch-go-mod go test -count=1 ./...`; `git diff --check` | pass | No exact `cc-cache`/`cc_cache` residuals found. Workspace and Config panel bodies cap at 76 columns, producing 80-column frames on wide terminals. Config opened from List/Ambiguous returns to the prior route on `Esc`/Cancel; direct `cc-watch config` still quits on cancel because there is no prior TUI route. Workspace `Esc` now matches the advertised back behavior. |
 | 2026-07-01 | Post-acceptance List View cap and keyboard/dead-code audit | Red/green checks for wide List View staying <=80 columns and expanded Workspace details advertising back; keyboard route/footer/focus audit; file/package size audit; active-doc/code old-name scan; `env GOCACHE=/private/tmp/cc-watch-go-build GOMODCACHE=/private/tmp/cc-watch-go-mod go test ./internal/tui`; `env GOCACHE=/private/tmp/cc-watch-go-build GOMODCACHE=/private/tmp/cc-watch-go-mod go test -count=1 ./...`; `env GOCACHE=/private/tmp/cc-watch-go-build GOMODCACHE=/private/tmp/cc-watch-go-mod go vet ./...`; `git diff --check` | pass | List View now shares the 80-column visual cap with Workspace/Config while preserving first/last excerpts. Expanded Workspace details footer now advertises `b/⎋ back`. `go vet` was clean; no active code/doc exact old-name residuals found. Audit found TUI remains the main over-fragmented area but no tiny safe deletion beyond the duplicate List footer branch removed here. |
+| 2026-07-02 | Post-acceptance List/Workspace title spacing alignment | Screenshot-driven red/green check for List header separator-to-row spacing; `env GOCACHE=/private/tmp/cc-watch-go-build GOMODCACHE=/private/tmp/cc-watch-go-mod go test ./internal/tui -run TestListKeepsEveryVisibleRowExcerptAndAddsTitleBreathingRoom -count=1`; `env GOCACHE=/private/tmp/cc-watch-go-build GOMODCACHE=/private/tmp/cc-watch-go-mod go test ./internal/tui`; `git diff --check` | pass | Removed the extra unconditional blank row after the List title rule so List View and Workspace use the same title-to-content rhythm. |
 
 ## Review Ledger
 

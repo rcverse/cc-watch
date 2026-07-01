@@ -372,6 +372,20 @@ func TestListKeepsEveryVisibleRowExcerptAndAddsTitleBreathingRoom(t *testing.T) 
 	if !strings.HasPrefix(plain, "\nClaude Code Watch\n") {
 		t.Fatalf("main title is missing top breathing room:\n%s", view)
 	}
+	lines := strings.Split(plain, "\n")
+	separatorIndex := -1
+	rowIndex := -1
+	for i, line := range lines {
+		if separatorIndex == -1 && strings.HasPrefix(line, "──") {
+			separatorIndex = i
+		}
+		if rowIndex == -1 && strings.Contains(line, "#1") {
+			rowIndex = i
+		}
+	}
+	if separatorIndex == -1 || rowIndex == -1 || rowIndex-separatorIndex != 1 {
+		t.Fatalf("list title spacing differs from workspace; separator=%d row=%d:\n%s", separatorIndex, rowIndex, view)
+	}
 	assertMaxLines(t, view, 30)
 	for _, want := range []string{"#1", "#4", "5ac2bc00", "Users-r...m-skills", "Page 1/2"} {
 		if !strings.Contains(plain, want) {

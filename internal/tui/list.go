@@ -27,7 +27,6 @@ func (m Model) listView() string {
 		b.WriteString(banner)
 		b.WriteString("\n")
 	}
-	b.WriteString("\n")
 
 	switch m.refresh.EmptyState {
 	case EmptyLoading:
