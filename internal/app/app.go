@@ -43,7 +43,7 @@ func DefaultDependencies() Dependencies {
 	}
 }
 
-// RunWithDeps dispatches CLI modes. Phase 3 wires JSON as a non-interactive snapshot path.
+// RunWithDeps dispatches CLI modes, including JSON as a non-interactive snapshot path.
 func RunWithDeps(args []string, stdout io.Writer, stderr io.Writer, deps Dependencies) int {
 	cmd, err := ParseArgs(args)
 	if err != nil {
