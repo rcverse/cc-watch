@@ -6,7 +6,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/richardchen/cc-cache/internal/config"
+	"github.com/richardchen/cc-watch/internal/config"
 )
 
 func TestConfigFocusCycleOnlyVisitsVisibleRows(t *testing.T) {
@@ -42,8 +42,21 @@ func TestListConfigShortcutOpensConfigEditor(t *testing.T) {
 	if model.Route() != RouteConfig {
 		t.Fatalf("c from list route = %q, want config", model.Route())
 	}
-	if !strings.Contains(model.View(), "Claude Code Cache / config") {
+	if !strings.Contains(model.View(), "Claude Code Watch / config") {
 		t.Fatalf("config shortcut did not render config editor:\n%s", model.View())
+	}
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	model = updated.(Model)
+
+	if cmd != nil {
+		t.Fatalf("esc from list-opened config returned command, want nil")
+	}
+	if model.Route() != RouteList {
+		t.Fatalf("route = %q, want list", model.Route())
+	}
+	if model.LastAction() != "back_to_list" {
+		t.Fatalf("last action = %q, want back_to_list", model.LastAction())
 	}
 }
 
@@ -66,7 +79,7 @@ func TestConfigEditorPrefillsCurrentValueAndPreservesMessageOnEmptyEdit(t *testi
 	model = moveConfigFocusTo(t, model, "config_message")
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated.(Model)
-	if !strings.Contains(model.View(), cfg.KeepAlive.Message) || !strings.Contains(model.View(), "Enter saves field") {
+	if !strings.Contains(model.View(), cfg.KeepAlive.Message) || !strings.Contains(model.View(), "↵ save field") {
 		t.Fatalf("message edit did not prefill current value with guidance:\n%s", model.View())
 	}
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})

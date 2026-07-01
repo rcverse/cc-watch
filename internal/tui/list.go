@@ -5,10 +5,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/richardchen/cc-cache/internal/keepalive"
-	"github.com/richardchen/cc-cache/internal/refresh"
-	"github.com/richardchen/cc-cache/internal/session"
+	"github.com/richardchen/cc-watch/internal/keepalive"
+	"github.com/richardchen/cc-watch/internal/refresh"
+	"github.com/richardchen/cc-watch/internal/session"
 )
+
+const listPageSize = 4
 
 func (m Model) listView() string {
 	var b strings.Builder
@@ -35,44 +37,34 @@ func (m Model) listView() string {
 	case EmptyNoSessions:
 		b.WriteString(m.emptyStateBlock("No sessions found", "Sessions appear after Claude Code writes JSONL files.", m.refresh.ProjectsDir))
 	default:
-		for i, s := range m.sessions {
+		start, end := m.listVisibleRange()
+		for i := start; i < end; i++ {
+			s := m.sessions[i]
 			b.WriteString(m.renderListRow(i, s))
 		}
+		b.WriteString(m.listPaginationLine())
 	}
 
 	b.WriteString(m.listFooter())
-	if m.helpOpen {
-		b.WriteString("\n")
-		b.WriteString(m.helpText())
-	}
 	return b.String()
 }
 
 func (m Model) listHeader() string {
 	styles := DefaultStyles()
-	status := m.refresh.Watcher.Status
-	if status == "" {
-		status = "ok"
-	}
-	parts := []string{
-		styles.Render(RoleIdentity, "Claude Code Cache"),
-		styles.Render(RoleMuted, fmt.Sprintf("%d sessions", len(m.sessions))),
-	}
-	if status != "" && status != refresh.StatusOK {
-		parts = append(parts, styles.Render(RoleWarning, "watcher "+string(status)))
-	} else {
-		parts = append(parts, styles.Render(RoleMuted, "live"))
-	}
-	parts = append(parts, styles.Render(RoleMuted, "updated "+m.now.Local().Format("15:04")))
-	line := strings.Join(parts, styles.Render(RoleSeparator, "  ·  "))
-	return truncateANSI(line, m.width) + "\n" + styles.Render(RoleSeparator, strings.Repeat("─", maxInt(minInt(m.width, 68)-2, 12))) + "\n"
+	width := m.listWidth()
+	title := truncateANSI(styles.Render(RoleIdentity, "Claude Code Watch"), width)
+	return "\n" + title + "\n" + styles.Render(RoleSeparator, strings.Repeat("─", maxInt(minInt(width, 68)-2, 12))) + "\n"
 }
 
 func (m Model) listDegradedBanner() string {
 	var messages []string
 	deliveredOnly := false
 	if len(m.refresh.Watcher.Messages) > 0 {
-		messages = append(messages, m.refresh.Watcher.Messages[0])
+		message := m.refresh.Watcher.Messages[0]
+		if m.refresh.Watcher.Status != "" && m.refresh.Watcher.Status != refresh.StatusOK {
+			message = "watcher " + string(m.refresh.Watcher.Status) + ": " + message
+		}
+		messages = append(messages, message)
 	}
 	if m.refresh.NotificationDegraded != "" {
 		messages = append(messages, "notifications degraded: "+m.refresh.NotificationDegraded)
@@ -104,8 +96,9 @@ func (m Model) listDegradedBanner() string {
 		prefix = "  "
 	}
 	var lines []string
+	width := m.listWidth()
 	for _, message := range messages {
-		lines = append(lines, styles.Render(RoleWarning, truncateEnd(prefix+message, maxInt(m.width-2, 20))))
+		lines = append(lines, styles.Render(RoleWarning, truncateEnd(prefix+message, maxInt(width-2, 20))))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -116,7 +109,7 @@ func (m Model) emptyStateBlock(title string, body string, path string) string {
 	fmt.Fprintf(&b, "  %s\n", styles.Render(RoleIdentity, title))
 	fmt.Fprintf(&b, "     %s\n", body)
 	if path != "" {
-		fmt.Fprintf(&b, "     %s  %s\n", styles.Render(RoleMuted, "path"), truncateMiddle(path, maxInt(m.width-17, 16)))
+		fmt.Fprintf(&b, "     %s  %s\n", styles.Render(RoleMuted, "path"), truncateMiddle(path, maxInt(m.listWidth()-17, 16)))
 	}
 	b.WriteString("\n")
 	for _, action := range emptyFocusActions {
@@ -136,8 +129,6 @@ func (m Model) emptyActionRow(action string) string {
 	switch action {
 	case "refresh":
 		label = "Refresh"
-	case "help":
-		label = "Help"
 	case "quit":
 		label = "Quit"
 	}
@@ -148,10 +139,8 @@ func emptyActionDetail(action string) string {
 	switch action {
 	case "refresh":
 		return "check again"
-	case "help":
-		return "show key hints"
 	case "quit":
-		return "close cc-cache"
+		return "close cc-watch"
 	default:
 		return ""
 	}
@@ -160,21 +149,23 @@ func emptyActionDetail(action string) string {
 func (m Model) ambiguousListView() string {
 	var b strings.Builder
 	styles := DefaultStyles()
-	b.WriteString(styles.Render(RoleIdentity, "Claude Code Cache / choose session"))
+	width := m.listWidth()
+	b.WriteString(styles.Render(RoleIdentity, "Claude Code Watch / choose session"))
 	b.WriteString("\n")
-	b.WriteString(styles.Render(RoleSeparator, strings.Repeat("─", maxInt(minInt(m.width, 68)-2, 12))))
+	b.WriteString(styles.Render(RoleSeparator, strings.Repeat("─", maxInt(minInt(width, 68)-2, 12))))
 	b.WriteString("\n\n")
 	fmt.Fprintf(&b, "  partial id %s matched more than one session\n\n", styles.Render(RoleWarning, m.refreshQuery()))
 	for i, s := range m.sessions {
 		b.WriteString(m.renderListRow(i, s))
 	}
-	b.WriteString("up/down move  enter open selected  esc list  q quit\n")
+	b.WriteString(cueLine("↑↓ move  ↵ open selected  ⎋ list  q quit"))
 	return b.String()
 }
 
 func (m Model) renderListRow(index int, s session.Session) string {
 	var b strings.Builder
 	styles := DefaultStyles()
+	width := m.listWidth()
 	selected := m.focusIndex == index
 	marker := " "
 	if selected {
@@ -186,30 +177,32 @@ func (m Model) renderListRow(index int, s session.Session) string {
 		id = styles.Render(RoleIdentity, id)
 	}
 	projectWidth := 18
-	if m.width >= 100 {
+	if width >= 100 {
 		projectWidth = 28
 	}
-	if m.width >= 120 {
+	if width >= 120 {
 		projectWidth = 36
 	}
-	identity := fmt.Sprintf("  %s #%d  %s  %s  %s  %s",
+	rowNumber := fmt.Sprintf("#%d", index+1)
+	project := styles.Render(RoleIdentity, truncateMiddle(s.Project, projectWidth))
+	identity := fmt.Sprintf("%s %s %s  %s  %s  %s",
 		marker,
-		index+1,
-		id,
+		padANSI(rowNumber, 4),
+		padANSI(id, 12),
 		styles.Render(RoleSeparator, "·"),
-		styles.Render(RoleIdentity, truncateMiddle(s.Project, projectWidth)),
-		cacheDisplay(s),
+		padANSI(project, projectWidth),
+		padANSI(cacheDisplay(s), 12),
 	)
-	identity = appendChips(identity, []string{keepAliveChip(m, s), reminderChip(m, s)}, m.width)
-	b.WriteString(truncateANSI(identity, m.width))
+	identity = appendChips(identity, []string{keepAliveChip(m, s), reminderChip(m, s)}, width)
+	b.WriteString(truncateANSI(identity, width))
 	b.WriteString("\n")
 
-	statusLine := fmt.Sprintf("     %s  %s  hit %.0f%%",
-		sessionStatusText(status, m.now),
+	statusLine := fmt.Sprintf("  %s  %s  hit %.0f%%",
+		padANSI(sessionStatusText(status, m.now), 24),
 		progressSummary(status),
 		s.TokenStats.HitRate,
 	)
-	if m.width >= 120 {
+	if width >= 120 {
 		if s.DurationSeconds != nil {
 			statusLine += "  duration " + formatDuration(*s.DurationSeconds)
 		}
@@ -217,28 +210,69 @@ func (m Model) renderListRow(index int, s session.Session) string {
 			statusLine += fmt.Sprintf("  warnings %d", len(s.Warnings))
 		}
 	}
-	b.WriteString(truncateANSI(statusLine, m.width))
+	b.WriteString(truncateANSI(statusLine, width))
 	b.WriteString("\n")
 
 	firstExcerpt := displayExcerpt(s.Messages.FirstUserExcerpt)
 	lastExcerpt := displayExcerpt(s.Messages.LastUserExcerpt)
-	if m.width >= 96 && firstExcerpt != "" {
-		fmt.Fprintf(&b, "    %s  %s\n", styles.Render(RoleExcerptLabel, "first"), truncateEnd(firstExcerpt, maxInt(m.width-13, 18)))
+	if firstExcerpt != "" {
+		fmt.Fprintf(&b, "  %s  %s\n", messageLabel("first"), messageText(truncateEnd(firstExcerpt, maxInt(width-16, 18))))
 	}
 	if lastExcerpt != "" {
-		label := "last"
-		available := maxInt(m.width-13, 18)
-		if m.width < 90 {
-			label = "last"
-			available = maxInt(m.width-13, 18)
+		available := maxInt(width-13, 18)
+		if width < 90 {
+			available = maxInt(width-13, 18)
 		}
-		fmt.Fprintf(&b, "    %s  %s\n", styles.Render(RoleExcerptLabel, label), truncateEnd(lastExcerpt, available))
+		fmt.Fprintf(&b, "  %s  %s\n", messageLabel("last"), messageText(truncateEnd(lastExcerpt, available)))
 	}
-	if len(s.Warnings) > 0 && m.width < 120 {
+	if len(s.Warnings) > 0 && width < 120 {
 		fmt.Fprintf(&b, "     %s\n", styles.Render(RoleWarning, fmt.Sprintf("! %d parse warning(s)", len(s.Warnings))))
 	}
 	b.WriteString("\n")
 	return b.String()
+}
+
+func (m Model) listVisibleRange() (int, int) {
+	if len(m.sessions) == 0 {
+		return 0, 0
+	}
+	selected := m.selectedIndex
+	if selected < 0 {
+		selected = 0
+	}
+	if selected >= len(m.sessions) {
+		selected = len(m.sessions) - 1
+	}
+	start := selected / listPageSize * listPageSize
+	end := start + listPageSize
+	if end > len(m.sessions) {
+		end = len(m.sessions)
+	}
+	return start, end
+}
+
+func (m Model) listPaginationLine() string {
+	if len(m.sessions) <= listPageSize {
+		return ""
+	}
+	start, _ := m.listVisibleRange()
+	page := start/listPageSize + 1
+	pages := (len(m.sessions) + listPageSize - 1) / listPageSize
+	styles := DefaultStyles()
+	prev := styles.Render(RoleMuted, "Prev")
+	if page > 1 {
+		prev = styles.Render(RoleIdentity, "< Prev")
+	}
+	next := styles.Render(RoleMuted, "Next")
+	if page < pages {
+		next = styles.Render(RoleIdentity, "Next >")
+	}
+	line := fmt.Sprintf("Page %d/%d  %s  %s", page, pages, prev, next)
+	return truncateANSI(line, m.listWidth()) + "\n\n"
+}
+
+func (m Model) listWidth() int {
+	return maxInt(minInt(m.width, maxVisualLineWidth), 24)
 }
 
 func cacheDisplay(s session.Session) string {
@@ -259,14 +293,14 @@ func sessionStatusText(status session.Status, now time.Time) string {
 	when := formatStatusTime(status)
 	switch status.State {
 	case session.StatusActive:
-		return styles.Render(RoleSuccess, "active") + " " + when + " left"
+		return padANSI(styles.Render(RoleSuccess, "● Active"), 12) + when + " left"
 	case session.StatusExpired:
 		if status.LastMessageAt != nil {
-			when = formatDuration(int(now.Sub(*status.LastMessageAt).Seconds())) + " ago"
+			when = formatStatusDuration(int(now.Sub(*status.LastMessageAt).Seconds())) + " ago"
 		}
-		return styles.Render(RoleDanger, "expired") + " " + when
+		return padANSI(styles.Render(RoleDanger, "× Expired"), 12) + when
 	case session.StatusUnknown:
-		return styles.Render(RoleDisabled, "unknown") + " " + when
+		return padANSI(styles.Render(RoleMuted, "○ Unknown"), 12) + when
 	default:
 		return string(status.State) + " " + when
 	}
@@ -292,6 +326,9 @@ func cappedPercent(percent float64) float64 {
 
 func reminderChip(m Model, s session.Session) string {
 	styles := DefaultStyles()
+	if s.StatusAt(m.now).State == session.StatusExpired {
+		return styles.Render(RoleDisabled, "remind N/A")
+	}
 	if m.reminderEnabled[s.SessionID] {
 		return styles.Render(RoleReminder, "remind") + " " + styles.Render(RoleSuccess, "ON")
 	}
@@ -300,6 +337,9 @@ func reminderChip(m Model, s session.Session) string {
 
 func keepAliveChip(m Model, s session.Session) string {
 	styles := DefaultStyles()
+	if s.StatusAt(m.now).State == session.StatusExpired {
+		return styles.Render(RoleDisabled, "KeepAlive N/A")
+	}
 	state := m.KeepAliveState(s.SessionID).State
 	switch state {
 	case keepalive.StateCountdown:
@@ -350,14 +390,17 @@ func truncateANSI(value string, max int) string {
 
 func (m Model) listFooter() string {
 	if m.isEmptyListState() {
-		return "enter act  u update  ? help  q quit\n"
+		return cueLine("↵ act  u update  q quit")
 	}
-	switch {
-	case m.width < 90:
-		return "↑↓ select  enter open  r remind  k KeepAlive  u update  c config  ? help  q quit\n"
-	default:
-		return "↑↓ select  enter open  r remind  k KeepAlive  u update  c config  ? help  q quit\n"
+	pageCue := ""
+	if len(m.sessions) > listPageSize {
+		pageCue = "  ←/→ page"
 	}
+	return cueLine("↑↓ select" + pageCue + "  ↵ open  r remind  k KeepAlive  u update  c config  q quit")
+}
+
+func cueLine(text string) string {
+	return DefaultStyles().Render(RoleMuted, text) + "\n"
 }
 
 func (m Model) focusedAction() string {
@@ -418,6 +461,24 @@ func (m *Model) moveFocus(delta int) {
 	}
 }
 
+func (m *Model) moveListPage(delta int) {
+	if len(m.sessions) <= listPageSize {
+		return
+	}
+	start, _ := m.listVisibleRange()
+	next := start + delta*listPageSize
+	if next < 0 {
+		next = 0
+	}
+	if next >= len(m.sessions) {
+		lastPage := (len(m.sessions) - 1) / listPageSize * listPageSize
+		next = lastPage
+	}
+	m.selectedIndex = next
+	m.focusIndex = next
+	m.selectedID = m.sessions[next].SessionID
+}
+
 func (m Model) selectedSession() *session.Session {
 	if len(m.sessions) == 0 {
 		return nil
@@ -439,6 +500,12 @@ func (m *Model) toggleReminderForSelected() {
 	if selected == nil {
 		return
 	}
+	if selected.StatusAt(m.now).State == session.StatusExpired {
+		m.reminderEnabled[selected.SessionID] = false
+		m.lastAction = "reminder_unavailable_expired"
+		m.setNotice("Reminder N/A after expiry", RoleMuted, 3*time.Second)
+		return
+	}
 	m.reminderEnabled[selected.SessionID] = !m.reminderEnabled[selected.SessionID]
 }
 
@@ -451,7 +518,7 @@ func (m *Model) toggleKeepAliveForSelected() {
 	if reason := m.keepAliveUnavailableReason(*selected); reason != "" {
 		m.disableKeepAlive(selected.SessionID)
 		m.lastAction = "keepalive_unavailable_expired"
-		m.setNotice("KeepAlive "+reason, RoleWarning, 3*time.Second)
+		m.setNotice("KeepAlive N/A "+reason, RoleMuted, 3*time.Second)
 		return
 	}
 	currentAction := m.FocusedAction()
@@ -523,14 +590,31 @@ func cacheLabel(s session.Session) string {
 func formatStatusTime(status session.Status) string {
 	switch {
 	case status.RemainingSeconds != nil:
-		return formatDuration(*status.RemainingSeconds)
+		return formatStatusDuration(*status.RemainingSeconds)
 	case status.ExpiredSeconds != nil:
-		return formatDuration(*status.ExpiredSeconds) + " ago"
+		return formatStatusDuration(*status.ExpiredSeconds) + " ago"
 	case status.LastMessageAt == nil:
 		return "no timestamp"
 	default:
 		return "no TTL"
 	}
+}
+
+func formatStatusDuration(seconds int) string {
+	if seconds < 0 {
+		seconds = 0
+	}
+	days := seconds / 86400
+	hours := seconds % 86400 / 3600
+	minutes := seconds % 3600 / 60
+	remainingSeconds := seconds % 60
+	if days > 0 {
+		return fmt.Sprintf("%dd%dh", days, hours)
+	}
+	if hours > 0 {
+		return fmt.Sprintf("%dh%02dm", hours, minutes)
+	}
+	return fmt.Sprintf("%dm%02ds", minutes, remainingSeconds)
 }
 
 func formatDuration(seconds int) string {

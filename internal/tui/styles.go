@@ -8,11 +8,20 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+const (
+	maxPanelBodyWidth  = 76
+	maxVisualLineWidth = maxPanelBodyWidth + 4
+)
+
 type StyleRole string
 
 const (
 	RoleNeutral       StyleRole = "neutral"
 	RoleMuted         StyleRole = "muted"
+	RoleCacheTier     StyleRole = "cache_tier"
+	RoleFirstLabel    StyleRole = "first_label"
+	RoleLastLabel     StyleRole = "last_label"
+	RoleExcerptText   StyleRole = "excerpt_text"
 	RoleExcerptLabel  StyleRole = "excerpt_label"
 	RoleReminder      StyleRole = "reminder"
 	RoleKeepAlive     StyleRole = "keepalive"
@@ -34,19 +43,23 @@ type SemanticStyles struct {
 func DefaultStyles() SemanticStyles {
 	return SemanticStyles{roles: map[StyleRole]lipgloss.Style{
 		RoleNeutral:       lipgloss.NewStyle(),
-		RoleMuted:         lipgloss.NewStyle().Foreground(lipgloss.Color("244")),
-		RoleExcerptLabel:  lipgloss.NewStyle().Foreground(lipgloss.Color("109")),
-		RoleReminder:      lipgloss.NewStyle().Foreground(lipgloss.Color("177")),
-		RoleKeepAlive:     lipgloss.NewStyle().Foreground(lipgloss.Color("214")),
-		RoleSeparator:     lipgloss.NewStyle().Foreground(lipgloss.Color("240")),
-		RoleIdentity:      lipgloss.NewStyle().Foreground(lipgloss.Color("81")).Bold(true),
-		RoleSelectedFocus: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Background(lipgloss.Color("24")),
-		RoleInfo:          lipgloss.NewStyle().Foreground(lipgloss.Color("39")),
-		RoleWarning:       lipgloss.NewStyle().Foreground(lipgloss.Color("214")),
-		RoleDanger:        lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true),
-		RoleSuccess:       lipgloss.NewStyle().Foreground(lipgloss.Color("42")),
-		RoleDisabled:      lipgloss.NewStyle().Foreground(lipgloss.Color("240")),
-		RoleDegraded:      lipgloss.NewStyle().Foreground(lipgloss.Color("202")),
+		RoleMuted:         lipgloss.NewStyle().Foreground(lipgloss.Color("245")),
+		RoleCacheTier:     lipgloss.NewStyle().Foreground(lipgloss.Color("250")).Italic(true),
+		RoleFirstLabel:    lipgloss.NewStyle().Foreground(lipgloss.Color("187")),
+		RoleLastLabel:     lipgloss.NewStyle().Foreground(lipgloss.Color("109")),
+		RoleExcerptText:   lipgloss.NewStyle().Italic(true),
+		RoleExcerptLabel:  lipgloss.NewStyle().Foreground(lipgloss.Color("144")),
+		RoleReminder:      lipgloss.NewStyle().Foreground(lipgloss.Color("110")),
+		RoleKeepAlive:     lipgloss.NewStyle().Foreground(lipgloss.Color("147")),
+		RoleSeparator:     lipgloss.NewStyle().Foreground(lipgloss.Color("242")),
+		RoleIdentity:      lipgloss.NewStyle().Foreground(lipgloss.Color("111")),
+		RoleSelectedFocus: lipgloss.NewStyle().Foreground(lipgloss.Color("111")).Underline(true),
+		RoleInfo:          lipgloss.NewStyle().Foreground(lipgloss.Color("109")),
+		RoleWarning:       lipgloss.NewStyle().Foreground(lipgloss.Color("179")),
+		RoleDanger:        lipgloss.NewStyle().Foreground(lipgloss.Color("167")),
+		RoleSuccess:       lipgloss.NewStyle().Foreground(lipgloss.Color("108")),
+		RoleDisabled:      lipgloss.NewStyle().Foreground(lipgloss.Color("244")),
+		RoleDegraded:      lipgloss.NewStyle().Foreground(lipgloss.Color("173")),
 	}}
 }
 

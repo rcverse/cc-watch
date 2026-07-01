@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/richardchen/cc-cache/internal/config"
-	"github.com/richardchen/cc-cache/internal/session"
-	"github.com/richardchen/cc-cache/internal/snapshot"
+	"github.com/richardchen/cc-watch/internal/config"
+	"github.com/richardchen/cc-watch/internal/session"
+	"github.com/richardchen/cc-watch/internal/snapshot"
 )
 
 func TestOptionsFromSnapshotMapsSelectedWorkspace(t *testing.T) {

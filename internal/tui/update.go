@@ -6,10 +6,10 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/richardchen/cc-cache/internal/keepalive"
-	"github.com/richardchen/cc-cache/internal/notify"
-	"github.com/richardchen/cc-cache/internal/refresh"
-	"github.com/richardchen/cc-cache/internal/session"
+	"github.com/richardchen/cc-watch/internal/keepalive"
+	"github.com/richardchen/cc-watch/internal/notify"
+	"github.com/richardchen/cc-watch/internal/refresh"
+	"github.com/richardchen/cc-watch/internal/session"
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -305,8 +305,16 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.String() {
 	case "?":
-		m.helpOpen = !m.helpOpen
-		m.lastAction = "toggle_help"
+		return m, nil
+	case "n", "right", "pagedown":
+		if m.route == RouteList {
+			m.moveListPage(1)
+		}
+		return m, nil
+	case "p", "left", "pageup":
+		if m.route == RouteList {
+			m.moveListPage(-1)
+		}
 		return m, nil
 	case "q", "ctrl+c":
 		m.lastAction = "quit"
@@ -349,14 +357,12 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "c":
 		if m.route == RouteList || m.route == RouteAmbiguous {
+			m.configReturnRoute = m.route
 			m.route = RouteConfig
 			m.focusIndex = m.defaultFocusIndex()
 			m.lastAction = "open_config"
 		} else if m.route == RouteWorkspace {
-			m.lastAction = "copy_session_id"
-			if selected := m.selectedSession(); selected != nil {
-				m.setNotice("Session ID shown: "+selected.SessionID, RoleInfo, 3*time.Second)
-			}
+			return m, nil
 		}
 		return m, nil
 	case "v":
@@ -369,10 +375,6 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "b", "esc":
 		if m.route == RouteWorkspace {
-			if msg.String() == "esc" && m.directWorkspace {
-				m.lastAction = "quit"
-				return m, tea.Quit
-			}
 			m.route = RouteList
 			m.lastAction = "back_to_list"
 		} else if m.route == RouteAmbiguous {
@@ -445,7 +447,7 @@ func (m *Model) toggleKeepAliveAutoSendForSelected() {
 	if reason := m.keepAliveUnavailableReason(*selected); reason != "" {
 		m.disableKeepAlive(selected.SessionID)
 		m.lastAction = "keepalive_unavailable_expired"
-		m.setNotice("KeepAlive "+reason, RoleWarning, 3*time.Second)
+		m.setNotice("KeepAlive N/A "+reason, RoleMuted, 3*time.Second)
 		return
 	}
 	state := m.KeepAliveState(selected.SessionID)
@@ -472,7 +474,7 @@ func (m Model) sendKeepAliveNow() (tea.Model, tea.Cmd) {
 	if reason := m.keepAliveUnavailableReason(*selected); reason != "" {
 		m.disableKeepAlive(selected.SessionID)
 		m.lastAction = "keepalive_unavailable_expired"
-		m.setNotice("KeepAlive "+reason, RoleWarning, 3*time.Second)
+		m.setNotice("KeepAlive N/A "+reason, RoleMuted, 3*time.Second)
 		m.restoreFocusAction("keepalive")
 		return m, nil
 	}

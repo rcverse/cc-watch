@@ -1,4 +1,4 @@
-module github.com/richardchen/cc-cache
+module github.com/richardchen/cc-watch
 
 go 1.23
 

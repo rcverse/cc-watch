@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/richardchen/cc-cache/internal/session"
+	"github.com/richardchen/cc-watch/internal/session"
 )
 
 func TestWatcherSetupRegistersRootAndExistingProjectDirectories(t *testing.T) {

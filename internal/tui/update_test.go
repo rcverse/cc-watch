@@ -7,11 +7,11 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/richardchen/cc-cache/internal/config"
-	"github.com/richardchen/cc-cache/internal/keepalive"
-	"github.com/richardchen/cc-cache/internal/notify"
-	"github.com/richardchen/cc-cache/internal/refresh"
-	"github.com/richardchen/cc-cache/internal/session"
+	"github.com/richardchen/cc-watch/internal/config"
+	"github.com/richardchen/cc-watch/internal/keepalive"
+	"github.com/richardchen/cc-watch/internal/notify"
+	"github.com/richardchen/cc-watch/internal/refresh"
+	"github.com/richardchen/cc-watch/internal/session"
 )
 
 func TestDisplayTickRecomputesTimeOnly(t *testing.T) {
@@ -178,7 +178,7 @@ func TestSessionStateIsDeepCopiedAcrossModelBoundaries(t *testing.T) {
 	}
 }
 
-func TestHelpToggleAndQuitKeys(t *testing.T) {
+func TestQuestionMarkIsInertAndQuitKeys(t *testing.T) {
 	model := NewModel(Options{})
 
 	updated, cmd := model.Update(keyRunes("?"))
@@ -186,11 +186,11 @@ func TestHelpToggleAndQuitKeys(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("? returned command, want nil")
 	}
-	if !model.HelpOpen() {
-		t.Fatal("HelpOpen = false, want true after ?")
+	if model.LastAction() == "toggle_help" {
+		t.Fatalf("? recorded removed help action: %q", model.LastAction())
 	}
-	if !strings.Contains(model.View(), "arrows") || !strings.Contains(model.View(), "enter") {
-		t.Fatalf("help view missing navigation copy:\n%s", model.View())
+	if strings.Contains(model.View(), "\nHelp\n") || strings.Contains(model.View(), "toggle help") {
+		t.Fatalf("removed help overlay rendered:\n%s", model.View())
 	}
 
 	updated, cmd = model.Update(keyRunes("q"))
@@ -214,7 +214,7 @@ func TestAdvertisedShortcutsAreHandledForCurrentRoute(t *testing.T) {
 	}
 
 	model = NewModel(Options{SelectedID: "11111111"})
-	for _, shortcut := range []string{"r", "k", "c", "b"} {
+	for _, shortcut := range []string{"r", "k", "b"} {
 		updated, _ := model.Update(keyRunes(shortcut))
 		model = updated.(Model)
 		if model.LastAction() == "" {
@@ -374,7 +374,7 @@ func TestEmptyStateFocusOnlyReachesValidActions(t *testing.T) {
 			t.Fatalf("empty state reached invalid action %q; saw %#v", disallowed, seen)
 		}
 	}
-	for _, want := range []string{"refresh", "help", "quit"} {
+	for _, want := range []string{"refresh", "quit"} {
 		if !seen[want] {
 			t.Fatalf("empty state did not reach %q; saw %#v", want, seen)
 		}
@@ -494,8 +494,8 @@ func TestListDirectKeysToggleAndActivate(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("? returned command, want nil")
 	}
-	if !model.HelpOpen() {
-		t.Fatal("HelpOpen = false, want true")
+	if model.LastAction() == "toggle_help" {
+		t.Fatalf("? recorded removed help action: %q", model.LastAction())
 	}
 
 	updated, cmd = model.Update(keyRunes("q"))
@@ -566,12 +566,12 @@ func TestWorkspaceFocusOrderAndFocusedActions(t *testing.T) {
 		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyDown})
 		model = updated.(Model)
 	}
-	for _, want := range []string{"reminder", "keepalive", "keepalive_autosend", "copy_id", "back"} {
+	for _, want := range []string{"reminder", "keepalive", "keepalive_autosend", "back"} {
 		if !seen[want] {
 			t.Fatalf("workspace focus action %q was not reachable; saw %#v", want, seen)
 		}
 	}
-	for _, hidden := range []string{"evidence", "refresh", "help", "quit"} {
+	for _, hidden := range []string{"copy_id", "evidence", "refresh", "help", "quit"} {
 		if seen[hidden] {
 			t.Fatalf("workspace focus reached hidden action %q; saw %#v", hidden, seen)
 		}
@@ -623,7 +623,7 @@ func TestWorkspaceEnterAndSpaceToggleFocusedControls(t *testing.T) {
 	}
 }
 
-func TestWorkspaceActionFeedbackForUpdateCopyAndCancelWatching(t *testing.T) {
+func TestWorkspaceActionFeedbackForUpdateAndCancelWatching(t *testing.T) {
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 	model := NewModel(Options{
 		Now:        now,
@@ -655,8 +655,8 @@ func TestWorkspaceActionFeedbackForUpdateCopyAndCancelWatching(t *testing.T) {
 
 	updated, _ = model.Update(keyRunes("c"))
 	model = updated.(Model)
-	if !strings.Contains(model.View(), "Session ID shown") || !strings.Contains(model.View(), "workspace-id") {
-		t.Fatalf("copy id missing visible feedback:\n%s", model.View())
+	if strings.Contains(model.View(), "Session ID shown") || model.LastAction() == "copy_session_id" {
+		t.Fatalf("workspace c still triggers Copy ID feedback/action:\n%s", model.View())
 	}
 
 	state := keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateMonitoringIdle, AutoSend: true, MaxSends: 1}
@@ -693,14 +693,52 @@ func TestTransientNoticesClearAfterDisplayTick(t *testing.T) {
 
 	updated, _ := model.Update(keyRunes("k"))
 	model = updated.(Model)
-	if !strings.Contains(model.View(), "KeepAlive unavailable after expiry") {
-		t.Fatalf("missing transient expiry notice:\n%s", model.View())
+	view := model.View()
+	if !strings.Contains(view, "Notice") || !strings.Contains(view, "KeepAlive N/A after expiry") {
+		t.Fatalf("missing transient expiry notice:\n%s", view)
+	}
+	assertOrder(t, view, "Controls", "Notice", "KeepAlive N/A after expiry")
+	if strings.Index(view, "KeepAlive N/A after expiry") < strings.Index(view, "Cache Status") {
+		t.Fatalf("transient notice rendered above workspace content:\n%s", view)
 	}
 
 	updated, _ = model.Update(DisplayTickMsg{Now: now.Add(4 * time.Second)})
 	model = updated.(Model)
-	if strings.Contains(model.View(), "KeepAlive unavailable after expiry") {
-		t.Fatalf("transient expiry notice did not clear:\n%s", model.View())
+	view = model.View()
+	if strings.Contains(view, "KeepAlive N/A after expiry") || strings.Contains(view, "Notice") {
+		t.Fatalf("transient expiry notice did not clear:\n%s", view)
+	}
+}
+
+func TestExpiredWorkspaceReminderIsNAAndCannotToggle(t *testing.T) {
+	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	expiredLast := now.Add(-2 * time.Hour)
+	expired := workspaceSession(now)
+	expired.LastMessageAt = &expiredLast
+	expired.CacheWindow = session.CacheWindow{Tier: session.Tier1Hour, Label: "1h", TTLSeconds: 3600, Known: true}
+	model := NewModel(Options{
+		Now:             now,
+		SelectedID:      expired.SessionID,
+		Sessions:        []session.Session{expired},
+		ReminderEnabled: map[string]bool{expired.SessionID: true},
+	})
+
+	view := stripANSI(model.View())
+	if !strings.Contains(view, "Reminder") || !strings.Contains(view, "N/A  after expiry") {
+		t.Fatalf("expired workspace should show Reminder N/A:\n%s", model.View())
+	}
+
+	model = moveWorkspaceFocusTo(t, model, "reminder")
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+	if cmd != nil {
+		t.Fatalf("expired reminder toggle returned command, want nil")
+	}
+	if model.ReminderEnabled(expired.SessionID) {
+		t.Fatalf("expired reminder stayed enabled after blocked toggle")
+	}
+	if !strings.Contains(model.View(), "Reminder N/A after expiry") {
+		t.Fatalf("expired reminder toggle missing notice:\n%s", model.View())
 	}
 }
 

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/richardchen/cc-cache/internal/keepalive"
-	"github.com/richardchen/cc-cache/internal/session"
+	"github.com/richardchen/cc-watch/internal/keepalive"
+	"github.com/richardchen/cc-watch/internal/session"
 )
 
 func (m Model) activeKeepAliveCard(s session.Session) string {
@@ -22,7 +22,7 @@ func (m Model) activeKeepAliveCard(s session.Session) string {
 
 func autoSendWorkspaceDetail(enabled bool) string {
 	if enabled {
-		return "sends Claude message after countdown"
+		return "send after countdown"
 	}
 	return "manual prompt only"
 }
@@ -91,7 +91,8 @@ func (m Model) keepAliveCard(s session.Session, state keepalive.SessionState) st
 		fmt.Fprintf(&b, "Msg Preview  %q\n", m.keepAliveConfig.Message)
 		if seconds := m.countdowns[s.SessionID]; seconds > 0 {
 			percent := float64(seconds) / float64(maxInt(m.keepAliveConfig.CountdownSeconds, 1)) * 100
-			fmt.Fprintf(&b, "Scope        %d / %d sends · %s %ds remaining\n", state.ScopeUsed, maxSends(state), ProgressBar(percent, 12), seconds)
+			fmt.Fprintf(&b, "Countdown    %s %ds remaining\n", ProgressBar(percent, 12), seconds)
+			fmt.Fprintf(&b, "Scope        %d / %d sends\n", state.ScopeUsed, maxSends(state))
 		} else {
 			fmt.Fprintf(&b, "Scope        %d / %d sends\n", state.ScopeUsed, maxSends(state))
 		}

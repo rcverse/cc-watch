@@ -11,6 +11,8 @@ import (
 type Mode string
 
 const (
+	DefaultLimit = 25
+
 	ModeTUI     Mode = "tui"
 	ModeHelp    Mode = "help"
 	ModeVersion Mode = "version"
@@ -29,7 +31,7 @@ type Command struct {
 func ParseArgs(args []string) (Command, error) {
 	cmd := Command{
 		Mode:  ModeTUI,
-		Limit: 5,
+		Limit: DefaultLimit,
 	}
 
 	if len(args) > 0 && args[0] == "config" {
@@ -40,12 +42,11 @@ func ParseArgs(args []string) (Command, error) {
 		return cmd, nil
 	}
 
-	fs := flag.NewFlagSet("cc-cache", flag.ContinueOnError)
+	fs := flag.NewFlagSet("cc-watch", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
 	var help bool
 	var version bool
-	var watch bool
 	fs.BoolVar(&help, "help", false, "show help")
 	fs.BoolVar(&help, "h", false, "show help")
 	fs.BoolVar(&version, "version", false, "show version")
@@ -53,7 +54,6 @@ func ParseArgs(args []string) (Command, error) {
 	fs.StringVar(&cmd.ID, "id", "", "session id")
 	fs.BoolVar(&cmd.JSON, "json", false, "machine-readable JSON")
 	fs.BoolVar(&cmd.Remind, "remind", false, "enable reminders")
-	fs.BoolVar(&watch, "watch", false, "unsupported")
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -73,9 +73,6 @@ func ParseArgs(args []string) (Command, error) {
 		cmd.Mode = ModeVersion
 		return cmd, nil
 	}
-	if watch {
-		return cmd, errors.New("--watch is not part of cc-cache v2; live refresh is internal to the TUI")
-	}
 	if cmd.Limit < 1 {
 		return cmd, fmt.Errorf("--n must be positive, got %s", strconv.Itoa(cmd.Limit))
 	}
@@ -87,20 +84,24 @@ func ParseArgs(args []string) (Command, error) {
 }
 
 func WriteHelp(w io.Writer) {
-	fmt.Fprint(w, `Usage: cc-cache [--n N] [--id <partial-id>] [--json] [--remind]
-       cc-cache config
-       cc-cache --help
-       cc-cache --version
+	fmt.Fprint(w, `Usage: cc-watch [--n N] [--id <partial-id>] [--json] [--remind]
+       cc-watch config
+       cc-watch --help
+       cc-watch --version
 
 Options:
-  --n N              number of recent sessions to list
+  --n N              load N recent sessions for the List View
   --id <partial-id> open or output one session
   --json            machine-readable JSON, then exit
   --remind          start TUI with reminders enabled
   --help, -h        show help
   --version         show version
 
-Unsupported:
-  --watch           not part of cc-cache v2; live refresh is internal
+Examples:
+  cc-watch
+  cc-watch --n 10
+  cc-watch --id d4b247b7
+  cc-watch --json --id d4b247b7
+  cc-watch config
 `)
 }

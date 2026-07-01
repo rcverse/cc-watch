@@ -8,7 +8,7 @@ Accepted
 
 ## Context
 
-`cc-cache --json` is a public machine-readable interface for scripts and future clients. It needs a stable schema before implementation so parser, config, refresh, Reminder, KeepAlive, and CLI behavior all encode state consistently.
+`cc-watch --json` is a public machine-readable interface for scripts and future clients. It needs a stable schema before implementation so parser, config, refresh, Reminder, KeepAlive, and CLI behavior all encode state consistently.
 
 JSON output must never emit ANSI escape sequences.
 
@@ -42,8 +42,8 @@ Each full session object includes:
 {
   "session_id": "11111111-1111-1111-1111-111111111111",
   "short_id": "11111111",
-  "project": "tmp-cc-cache",
-  "jsonl_path": "/tmp/home/.claude/projects/-tmp-cc-cache/11111111-1111-1111-1111-111111111111.jsonl",
+  "project": "tmp-cc-watch",
+  "jsonl_path": "/tmp/home/.claude/projects/-tmp-cc-watch/11111111-1111-1111-1111-111111111111.jsonl",
   "file_modified_at": "2026-06-03T12:00:00Z",
   "cache_window": {"tier": "1h", "label": "1h", "ttl_seconds": 3600, "known": true, "evidence": ["ephemeral_1h_input_tokens"]},
   "status": {"state": "active", "last_message_at": "2026-06-03T11:55:00Z", "remaining_seconds": 3300, "expired_seconds": null, "percent_elapsed": 8.33},
@@ -82,7 +82,7 @@ Ambiguous partial ID:
   "query": {"id": "111", "limit": 5},
   "refresh": {"mode": "snapshot", "watcher": {"status": "not_started", "degraded": false, "messages": []}, "safety_refresh_active": false, "last_refresh_at": "2026-06-03T12:00:00Z"},
   "notifications": {"status": "not_started", "degraded": false, "recent": []},
-  "sessions": [{"session_id": "11111111-1111-1111-1111-111111111111", "short_id": "11111111", "project": "tmp-cc-cache"}],
+  "sessions": [{"session_id": "11111111-1111-1111-1111-111111111111", "short_id": "11111111", "project": "tmp-cc-watch"}],
   "selected_session": null,
   "error": {"code": "ambiguous_session_id", "message": "partial id matched multiple sessions", "query": "111"}
 }

@@ -1,4 +1,4 @@
-# cc-cache — Product Requirements Document
+# cc-watch — Product Requirements Document
 
 **Version:** 2.0 target
 **Status:** v2 product reality synced
@@ -6,16 +6,16 @@
 **Last updated:** 2026-06-18
 
 Detailed implementation and UI contract:
-`docs/superpowers/specs/2026-06-02-cc-cache-v2-design.md`
+`docs/superpowers/specs/2026-06-02-cc-watch-v2-design.md`
 
 Current product boundary:
-`docs/superpowers/specs/2026-06-18-cc-cache-v2-product-reality.md`
+`docs/superpowers/specs/2026-06-18-cc-watch-v2-product-reality.md`
 
 ---
 
 ## 1. Product Summary
 
-cc-cache is a lightweight macOS terminal TUI and JSON API for inspecting Claude Code session cache health and managing bounded Reminder and KeepAlive workflows.
+cc-watch is a lightweight macOS terminal TUI and JSON API for inspecting Claude Code session cache health and managing bounded Reminder and KeepAlive workflows.
 
 It reads Claude Code JSONL session files from `~/.claude/projects/`, shows whether session cache windows are active, expired, or unknown, and helps users avoid accidental cache expiry during long work sessions.
 
@@ -40,7 +40,7 @@ The result is uncertainty, surprise cold starts, and unsafe ad hoc keep-alive be
 
 ## 3. Goals
 
-1. **Fast cache triage:** `cc-cache` opens to a scan-friendly list of recent sessions.
+1. **Fast cache triage:** `cc-watch` opens to a scan-friendly list of recent sessions.
 2. **Session clarity:** each Session Workspace separates read-only evidence from interactive controls.
 3. **Beginner comprehension:** the UI explains cache windows/TTL without requiring prior cache terminology.
 4. **Safe reminders:** Reminder is an alarm only; it never sends Claude messages.
@@ -79,18 +79,18 @@ The result is uncertainty, surprise cold starts, and unsafe ad hoc keep-alive be
 ## 6. CLI Contract
 
 ```text
-cc-cache                     # List View, default recent sessions
-cc-cache --n N               # List View, N recent sessions
-cc-cache --id <partial-id>   # Session Workspace for one session
-cc-cache --json              # Machine-readable JSON, then exit
-cc-cache --json --id <id>    # JSON for one session, then exit
-cc-cache --remind            # Start TUI with reminders enabled for loaded sessions
-cc-cache config              # Config Editor
-cc-cache --help              # Help
-cc-cache --version           # Version
+cc-watch                     # List View, default recent sessions
+cc-watch --n N               # List View, N recent sessions
+cc-watch --id <partial-id>   # Session Workspace for one session
+cc-watch --json              # Machine-readable JSON, then exit
+cc-watch --json --id <id>    # JSON for one session, then exit
+cc-watch --remind            # Start TUI with reminders enabled for loaded sessions
+cc-watch config              # Config Editor
+cc-watch --help              # Help
+cc-watch --version           # Version
 ```
 
-`--watch` is not part of v2. Live refresh is internal TUI behavior.
+There is no public watch command or watch flag in v2. Live refresh is internal TUI behavior.
 
 Partial IDs resolve against JSONL filename stems. Ambiguous partial IDs must show a clear selection/error state.
 
@@ -124,7 +124,6 @@ Required actions must be reachable by cursor focus and `enter`; shortcuts are ac
 | Toggle Reminder for selected session | `r` |
 | Toggle KeepAlive for selected session | `k` |
 | Refresh list | none |
-| Help | `?` |
 | Quit | `q` |
 
 Arrow keys are the movement model. `k` is reserved for KeepAlive, not vim-style down navigation.
@@ -181,7 +180,7 @@ Behavior:
 - Fires once per threshold crossing per active session instance.
 - Does not send Claude messages.
 - Does not alter KeepAlive state.
-- Notifications fire only while cc-cache is running.
+- Notifications fire only while cc-watch is running.
 
 Required UI copy must preserve this distinction:
 
@@ -189,7 +188,7 @@ Required UI copy must preserve this distinction:
 [ ] Reminder   alert at 20%, 10%   Sends no Claude message.
 ```
 
-`cc-cache --remind` enables reminder alarms for loaded sessions only. It must not enable KeepAlive, Auto-send, or any Claude subprocess behavior.
+`cc-watch --remind` enables reminder alarms for loaded sessions only. It must not enable KeepAlive, Auto-send, or any Claude subprocess behavior.
 
 ---
 
@@ -268,8 +267,8 @@ KeepAlive off
   -> countdown starts at trigger
   -> user may send now or cancel
   -> countdown reaches zero
-  -> cc-cache runs claude -r <session> -p <message>
-  -> cc-cache confirms by watching this session JSONL
+  -> cc-watch runs claude -r <session> -p <message>
+  -> cc-watch confirms by watching this session JSONL
   -> success, failure, or scope complete is shown
 ```
 
@@ -300,7 +299,7 @@ Every KeepAlive state must show whether a Claude message has been sent, may be s
 
 ## 10. Data Requirements
 
-Source data comes from `~/.claude/projects/**/*.jsonl`. cc-cache must not write to session JSONL files.
+Source data comes from `~/.claude/projects/**/*.jsonl`. cc-watch must not write to session JSONL files.
 
 Each parsed session must include:
 
@@ -362,7 +361,7 @@ Requirements:
 
 ## 12. Notifications
 
-Notifications are always attempted for Reminder and KeepAlive events while cc-cache is running.
+Notifications are always attempted for Reminder and KeepAlive events while cc-watch is running.
 
 Requirements:
 
@@ -391,7 +390,7 @@ Notification events:
 Global config file:
 
 ```text
-~/.config/cc-cache/config.json
+~/.config/cc-watch/config.json
 ```
 
 Global config includes:
@@ -404,7 +403,7 @@ Global config includes:
 - KeepAlive max sends;
 - future app-level display/retention defaults if needed.
 
-Runtime per-session state is in-memory and discarded when cc-cache exits.
+Runtime per-session state is in-memory and discarded when cc-watch exits.
 
 Runtime state includes:
 

@@ -3,7 +3,7 @@ package refresh
 import (
 	"time"
 
-	"github.com/richardchen/cc-cache/internal/session"
+	"github.com/richardchen/cc-watch/internal/session"
 )
 
 type Source string

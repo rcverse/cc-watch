@@ -8,9 +8,9 @@ Accepted
 
 ## Context
 
-cc-cache v2 uses filesystem events to accelerate updates, but filesystem watchers are not perfectly reliable across project directory creation, rename/delete behavior, terminal contexts, and platform differences.
+cc-watch v2 uses filesystem events to accelerate updates, but filesystem watchers are not perfectly reliable across project directory creation, rename/delete behavior, terminal contexts, and platform differences.
 
-The product requires no public `--watch` mode and no user-configurable watch interval. Live refresh is internal TUI behavior, supported by manual refresh and degraded-state visibility.
+The product requires no public watch mode, watch flag, or user-configurable watch interval. Live refresh is internal TUI behavior, supported by manual refresh and degraded-state visibility.
 
 ## Decision
 

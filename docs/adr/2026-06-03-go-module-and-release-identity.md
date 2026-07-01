@@ -8,18 +8,18 @@ Accepted
 
 ## Context
 
-cc-cache v2 is a Go rewrite of the existing terminal utility. The implementation needs one repository-level identity for module imports, local builds, install scripts, docs, and later release metadata.
+cc-watch v2 is a Go rewrite of the existing terminal utility. The implementation needs one repository-level identity for module imports, local builds, install scripts, docs, and later release metadata.
 
 Public release work has more risk than local binary installation because it depends on GitHub Release and Homebrew tap setup. That work should not block the first verified local binary.
 
 ## Decision
 
-Use one repository for v2 governance and implementation: `/Users/richardchen/Dev/cc-cache`.
+Use one repository for v2 governance and implementation: `/Users/richardchen/Dev/cc-watch`.
 
 Use this Go module path:
 
 ```bash
-go mod init github.com/richardchen/cc-cache
+go mod init github.com/richardchen/cc-watch
 ```
 
 Do not run `go mod init` until the Go skeleton phase. Phase 1 records and executes that command after verifying the local Go toolchain.

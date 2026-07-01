@@ -5,27 +5,22 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/richardchen/cc-cache/internal/keepalive"
-	"github.com/richardchen/cc-cache/internal/session"
+	"github.com/richardchen/cc-watch/internal/keepalive"
+	"github.com/richardchen/cc-watch/internal/session"
 )
-
-const maxWorkspaceEvidenceLines = 16
 
 func (m Model) workspaceView() string {
 	selected := m.selectedSession()
 	if selected == nil {
 		var b strings.Builder
-		b.WriteString("cc-cache workspace\nNo selected session.\nb/esc back  q quit\n")
-		if m.helpOpen {
-			b.WriteString("\n")
-			b.WriteString(m.helpText())
-		}
+		b.WriteString("cc-watch workspace\nNo selected session.\nb/esc back  q quit\n")
 		return b.String()
 	}
 
 	var b strings.Builder
 	styles := DefaultStyles()
-	title := fmt.Sprintf("Claude Code Cache / %s / %s", selected.Project, displayID(*selected))
+	title := fmt.Sprintf("Claude Code Watch / %s / %s", selected.Project, displayID(*selected))
+	b.WriteString("\n")
 	b.WriteString(truncateANSI(styles.Render(RoleIdentity, title), m.width))
 	b.WriteString("\n")
 	b.WriteString(styles.Render(RoleSeparator, strings.Repeat("─", maxInt(minInt(m.width, 76)-2, 12))))
@@ -34,21 +29,17 @@ func (m Model) workspaceView() string {
 		b.WriteString(banner)
 		b.WriteString("\n")
 	}
-	if banner := m.actionBanner(); banner != "" {
-		b.WriteString(banner)
-		b.WriteString("\n")
-	}
+	panelGap := m.workspacePanelGap()
 	b.WriteString(m.cacheStatusCard(*selected))
+	b.WriteString(panelGap)
 	b.WriteString(m.sessionInfoCard(*selected))
 	if card := m.activeKeepAliveCard(*selected); card != "" {
+		b.WriteString(panelGap)
 		b.WriteString(card)
 	}
+	b.WriteString(panelGap)
 	b.WriteString(m.workspaceControls(*selected))
 	b.WriteString(m.workspaceFooter())
-	if m.helpOpen {
-		b.WriteString("\n")
-		b.WriteString(m.helpText())
-	}
 	return b.String()
 }
 
@@ -56,17 +47,16 @@ func (m Model) cacheStatusCard(s session.Session) string {
 	styles := DefaultStyles()
 	status := s.StatusAt(m.now)
 	var b strings.Builder
-	state := strings.ToUpper(string(status.State))
+	state := workspaceStatusLabel(status)
 	if state == "" {
 		state = "UNKNOWN"
 	}
-	ttlLine := fmt.Sprintf("%-10s %s", styles.Render(statusRole(status), state), cacheDisplay(s))
+	ttlLine := fmt.Sprintf("%s %s", padANSI(styles.Render(statusRole(status), state), 10), cacheTierText(s))
 	if status.PercentElapsed != nil {
 		percent := cappedPercent(*status.PercentElapsed)
-		ttlLine = fmt.Sprintf("%-10s %s  %s %.0f%%  %s", styles.Render(statusRole(status), state), formatStatusTime(status), ProgressBar(percent, 20), percent, cacheDisplay(s))
+		ttlLine = fmt.Sprintf("%s %s  %.0f%%  %s  %s", padANSI(styles.Render(statusRole(status), state), 10), ProgressBar(percent, 20), percent, cacheStatusTime(status), cacheTierText(s))
 	}
 	fmt.Fprintf(&b, "%s\n", truncateANSI(ttlLine, maxInt(m.width-4, 20)))
-	fmt.Fprintf(&b, "%s    %s\n", styles.Render(RoleMuted, "Session"), displayID(s))
 	return m.renderWorkspacePanel("Cache Status", b.String())
 }
 
@@ -80,8 +70,8 @@ func (m Model) sessionInfoCard(s session.Session) string {
 	var b strings.Builder
 	styles := DefaultStyles()
 	fmt.Fprintf(&b, "%s   %s\n", styles.Render(RoleMuted, "Session ID"), truncateMiddle(s.SessionID, maxInt(m.width-18, 24)))
-	fmt.Fprintf(&b, "%s     first %s\n", styles.Render(RoleMuted, "Messages"), truncateEnd(emptyDash(displayExcerpt(s.Messages.FirstUserExcerpt)), maxInt(m.width-23, 18)))
-	fmt.Fprintf(&b, "             last  %s\n", truncateEnd(emptyDash(displayExcerpt(s.Messages.LastUserExcerpt)), maxInt(m.width-23, 18)))
+	fmt.Fprintf(&b, "%s     %s  %s\n", styles.Render(RoleMuted, "Messages"), messageLabel("first"), messageText(truncateEnd(emptyDash(displayExcerpt(s.Messages.FirstUserExcerpt)), maxInt(m.width-27, 18))))
+	fmt.Fprintf(&b, "             %s  %s\n", messageLabel("last"), messageText(truncateEnd(emptyDash(displayExcerpt(s.Messages.LastUserExcerpt)), maxInt(m.width-27, 18))))
 	fmt.Fprintf(&b, "%s       writes %d  reads %d  hit %s %.0f%%\n", styles.Render(RoleMuted, "Tokens"), s.TokenStats.CacheWrites, s.TokenStats.CacheReads, HitRateProgressBar(s.TokenStats.HitRate, 8), s.TokenStats.HitRate)
 	fmt.Fprintf(&b, "%s         %s  %s\n", styles.Render(RoleMuted, "Gaps"), gapSummary(s), styles.Render(RoleMuted, "v details"))
 	return m.renderWorkspacePanel("Session Info", b.String())
@@ -92,9 +82,6 @@ func (m Model) compactSessionInfoCard(s session.Session) string {
 	styles := DefaultStyles()
 	fmt.Fprintf(&b, "%s   %s\n", styles.Render(RoleMuted, "Session ID"), truncateMiddle(s.SessionID, maxInt(m.width-18, 24)))
 	fmt.Fprintf(&b, "%s       writes %d  reads %d  hit %.0f%%\n", styles.Render(RoleMuted, "Tokens"), s.TokenStats.CacheWrites, s.TokenStats.CacheReads, s.TokenStats.HitRate)
-	if !m.compactOperationalWorkspace() {
-		fmt.Fprintf(&b, "%s         %s\n", styles.Render(RoleMuted, "Gaps"), gapSummary(s))
-	}
 	return m.renderWorkspacePanel("Session Info", b.String())
 }
 
@@ -113,8 +100,8 @@ func (m Model) sessionInfoDetailsCard(s session.Session) string {
 	fmt.Fprintf(&b, "%s   %s\n", styles.Render(RoleMuted, "Session ID"), truncateMiddle(s.SessionID, maxInt(m.width-18, 24)))
 	fmt.Fprintf(&b, "%s        %s\n", styles.Render(RoleMuted, "JSONL"), truncateMiddle(s.JSONLPath, maxInt(m.width-18, 24)))
 	fmt.Fprintf(&b, "%s      parsed %s · file modified %s\n", styles.Render(RoleMuted, "Updated"), m.now.Local().Format("15:04:05"), s.FileModifiedAt.Local().Format("15:04:05"))
-	fmt.Fprintf(&b, "%s     first %s\n", styles.Render(RoleMuted, "Messages"), truncateEnd(emptyDash(displayExcerpt(s.Messages.FirstUserExcerpt)), maxInt(m.width-23, 18)))
-	fmt.Fprintf(&b, "             last  %s\n", truncateEnd(emptyDash(displayExcerpt(s.Messages.LastUserExcerpt)), maxInt(m.width-23, 18)))
+	fmt.Fprintf(&b, "%s     %s  %s\n", styles.Render(RoleMuted, "Messages"), messageLabel("first"), messageText(truncateEnd(emptyDash(displayExcerpt(s.Messages.FirstUserExcerpt)), maxInt(m.width-27, 18))))
+	fmt.Fprintf(&b, "             %s  %s\n", messageLabel("last"), messageText(truncateEnd(emptyDash(displayExcerpt(s.Messages.LastUserExcerpt)), maxInt(m.width-27, 18))))
 	fmt.Fprintf(&b, "%s  writes %d · reads %d · hit %s %.0f%% · output %d\n", styles.Render(RoleMuted, "Token Stats"), s.TokenStats.CacheWrites, s.TokenStats.CacheReads, HitRateProgressBar(s.TokenStats.HitRate, 10), s.TokenStats.HitRate, s.TokenStats.OutputTokens)
 	fmt.Fprintf(&b, "%s\n", styles.Render(RoleMuted, "Mid-session Gaps >1min · "+m.gapSortLabel()))
 	gaps := m.visibleDetailGaps(s)
@@ -135,11 +122,65 @@ func (m Model) sessionInfoDetailsCard(s session.Session) string {
 }
 
 func (m Model) renderWorkspacePanel(title string, body string) string {
-	return RenderPanelWidth(DefaultStyles().Render(RoleIdentity, title), body, m.workspacePanelWidth())
+	width := m.workspacePanelWidth()
+	return RenderPanelWidth(DefaultStyles().Render(RoleIdentity, title), truncateBodyLines(body, width), width)
 }
 
 func (m Model) workspacePanelWidth() int {
-	return maxInt(m.width-4, 24)
+	return maxInt(minInt(m.width-4, maxPanelBodyWidth), 24)
+}
+
+func (m Model) workspacePanelGap() string {
+	if m.height >= 30 {
+		return "\n"
+	}
+	return ""
+}
+
+func cacheStatusTime(status session.Status) string {
+	switch status.State {
+	case session.StatusActive:
+		return formatStatusTime(status) + " left"
+	default:
+		return formatStatusTime(status)
+	}
+}
+
+func workspaceStatusLabel(status session.Status) string {
+	switch status.State {
+	case session.StatusActive:
+		return "● ACTIVE"
+	case session.StatusExpired:
+		return "× EXPIRED"
+	case session.StatusUnknown:
+		return "○ UNKNOWN"
+	default:
+		return strings.ToUpper(string(status.State))
+	}
+}
+
+func cacheTierText(s session.Session) string {
+	return DefaultStyles().Render(RoleCacheTier, cacheDisplay(s))
+}
+
+func messageLabel(label string) string {
+	styles := DefaultStyles()
+	if label == "last" {
+		return styles.Render(RoleLastLabel, label)
+	}
+	return styles.Render(RoleFirstLabel, label)
+}
+
+func messageText(value string) string {
+	return DefaultStyles().Render(RoleExcerptText, value)
+}
+
+func padANSI(value string, width int) string {
+	padding := width - visibleWidth(stripANSI(value))
+	if padding <= 0 {
+		return value
+	}
+	return value + strings.Repeat(" ", padding)
 }
 
 func statusRole(status session.Status) StyleRole {
@@ -151,11 +192,6 @@ func statusRole(status session.Status) StyleRole {
 	default:
 		return RoleWarning
 	}
-}
-
-func (m Model) workspaceSection(title string) string {
-	styles := DefaultStyles()
-	return styles.Render(RoleMuted, title)
 }
 
 func gapSummary(s session.Session) string {
@@ -215,7 +251,7 @@ func (m Model) visibleDetailGaps(s session.Session) []session.Gap {
 func (m Model) detailGapLimit(s session.Session) int {
 	limit := 3
 	if m.height <= 24 {
-		limit = 2
+		limit = 1
 	}
 	if m.compactOperationalWorkspace() {
 		limit = 1
@@ -284,12 +320,13 @@ func formatGapLine(gap session.Gap, s session.Session, newest bool) string {
 
 func (m Model) workspaceControls(s session.Session) string {
 	var b strings.Builder
-	b.WriteString(m.workspaceSection("Controls"))
-	b.WriteString("\n")
 	for _, action := range m.workspaceControlActions(s) {
 		fmt.Fprintf(&b, "%s\n", m.controlRow(action.id, action.label, action.value, action.detail))
 	}
-	return b.String()
+	if m.notice.Message != "" {
+		fmt.Fprintf(&b, "\n%s\n", m.controlRow("", "Notice", "", m.notice.Message))
+	}
+	return m.renderWorkspacePanel("Controls", b.String())
 }
 
 type workspaceControlAction struct {
@@ -322,19 +359,23 @@ func (m Model) workspaceControlActions(s session.Session) []workspaceControlActi
 	}
 
 	reminderState := offText()
-	if m.reminderEnabled[s.SessionID] {
+	reminderDetail := fmt.Sprintf("notify at %s", thresholdSummary(m.reminderThresholds))
+	if s.StatusAt(m.now).State == session.StatusExpired {
+		reminderState = DefaultStyles().Render(RoleDisabled, "N/A")
+		reminderDetail = "after expiry"
+	} else if m.reminderEnabled[s.SessionID] {
 		reminderState = onText(false)
 	}
-	actions = append(actions, workspaceControlAction{id: "reminder", label: "Reminder", value: reminderState, detail: fmt.Sprintf("alert at %s · sends no Claude message", thresholdSummary(m.reminderThresholds))})
+	actions = append(actions, workspaceControlAction{id: "reminder", label: "Reminder", value: reminderState, detail: reminderDetail})
 
 	if reason := m.keepAliveUnavailableReason(s); reason != "" {
 		actions = append(actions,
-			workspaceControlAction{id: "keepalive", label: "KeepAlive", value: DefaultStyles().Render(RoleDisabled, "unavailable"), detail: reason},
-			workspaceControlAction{id: "keepalive_autosend", label: "Auto-send", value: onOffText(state.AutoSend, true), detail: "disabled while KeepAlive is unavailable"},
+			workspaceControlAction{id: "keepalive", label: "KeepAlive", value: DefaultStyles().Render(RoleDisabled, "N/A"), detail: reason},
+			workspaceControlAction{id: "keepalive_autosend", label: "Auto-send", value: DefaultStyles().Render(RoleDisabled, "N/A"), detail: reason},
 		)
 	} else if state.State == keepalive.StateOff || state.State == "" {
 		actions = append(actions,
-			workspaceControlAction{id: "keepalive", label: "KeepAlive", value: offText(), detail: fmt.Sprintf("trigger %dm before expiry · scope %s", m.keepAliveConfig.TriggerBeforeExpiryMinutes, scopeLabel(m.keepAliveConfig.Scope.MaxSends))},
+			workspaceControlAction{id: "keepalive", label: "KeepAlive", value: offText(), detail: fmt.Sprintf("%dm before expiry · %s", m.keepAliveConfig.TriggerBeforeExpiryMinutes, scopeLabel(m.keepAliveConfig.Scope.MaxSends))},
 			workspaceControlAction{id: "keepalive_autosend", label: "Auto-send", value: onOffText(state.AutoSend, true), detail: autoSendWorkspaceDetail(state.AutoSend)},
 		)
 	} else {
@@ -346,8 +387,7 @@ func (m Model) workspaceControlActions(s session.Session) []workspaceControlActi
 
 	if !m.compactOperationalWorkspace() && !m.sessionInfoExpanded {
 		actions = append(actions,
-			workspaceControlAction{id: "copy_id", label: "Copy ID", detail: "show full session id"},
-			workspaceControlAction{id: "back", label: "Back", detail: "return to session list"},
+			workspaceControlAction{id: "back", label: "Back", detail: "session list"},
 		)
 	}
 	return actions
@@ -359,7 +399,7 @@ func (m Model) controlRow(action string, label string, state string, detail stri
 	if m.FocusedAction() == action {
 		marker = styles.Render(RoleIdentity, "›")
 	}
-	return fmt.Sprintf("  %s %-11s %-10s %s", marker, label, state, detail)
+	return fmt.Sprintf("  %s %-9s %s %s", marker, label, padANSI(state, 4), styles.Render(RoleMuted, detail))
 }
 
 func onText(risky bool) string {
@@ -384,31 +424,31 @@ func onOffText(enabled bool, risky bool) string {
 func (m Model) workspaceFooter() string {
 	if m.sessionInfoExpanded {
 		if m.width <= 90 {
-			return "v collapse  s sort  u update  q quit\n"
+			return cueLine("v collapse  s sort  u update  b/⎋ back  q quit")
 		}
-		return "v collapse   s sort gaps   u update   q quit\n"
+		return cueLine("v collapse  s sort gaps  u update  b/⎋ back  q quit")
 	}
 	switch m.activeKeepAliveState().State {
 	case keepalive.StateCountdown:
 		if m.width <= 90 {
-			return "up/down choose  enter act  s send now  x cancel  b back  ? help  q quit\n"
+			return cueLine("↑↓ choose  ↵ act  s send now  x cancel  b/⎋ back  q quit")
 		}
-		return "arrows choose action   enter act   s send now   x cancel instance   b back   ? help   q quit\n"
+		return cueLine("↑↓ choose action  ↵ act  s send now  x cancel instance  b/⎋ back  q quit")
 	case keepalive.StateManualReady:
 		if m.width <= 90 {
-			return "up/down choose  enter act  s send now  x dismiss  b back  ? help  q quit\n"
+			return cueLine("↑↓ choose  ↵ act  s send now  x dismiss  b/⎋ back  q quit")
 		}
-		return "arrows choose action   enter act   s send now   x dismiss   b back   ? help   q quit\n"
+		return cueLine("↑↓ choose action  ↵ act  s send now  x dismiss  b/⎋ back  q quit")
 	case keepalive.StateConfirming, keepalive.StateSending:
 		if m.width <= 90 {
-			return "up/down choose  enter act  x stop  b back  ? help  q quit\n"
+			return cueLine("↑↓ choose  ↵ act  x stop  b/⎋ back  q quit")
 		}
-		return "arrows choose action   enter act   x stop waiting   b back   ? help   q quit\n"
+		return cueLine("↑↓ choose action  ↵ act  x stop waiting  b/⎋ back  q quit")
 	default:
 		if m.width <= 90 {
-			return "up/down focus  enter act  r remind  k KeepAlive  v details  u update  q quit\n"
+			return cueLine("↑↓ focus  ↵ act  r remind  k KeepAlive  v details  u update  q quit")
 		}
-		return "arrows move focus   enter/space act   r remind   k KeepAlive   v details   u update   b/esc back   ? help   q quit\n"
+		return cueLine("↑↓ focus  ↵/space act  r remind  k KeepAlive  v details  u update  b/⎋ back  q quit")
 	}
 }
 
@@ -428,7 +468,7 @@ func (m Model) workspaceFocusActions() []string {
 			filtered = append(filtered, "details_scroll")
 		}
 		for _, action := range actions {
-			if action != "copy_id" && action != "back" {
+			if action != "back" {
 				filtered = append(filtered, action)
 			}
 		}
@@ -437,7 +477,7 @@ func (m Model) workspaceFocusActions() []string {
 	if m.compactOperationalWorkspace() {
 		filtered := actions[:0]
 		for _, action := range actions {
-			if action != "copy_id" && action != "back" {
+			if action != "back" {
 				filtered = append(filtered, action)
 			}
 		}
@@ -481,7 +521,7 @@ func (m Model) detailsScrollable() bool {
 func (m Model) keepAliveUnavailableReason(s session.Session) string {
 	status := s.StatusAt(m.now)
 	if status.State == session.StatusExpired {
-		return "unavailable after expiry"
+		return "after expiry"
 	}
 	return ""
 }
@@ -505,7 +545,7 @@ func (m Model) actionBanner() string {
 	if m.notice.Message == "" {
 		return ""
 	}
-	return DefaultStyles().Render(m.notice.Role, "  "+m.notice.Message)
+	return DefaultStyles().Render(m.notice.Role, m.notice.Message)
 }
 
 func minInt(a, b int) int {

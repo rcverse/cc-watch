@@ -44,7 +44,7 @@ Claude limit, unavailable executable, timeout, confirmation timeout, or subproce
 ```text
 Send manually if you still want to keep this session warm:
 claude -r <session-id> -p <configured-message>
-Then refresh cc-cache to confirm the session JSONL changed.
+Then refresh cc-watch to confirm the session JSONL changed.
 ```
 
 No production code or test may perform a real Claude KeepAlive send. Tests use fake runners and fixture HOME/session files.

@@ -7,9 +7,9 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/richardchen/cc-cache/internal/config"
-	"github.com/richardchen/cc-cache/internal/keepalive"
-	"github.com/richardchen/cc-cache/internal/session"
+	"github.com/richardchen/cc-watch/internal/config"
+	"github.com/richardchen/cc-watch/internal/keepalive"
+	"github.com/richardchen/cc-watch/internal/session"
 )
 
 func TestDisplayTickEvaluatesKeepAliveMonitoringSessions(t *testing.T) {
@@ -72,7 +72,7 @@ func TestExpiredSessionDoesNotEnableKeepAlive(t *testing.T) {
 	if model.LastAction() != "keepalive_unavailable_expired" {
 		t.Fatalf("last action = %q, want expired unavailable", model.LastAction())
 	}
-	if !strings.Contains(model.View(), "unavailable after expiry") {
+	if !strings.Contains(model.View(), "N/A after expiry") {
 		t.Fatalf("expired workspace missing KeepAlive disabled reason:\n%s", model.View())
 	}
 }

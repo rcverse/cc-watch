@@ -3,8 +3,8 @@ package keepalive
 import (
 	"time"
 
-	"github.com/richardchen/cc-cache/internal/config"
-	"github.com/richardchen/cc-cache/internal/session"
+	"github.com/richardchen/cc-watch/internal/config"
+	"github.com/richardchen/cc-watch/internal/session"
 )
 
 const (

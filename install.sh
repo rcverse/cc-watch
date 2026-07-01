@@ -5,8 +5,8 @@ usage() {
   cat <<'USAGE'
 Usage: ./install.sh [--yes] [--dry-run]
 
-Build and install the cc-cache v2 Go binary to:
-  $HOME/.local/bin/cc-cache
+Build and install the cc-watch v2 Go binary to:
+  $HOME/.local/bin/cc-watch
 
 Options:
   --yes      required to write the installed command
@@ -14,7 +14,7 @@ Options:
   --help     show this help
 
 Environment:
-  CC_CACHE_BUILD_DIR  override build output directory (default: ./dist)
+  CC_WATCH_BUILD_DIR  override build output directory (default: ./dist)
 USAGE
 }
 
@@ -41,7 +41,7 @@ for arg in "$@"; do
 done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD_DIR="${CC_CACHE_BUILD_DIR:-$SCRIPT_DIR/dist}"
+BUILD_DIR="${CC_WATCH_BUILD_DIR:-$SCRIPT_DIR/dist}"
 case "$BUILD_DIR" in
   /*) ;;
   *) BUILD_DIR="$SCRIPT_DIR/$BUILD_DIR" ;;
@@ -49,17 +49,17 @@ esac
 while [ "$BUILD_DIR" != "/" ] && [ "${BUILD_DIR%/}" != "$BUILD_DIR" ]; do
   BUILD_DIR="${BUILD_DIR%/}"
 done
-BINARY="$BUILD_DIR/cc-cache"
+BINARY="$BUILD_DIR/cc-watch"
 BIN_DIR="$HOME/.local/bin"
-TARGET="$BIN_DIR/cc-cache"
+TARGET="$BIN_DIR/cc-watch"
 
 if [ "$BINARY" = "$TARGET" ]; then
   echo "build output must not equal install target: $TARGET" >&2
-  echo "Choose a different CC_CACHE_BUILD_DIR or unset it." >&2
+  echo "Choose a different CC_WATCH_BUILD_DIR or unset it." >&2
   exit 2
 fi
 
-echo "cc-cache v2 local installer"
+echo "cc-watch v2 local installer"
 echo "repo:    $SCRIPT_DIR"
 echo "binary:  $BINARY"
 echo "target:  $TARGET"
@@ -76,7 +76,7 @@ else
 fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
-  echo "dry run: would build and install cc-cache v2"
+  echo "dry run: would build and install cc-watch v2"
   exit 0
 fi
 
@@ -88,9 +88,9 @@ fi
 
 mkdir -p "$BUILD_DIR" "$BIN_DIR"
 
-GOCACHE="${GOCACHE:-/private/tmp/cc-cache-go-build}" \
-GOMODCACHE="${GOMODCACHE:-/private/tmp/cc-cache-go-mod}" \
-  go build -C "$SCRIPT_DIR" -o "$BINARY" ./cmd/cc-cache
+GOCACHE="${GOCACHE:-/private/tmp/cc-watch-go-build}" \
+GOMODCACHE="${GOMODCACHE:-/private/tmp/cc-watch-go-mod}" \
+  go build -C "$SCRIPT_DIR" -o "$BINARY" ./cmd/cc-watch
 
 "$BINARY" --version >/dev/null
 "$BINARY" --help >/dev/null

@@ -1,10 +1,6 @@
 package tui
 
-import (
-	"time"
-
-	tea "github.com/charmbracelet/bubbletea"
-)
+import tea "github.com/charmbracelet/bubbletea"
 
 func (m Model) activateFocusedAction(action string) (tea.Model, tea.Cmd) {
 	switch m.route {
@@ -64,12 +60,6 @@ func (m Model) activateWorkspaceAction(action string) (tea.Model, tea.Cmd) {
 			m.focusIndex = m.defaultFocusIndex()
 		}
 		return m, nil
-	case "copy_id":
-		m.lastAction = "copy_session_id"
-		if selected := m.selectedSession(); selected != nil {
-			m.setNotice("Session ID shown: "+selected.SessionID, RoleInfo, 3*time.Second)
-		}
-		return m, nil
 	case "back":
 		m.route = RouteList
 		m.lastAction = "back_to_list"
@@ -105,10 +95,6 @@ func (m Model) activateSharedAction(action string) (tea.Model, tea.Cmd) {
 	case "config":
 		m.route = RouteConfig
 		m.focusIndex = m.defaultFocusIndex()
-		return m, nil
-	case "help":
-		m.helpOpen = !m.helpOpen
-		m.lastAction = "toggle_help"
 		return m, nil
 	case "quit":
 		m.lastAction = "quit"

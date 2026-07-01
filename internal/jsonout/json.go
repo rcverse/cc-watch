@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/richardchen/cc-cache/internal/refresh"
-	"github.com/richardchen/cc-cache/internal/session"
+	"github.com/richardchen/cc-watch/internal/refresh"
+	"github.com/richardchen/cc-watch/internal/session"
 )
 
 const SchemaVersion = 1

@@ -12,11 +12,11 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/richardchen/cc-cache/internal/config"
-	"github.com/richardchen/cc-cache/internal/notify"
-	"github.com/richardchen/cc-cache/internal/refresh"
-	"github.com/richardchen/cc-cache/internal/session"
-	"github.com/richardchen/cc-cache/internal/tui"
+	"github.com/richardchen/cc-watch/internal/config"
+	"github.com/richardchen/cc-watch/internal/notify"
+	"github.com/richardchen/cc-watch/internal/refresh"
+	"github.com/richardchen/cc-watch/internal/session"
+	"github.com/richardchen/cc-watch/internal/tui"
 )
 
 func TestHelpExitsSuccessfully(t *testing.T) {
@@ -27,8 +27,18 @@ func TestHelpExitsSuccessfully(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Run(--help) exit code = %d, want 0", code)
 	}
-	if !strings.Contains(stdout.String(), "Usage: cc-cache") {
+	if !strings.Contains(stdout.String(), "Usage: cc-watch") {
 		t.Fatalf("help output missing usage:\n%s", stdout.String())
+	}
+	for _, notWant := range []string{"--watch", "Unsupported:"} {
+		if strings.Contains(stdout.String(), notWant) {
+			t.Fatalf("help output still advertises retired flag %q:\n%s", notWant, stdout.String())
+		}
+	}
+	for _, want := range []string{"Examples:", "cc-watch --json --id d4b247b7"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("help output missing %q:\n%s", want, stdout.String())
+		}
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
@@ -43,7 +53,7 @@ func TestVersionExitsSuccessfully(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Run(--version) exit code = %d, want 0", code)
 	}
-	if !strings.Contains(stdout.String(), "cc-cache 2.0.0-dev") {
+	if !strings.Contains(stdout.String(), "cc-watch 2.0.0-dev") {
 		t.Fatalf("version output = %q, want dev version", stdout.String())
 	}
 	if stderr.Len() != 0 {
@@ -51,7 +61,7 @@ func TestVersionExitsSuccessfully(t *testing.T) {
 	}
 }
 
-func TestWatchIsExplicitlyRejected(t *testing.T) {
+func TestRetiredWatchFlagIsUnknown(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 
 	code := Run([]string{"--watch"}, &stdout, &stderr)
@@ -62,8 +72,11 @@ func TestWatchIsExplicitlyRejected(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "--watch is not part of cc-cache v2") {
-		t.Fatalf("stderr missing watch rejection:\n%s", stderr.String())
+	if !strings.Contains(stderr.String(), "flag provided but not defined: -watch") {
+		t.Fatalf("stderr missing unknown-flag error:\n%s", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "not part of cc-watch v2") {
+		t.Fatalf("stderr still treats watch as known retired mode:\n%s", stderr.String())
 	}
 }
 
@@ -177,9 +190,9 @@ func TestTUIDispatchForwardsPublicCLICommands(t *testing.T) {
 		want Command
 	}{
 		{
-			name: "default cc-cache",
+			name: "default cc-watch",
 			args: nil,
-			want: Command{Mode: ModeTUI, Limit: 5},
+			want: Command{Mode: ModeTUI, Limit: 25},
 		},
 		{
 			name: "--n N",
@@ -189,17 +202,17 @@ func TestTUIDispatchForwardsPublicCLICommands(t *testing.T) {
 		{
 			name: "--id partial",
 			args: []string{"--id", "11111111"},
-			want: Command{Mode: ModeTUI, Limit: 5, ID: "11111111"},
+			want: Command{Mode: ModeTUI, Limit: 25, ID: "11111111"},
 		},
 		{
 			name: "--remind",
 			args: []string{"--remind"},
-			want: Command{Mode: ModeTUI, Limit: 5, Remind: true},
+			want: Command{Mode: ModeTUI, Limit: 25, Remind: true},
 		},
 		{
 			name: "config",
 			args: []string{"config"},
-			want: Command{Mode: ModeConfig, Limit: 5},
+			want: Command{Mode: ModeConfig, Limit: 25},
 		},
 	}
 
@@ -772,7 +785,7 @@ func TestConfigEditorStartupLoadsAndSavesConfig(t *testing.T) {
 	if model.Route() != tui.RouteConfig {
 		t.Fatalf("route = %q, want config", model.Route())
 	}
-	if !strings.Contains(model.View(), "Claude Code Cache / config") || !strings.Contains(model.View(), "Reminder thresholds") {
+	if !strings.Contains(model.View(), "Claude Code Watch / config") || !strings.Contains(model.View(), "Reminder thresholds") {
 		t.Fatalf("config editor did not render:\n%s", model.View())
 	}
 
@@ -957,7 +970,7 @@ func TestJSONHomeErrorUsesContractShape(t *testing.T) {
 func TestJSONInvalidConfigWarningIsVisible(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	home := t.TempDir()
-	configPath := filepath.Join(home, ".config", "cc-cache", "config.json")
+	configPath := filepath.Join(home, ".config", "cc-watch", "config.json")
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}

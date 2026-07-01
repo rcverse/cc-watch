@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/richardchen/cc-cache/internal/refresh"
-	"github.com/richardchen/cc-cache/internal/session"
+	"github.com/richardchen/cc-watch/internal/refresh"
+	"github.com/richardchen/cc-watch/internal/session"
 )
 
 func TestSuccessOutputUsesStableTopLevelContract(t *testing.T) {
@@ -52,8 +52,8 @@ func TestSessionObjectShapeIncludesParserReminderAndKeepAliveState(t *testing.T)
 	s := session.Session{
 		SessionID:       "11111111-1111-1111-1111-111111111111",
 		ShortID:         "11111111",
-		Project:         "tmp-cc-cache",
-		JSONLPath:       "/tmp/home/.claude/projects/-tmp-cc-cache/11111111-1111-1111-1111-111111111111.jsonl",
+		Project:         "tmp-cc-watch",
+		JSONLPath:       "/tmp/home/.claude/projects/-tmp-cc-watch/11111111-1111-1111-1111-111111111111.jsonl",
 		FileModifiedAt:  now,
 		StartedAt:       &start,
 		EndedAt:         &last,
@@ -250,7 +250,7 @@ func TestAllowedErrorShapesForNoMatchAndAmbiguousID(t *testing.T) {
 	candidate := session.Session{
 		SessionID: "11111111-1111-1111-1111-111111111111",
 		ShortID:   "11111111",
-		Project:   "tmp-cc-cache",
+		Project:   "tmp-cc-watch",
 	}
 	ambiguous, err := Marshal(State{
 		GeneratedAt: now,

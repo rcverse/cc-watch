@@ -3,7 +3,7 @@ package tui
 import (
 	"time"
 
-	"github.com/richardchen/cc-cache/internal/session"
+	"github.com/richardchen/cc-watch/internal/session"
 )
 
 type reminderRuntime struct {

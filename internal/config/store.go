@@ -24,7 +24,7 @@ type LoadResult struct {
 }
 
 func ConfigPath(home string) string {
-	return filepath.Join(home, ".config", "cc-cache", "config.json")
+	return filepath.Join(home, ".config", "cc-watch", "config.json")
 }
 
 func Load(home string) (LoadResult, error) {

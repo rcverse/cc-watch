@@ -8,14 +8,14 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/richardchen/cc-cache/internal/config"
-	"github.com/richardchen/cc-cache/internal/jsonout"
-	"github.com/richardchen/cc-cache/internal/keepalive"
-	"github.com/richardchen/cc-cache/internal/notify"
-	"github.com/richardchen/cc-cache/internal/refresh"
-	"github.com/richardchen/cc-cache/internal/session"
-	"github.com/richardchen/cc-cache/internal/snapshot"
-	"github.com/richardchen/cc-cache/internal/tui"
+	"github.com/richardchen/cc-watch/internal/config"
+	"github.com/richardchen/cc-watch/internal/jsonout"
+	"github.com/richardchen/cc-watch/internal/keepalive"
+	"github.com/richardchen/cc-watch/internal/notify"
+	"github.com/richardchen/cc-watch/internal/refresh"
+	"github.com/richardchen/cc-watch/internal/session"
+	"github.com/richardchen/cc-watch/internal/snapshot"
+	"github.com/richardchen/cc-watch/internal/tui"
 )
 
 func Run(args []string, stdout io.Writer, stderr io.Writer) int {
@@ -56,7 +56,7 @@ func RunWithDeps(args []string, stdout io.Writer, stderr io.Writer, deps Depende
 		WriteHelp(stdout)
 		return 0
 	case ModeVersion:
-		fmt.Fprintf(stdout, "cc-cache %s\n", Version)
+		fmt.Fprintf(stdout, "cc-watch %s\n", Version)
 		return 0
 	case ModeJSON:
 		return runJSON(cmd, stdout, stderr, deps)

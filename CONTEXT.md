@@ -1,4 +1,4 @@
-# cc-cache Domain Context
+# cc-watch Domain Context
 
 ## Terms
 
@@ -32,7 +32,7 @@ The current product target is macOS with native `osascript` notifications and a 
 
 ### Implementation Stack
 
-The current implementation stack is Go because cc-cache is a local macOS terminal binary with filesystem watching, native notification command execution, bounded subprocess control, stable JSON output, and simple local install. TypeScript is out of scope unless the product becomes Node-native, web-native, or editor-extension-native.
+The current implementation stack is Go because cc-watch is a local macOS terminal binary with filesystem watching, native notification command execution, bounded subprocess control, stable JSON output, and simple local install. TypeScript is out of scope unless the product becomes Node-native, web-native, or editor-extension-native.
 
 ### Route Module
 

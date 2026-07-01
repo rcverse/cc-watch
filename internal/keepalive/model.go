@@ -3,7 +3,7 @@ package keepalive
 import (
 	"time"
 
-	"github.com/richardchen/cc-cache/internal/config"
+	"github.com/richardchen/cc-watch/internal/config"
 )
 
 type State string

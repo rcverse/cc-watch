@@ -6,11 +6,11 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/richardchen/cc-cache/internal/config"
-	"github.com/richardchen/cc-cache/internal/keepalive"
-	"github.com/richardchen/cc-cache/internal/notify"
-	"github.com/richardchen/cc-cache/internal/refresh"
-	"github.com/richardchen/cc-cache/internal/session"
+	"github.com/richardchen/cc-watch/internal/config"
+	"github.com/richardchen/cc-watch/internal/keepalive"
+	"github.com/richardchen/cc-watch/internal/notify"
+	"github.com/richardchen/cc-watch/internal/refresh"
+	"github.com/richardchen/cc-watch/internal/session"
 )
 
 type Route string
@@ -128,7 +128,6 @@ type Model struct {
 	liveRefresh          tea.Cmd
 	watcherEvents        []WatcherEventMsg
 	notificationStatuses []NotificationStatus
-	helpOpen             bool
 	focusIndex           int
 	selectedIndex        int
 	selectedID           string
@@ -138,12 +137,12 @@ type Model struct {
 	refresh              RefreshViewState
 	lastRefreshSource    refresh.Source
 	lastBypassedDebounce bool
-	directWorkspace      bool
 	detailsOffset        int
 	sessionInfoExpanded  bool
 	gapSortNewest        bool
 	startDisplayTicker   bool
 	startRefreshTicker   bool
+	configReturnRoute    Route
 	configOriginal       config.Config
 	configDraft          config.Config
 	configEditing        bool
@@ -159,7 +158,7 @@ type focusItem struct {
 	action string
 }
 
-var emptyFocusActions = []string{"refresh", "help", "quit"}
+var emptyFocusActions = []string{"refresh", "quit"}
 
 func NewModel(options Options) Model {
 	now := options.Now
@@ -236,7 +235,6 @@ func NewModel(options Options) Model {
 		selectedID:         options.SelectedID,
 		ambiguousID:        options.AmbiguousID,
 		refresh:            defaultRefresh(options.Refresh),
-		directWorkspace:    options.SelectedID != "",
 		startDisplayTicker: options.StartDisplayTicker,
 		startRefreshTicker: options.StartRefreshTicker,
 		configOriginal:     configDraft,
@@ -287,10 +285,6 @@ func (m Model) WatcherEvents() []WatcherEventMsg {
 
 func (m Model) NotificationStatuses() []NotificationStatus {
 	return append([]NotificationStatus(nil), m.notificationStatuses...)
-}
-
-func (m Model) HelpOpen() bool {
-	return m.helpOpen
 }
 
 func (m Model) FocusedAction() string {

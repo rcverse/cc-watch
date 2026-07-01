@@ -3,7 +3,7 @@ package keepalive
 import (
 	"time"
 
-	"github.com/richardchen/cc-cache/internal/session"
+	"github.com/richardchen/cc-watch/internal/session"
 )
 
 func (m *Manager) Enable(s session.Session, now time.Time) []Action {

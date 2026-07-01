@@ -17,15 +17,11 @@ func (m Model) View() string {
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "cc-cache %s\n", m.route)
+	fmt.Fprintf(&b, "cc-watch %s\n", m.route)
 	fmt.Fprintf(&b, "focus: %s\n", m.FocusedAction())
 	b.WriteString(m.refreshBanner())
 	if len(m.watcherEvents) > 0 {
 		fmt.Fprintf(&b, "watcher events: %d\n", len(m.watcherEvents))
-	}
-	if m.helpOpen {
-		b.WriteString("\n")
-		b.WriteString(m.helpText())
 	}
 	return b.String()
 }

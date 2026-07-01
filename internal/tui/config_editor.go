@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/richardchen/cc-cache/internal/config"
+	"github.com/richardchen/cc-watch/internal/config"
 )
 
 var configFocusActions = []string{
@@ -25,65 +25,72 @@ func (m Model) configView() string {
 	cfg := m.configDraft
 	var b strings.Builder
 	styles := DefaultStyles()
-	b.WriteString(styles.Render(RoleIdentity, "Claude Code Cache / config"))
+	b.WriteString("\n")
+	b.WriteString(styles.Render(RoleIdentity, "Claude Code Watch / config"))
 	b.WriteString("\n")
 	b.WriteString(styles.Render(RoleSeparator, strings.Repeat("─", 46)))
-	b.WriteString("\n\n")
+	b.WriteString("\n")
 
-	fmt.Fprintf(&b, "%s\n", m.configRow("config_reminder_thresholds", "Reminder thresholds", thresholdsText(cfg.ReminderThresholds)+"%", "alerts only; no Claude message"))
+	var settings strings.Builder
+	fmt.Fprintf(&settings, "%s\n", m.configRow("config_reminder_thresholds", "Reminder thresholds", thresholdsText(cfg.ReminderThresholds)+"%", "alerts only; no Claude message"))
 	if message := m.configFieldError("config_reminder_thresholds"); message != "" {
-		fmt.Fprintf(&b, "    %s\n", styles.Render(RoleDanger, "Error: "+message))
+		fmt.Fprintf(&settings, "    %s\n", styles.Render(RoleDanger, "Error: "+message))
 	}
-	fmt.Fprintf(&b, "%s\n", m.configRow("config_trigger", "KeepAlive trigger", fmt.Sprintf("%dm", cfg.KeepAlive.TriggerBeforeExpiryMinutes), "before cache expiry"))
+	fmt.Fprintf(&settings, "%s\n", m.configRow("config_trigger", "KeepAlive trigger", fmt.Sprintf("%dm", cfg.KeepAlive.TriggerBeforeExpiryMinutes), "before cache expiry"))
 	if message := m.configFieldError("config_trigger"); message != "" {
-		fmt.Fprintf(&b, "    %s\n", styles.Render(RoleDanger, "Error: "+message))
+		fmt.Fprintf(&settings, "    %s\n", styles.Render(RoleDanger, "Error: "+message))
 	}
-	fmt.Fprintf(&b, "%s\n", m.configRow("config_countdown", "Countdown", fmt.Sprintf("%ds", cfg.KeepAlive.CountdownSeconds), "cancel window before any send"))
+	fmt.Fprintf(&settings, "%s\n", m.configRow("config_countdown", "Countdown", fmt.Sprintf("%ds", cfg.KeepAlive.CountdownSeconds), "cancel window before any send"))
 	if message := m.configFieldError("config_countdown"); message != "" {
-		fmt.Fprintf(&b, "    %s\n", styles.Render(RoleDanger, "Error: "+message))
+		fmt.Fprintf(&settings, "    %s\n", styles.Render(RoleDanger, "Error: "+message))
 	}
 	if countdownWarnsFor5Minute(cfg) {
-		fmt.Fprintf(&b, "    %s\n", styles.Render(RoleWarning, "Warning: countdown may not fit the 5m cache trigger window."))
+		fmt.Fprintf(&settings, "    %s\n", styles.Render(RoleWarning, "Warning: countdown may not fit the 5m cache trigger window."))
 	}
-	fmt.Fprintf(&b, "%s\n", m.configRow("config_message", "Message", truncateEnd(cfg.KeepAlive.Message, 38), "Claude prompt text"))
-	fmt.Fprintf(&b, "%s\n", m.configRow("config_autosend", "Auto-send", onOffText(cfg.KeepAlive.AutoSend, true), autoSendConfigDetail(cfg.KeepAlive.AutoSend)))
-	if cfg.KeepAlive.AutoSend {
-		fmt.Fprintf(&b, "    %s\n", styles.Render(RoleWarning, "Warning: Auto-send default may send a Claude message after countdown."))
-	}
-	fmt.Fprintf(&b, "%s\n", m.configRow("config_max_sends", "Max sends", fmt.Sprintf("%d", cfg.KeepAlive.Scope.MaxSends), "per session scope"))
+	fmt.Fprintf(&settings, "%s\n", m.configRow("config_message", "Message", truncateEnd(cfg.KeepAlive.Message, 38), "Claude prompt text"))
+	fmt.Fprintf(&settings, "%s\n", m.configRow("config_autosend", "Auto-send", onOffText(cfg.KeepAlive.AutoSend, true), autoSendConfigDetail(cfg.KeepAlive.AutoSend)))
+	fmt.Fprintf(&settings, "%s\n", m.configRow("config_max_sends", "Max sends", fmt.Sprintf("%d", cfg.KeepAlive.Scope.MaxSends), "per session scope"))
 	if message := m.configFieldError("config_max_sends"); message != "" {
-		fmt.Fprintf(&b, "    %s\n", styles.Render(RoleDanger, "Error: "+message))
+		fmt.Fprintf(&settings, "    %s\n", styles.Render(RoleDanger, "Error: "+message))
 	}
+	b.WriteString(m.renderConfigPanel("Settings", settings.String()))
 	if m.configEditing {
-		fmt.Fprintf(&b, "    %s\n", styles.Render(RoleInfo, fmt.Sprintf("Editing %s: %s", configFieldLabel(m.configEditingField), m.configInput)))
-		fmt.Fprintf(&b, "    %s\n", styles.Render(RoleMuted, "Enter saves field · Esc cancels edit"))
+		var edit strings.Builder
+		fmt.Fprintf(&edit, "%s %s\n", styles.Render(RoleInfo, configFieldLabel(m.configEditingField)), styles.Render(RoleMuted, "is active"))
+		fmt.Fprintf(&edit, "%s  %s\n", styles.Render(RoleMuted, "Current input"), m.configInput)
+		fmt.Fprintf(&edit, "%s\n", styles.Render(RoleMuted, "↵ save field  ⎋ cancel edit"))
+		b.WriteString(m.renderConfigPanel("Editing", edit.String()))
 	}
 
-	b.WriteString("\nWhat will happen\n")
-	b.WriteString(configBehaviorSummary(cfg))
+	var preview strings.Builder
+	preview.WriteString(configBehaviorSummary(cfg))
+	if cfg.KeepAlive.AutoSend {
+		fmt.Fprintf(&preview, "%s\n", styles.Render(RoleWarning, "Auto-send is ON: Claude message after countdown unless canceled."))
+	}
+	b.WriteString(m.renderConfigPanel("Preview", preview.String()))
 
-	b.WriteString("\nValidation\n")
+	var validation strings.Builder
 	if err := m.configEditorValidation(); err != nil {
-		fmt.Fprintf(&b, "  %s\n", styles.Render(RoleDanger, "Cannot save. "+err.Error()))
+		fmt.Fprintf(&validation, "%s\n", styles.Render(RoleDanger, "Cannot save. "+err.Error()))
 	} else {
-		fmt.Fprintf(&b, "  %s\n", styles.Render(RoleSuccess, "OK"))
+		fmt.Fprintf(&validation, "%s\n", styles.Render(RoleSuccess, "OK"))
 	}
 	if m.configSaveError != "" {
-		fmt.Fprintf(&b, "  %s\n", styles.Render(RoleDanger, "Save failed: "+m.configSaveError))
+		fmt.Fprintf(&validation, "%s\n", styles.Render(RoleDanger, "Save failed: "+m.configSaveError))
 	}
 	if m.configResetConfirm {
-		b.WriteString("\n  Reset defaults? This will replace KeepAlive defaults.\n")
-		b.WriteString("  Press d again to confirm, esc to keep current settings.\n")
+		validation.WriteString("\n")
+		validation.WriteString("Reset defaults? This will replace KeepAlive defaults.\n")
+		validation.WriteString("Press d again to confirm, ⎋ to keep current settings.\n")
 	}
-	b.WriteString("\nActions\n")
-	fmt.Fprintf(&b, "%s\n", m.configRow("config_save", "Save", "", "write config"))
-	fmt.Fprintf(&b, "%s\n", m.configRow("config_reset", "Reset defaults", "", "requires confirmation"))
-	fmt.Fprintf(&b, "%s\n", m.configRow("config_cancel", "Cancel", "", "discard edits"))
-	b.WriteString("up/down move  enter edit  space toggle  s save  d reset(confirm)  esc cancel\n")
-	if m.helpOpen {
-		b.WriteString("\n")
-		b.WriteString(m.helpText())
-	}
+	b.WriteString(m.renderConfigPanel("Validation", validation.String()))
+
+	var actions strings.Builder
+	fmt.Fprintf(&actions, "%s\n", m.configRow("config_save", "Save", "", "write config"))
+	fmt.Fprintf(&actions, "%s\n", m.configRow("config_reset", "Reset defaults", "", "requires confirmation"))
+	fmt.Fprintf(&actions, "%s\n", m.configRow("config_cancel", "Cancel", "", "discard edits"))
+	b.WriteString(m.renderConfigPanel("Actions", actions.String()))
+	b.WriteString(cueLine("↑↓ move  ↵ edit  space toggle  s save  d reset  ⎋ cancel"))
 	return b.String()
 }
 
@@ -93,12 +100,29 @@ func (m Model) configRow(action string, label string, value string, detail strin
 	if m.FocusedAction() == action {
 		marker = styles.Render(RoleIdentity, "›")
 	}
-	return truncateANSI(fmt.Sprintf("  %s %-20s %-10s %s", marker, label, value, detail), m.width)
+	return truncateANSI(fmt.Sprintf("  %s %-20s %-10s %s", marker, label, value, styles.Render(RoleMuted, detail)), m.configPanelBodyWidth())
+}
+
+func (m Model) renderConfigPanel(title string, body string) string {
+	width := m.configPanelBodyWidth()
+	return RenderPanelWidth(DefaultStyles().Render(RoleIdentity, title), truncateBodyLines(body, width), width)
+}
+
+func (m Model) configPanelBodyWidth() int {
+	return maxInt(minInt(m.width-4, maxPanelBodyWidth), 24)
+}
+
+func truncateBodyLines(body string, width int) string {
+	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
+	for i, line := range lines {
+		lines[i] = truncateANSI(line, width)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func autoSendConfigDetail(enabled bool) string {
 	if enabled {
-		return "sends Claude message after countdown"
+		return "send after countdown"
 	}
 	return "manual prompt only"
 }
@@ -293,6 +317,13 @@ func (m Model) cancelConfig() (tea.Model, tea.Cmd) {
 	m.configInputFresh = false
 	m.configFieldErrors = map[string]string{}
 	m.configResetConfirm = false
+	if m.configReturnRoute != "" {
+		m.route = m.configReturnRoute
+		m.configReturnRoute = ""
+		m.focusIndex = m.defaultFocusIndex()
+		m.lastAction = "back_to_list"
+		return m, nil
+	}
 	m.lastAction = "cancel_config"
 	return m, tea.Quit
 }

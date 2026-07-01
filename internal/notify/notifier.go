@@ -196,8 +196,8 @@ func FormatEvent(event Event) Notification {
 		}
 	default:
 		return Notification{
-			Title: "cc-cache event",
-			Body:  "A cc-cache event occurred.",
+			Title: "cc-watch event",
+			Body:  "A cc-watch event occurred.",
 		}
 	}
 }
