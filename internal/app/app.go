@@ -32,14 +32,18 @@ type Dependencies struct {
 	RunTUIProgram                func(tui.Options) error
 	NotifyEvent                  func(notify.Event) notify.Result
 	ResetNotificationSuppression func()
+	Stdin                        io.Reader
+	RunStatuslineCommand         StatuslineRunner
 }
 
 func DefaultDependencies() Dependencies {
 	return Dependencies{
-		HomeDir:      os.UserHomeDir,
-		Now:          func() time.Time { return time.Now().UTC() },
-		DiscoverHome: session.DiscoverHome,
-		ParseFile:    session.ParseFile,
+		HomeDir:              os.UserHomeDir,
+		Now:                  func() time.Time { return time.Now().UTC() },
+		DiscoverHome:         session.DiscoverHome,
+		ParseFile:            session.ParseFile,
+		Stdin:                os.Stdin,
+		RunStatuslineCommand: runStatuslineCommand,
 	}
 }
 
@@ -60,6 +64,9 @@ func RunWithDeps(args []string, stdout io.Writer, stderr io.Writer, deps Depende
 		return 0
 	case ModeJSON:
 		return runJSON(cmd, stdout, stderr, deps)
+	case ModeStatusline:
+		deps = fillDependencies(deps)
+		return runStatusline(cmd, deps, deps.Stdin, stdout, stderr)
 	case ModeConfig:
 		deps = fillDependencies(deps)
 		var err error
@@ -289,6 +296,12 @@ func fillDependencies(deps Dependencies) Dependencies {
 	}
 	if deps.NewLiveWatcher == nil {
 		deps.NewLiveWatcher = defaultLiveWatcher
+	}
+	if deps.Stdin == nil {
+		deps.Stdin = defaults.Stdin
+	}
+	if deps.RunStatuslineCommand == nil {
+		deps.RunStatuslineCommand = defaults.RunStatuslineCommand
 	}
 	return deps
 }

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -232,7 +233,7 @@ func TestTUIDispatchForwardsPublicCLICommands(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("RunWithDeps(%v) exit code = %d, want 0; stderr=%q", tt.args, code, stderr.String())
 			}
-			if got != tt.want {
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("command = %#v, want %#v", got, tt.want)
 			}
 			if deps.tuiStarts != 1 {
@@ -842,6 +843,65 @@ func TestParseListFlags(t *testing.T) {
 	}
 	if !cmd.Remind {
 		t.Fatal("Remind = false, want true")
+	}
+}
+
+func TestParseStatuslineArgsGrammar(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		want    Command
+		wantErr string
+	}{
+		{
+			name: "bare",
+			args: []string{"statusline"},
+			want: Command{Mode: ModeStatusline, Limit: DefaultLimit},
+		},
+		{
+			name: "check",
+			args: []string{"statusline", "--check"},
+			want: Command{Mode: ModeStatusline, Limit: DefaultLimit, CheckConfig: true},
+		},
+		{
+			name: "wrapped command",
+			args: []string{"statusline", "--", "ccstatusline", "--flag"},
+			want: Command{Mode: ModeStatusline, Limit: DefaultLimit, WrappedCommand: []string{"ccstatusline", "--flag"}},
+		},
+		{
+			name:    "dash-dash with no command",
+			args:    []string{"statusline", "--"},
+			wantErr: "statusline: no command given after --",
+		},
+		{
+			name:    "check with trailing wrapped command",
+			args:    []string{"statusline", "--check", "--", "cmd"},
+			wantErr: statuslineUsageError,
+		},
+		{
+			name:    "unrecognized flag",
+			args:    []string{"statusline", "--bogus"},
+			wantErr: statuslineUsageError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd, err := ParseArgs(tt.args)
+			if tt.wantErr != "" {
+				if err == nil || err.Error() != tt.wantErr {
+					t.Fatalf("err = %v, want %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseArgs returned error: %v", err)
+			}
+			if cmd.Mode != tt.want.Mode || cmd.CheckConfig != tt.want.CheckConfig ||
+				!reflect.DeepEqual(cmd.WrappedCommand, tt.want.WrappedCommand) {
+				t.Fatalf("cmd = %#v, want %#v", cmd, tt.want)
+			}
+		})
 	}
 }
 

@@ -68,6 +68,55 @@ remaining.
 - Watcher failures are a degraded state, not a crash — safety refresh keeps
   working even if fsnotify setup partially fails.
 
+## statusline subprocess safety and rate-limit estimate
+
+- `cc-watch statusline` is the only other feature (besides KeepAlive)
+  allowed to spawn a subprocess — the user's own existing statusline
+  command, given via `cc-watch statusline -- <command> [args...]`. Argv
+  only, via `exec.CommandContext`, never a shell.
+- Subprocess timeout: 5s (short — this hook runs on every turn and must
+  not visibly stall Claude Code's UI, unlike KeepAlive's rare, 30s,
+  user-visible send).
+- The wrapped command's **stderr is relayed directly**, never captured —
+  a wrapped command may depend on stderr passthrough for its own
+  progress/warnings. Only stdout is captured.
+- Exactly one trailing newline is trimmed from the wrapped command's
+  stdout before cc-watch's own segment is appended; everything else is
+  handled as raw bytes, never string-normalized (could mangle ANSI
+  sequences the wrapped command emitted).
+- On a non-clean wrapped-command exit (nonzero, spawn error, or timeout),
+  cc-watch relays whatever partial stdout it produced and appends
+  **nothing** — never risk turning a truncated line into a garbled
+  combined one. `cc-watch statusline` (and its wrapping) **always exits
+  0** regardless: this is invisible plumbing riding along the user's real
+  statusline, and a non-zero exit or eaten output would visibly break
+  their setup on any transient hiccup, which is worse than a stale or
+  missing readout for one turn.
+- Rate-limit state persists at `~/.config/cc-watch/ratelimit.json`
+  (`internal/ratelimit`), same plain `json.MarshalIndent` +
+  `os.WriteFile` pattern as `internal/config`. It self-heals every turn
+  (rebuilt from the next hook invocation regardless of prior contents),
+  so there's no delete/`--clean` verb — `rm` the file if you ever need to.
+- **Momentum is a conservative estimate, never a fact.** `pctPerMessage`
+  is the average of the last few consecutive reading-to-reading deltas in
+  the account's overall `used_percentage` — not isolated to KeepAlive's
+  own (cheaper) cost, deliberately: an earlier draft that tried to isolate
+  KA-specific cost via transcript-text matching was structurally broken,
+  since `rate_limits` is account-wide but the transcript checked is
+  per-session. Below a small delta epsilon (~0.5%, e.g. an idle account),
+  momentum reports `unknown`, never a confidently-wrong large
+  `messagesLeft` — this is the load-bearing safety property of the whole
+  feature.
+- On a rate-limit window rollover (a new `resets_at` differs from the
+  last stored reading), the reading history is cleared — momentum across
+  a reset boundary is meaningless.
+- The session's cache-tier TTL is looked up via the existing
+  `session.ParseFile` whole-transcript-sum logic and then **cached per
+  `transcript_path`** in `ratelimit.json` — re-running a whole-file scan
+  on every single hook invocation would add real per-turn latency on a
+  long session. Only the first hook invocation for a session pays the
+  scan cost.
+
 ## Parser rules (don't casually change)
 
 - `ephemeral_1h_input_tokens > 0` → 1h tier; else

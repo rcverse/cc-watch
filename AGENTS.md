@@ -15,6 +15,8 @@ pitch.
 - `internal/refresh/` — fsnotify watcher, debounce, safety refresh.
 - `internal/keepalive/` — the KeepAlive state machine and subprocess
   runner.
+- `internal/ratelimit/` — account-wide 5-hour rate-limit tracking
+  (momentum estimate, tier-TTL cache) for the `statusline` subcommand.
 - `internal/notify/` — macOS `osascript` notifications.
 - `internal/config/` — config file load/save/validate.
 - `internal/jsonout/` — the `--json` schema.
@@ -57,6 +59,10 @@ scripts/test-install.sh # exercises install.sh against a temp HOME, safe to run
   actually invoke `claude -r ... -p ...` against a real session). Use fake
   runners and fixture homes.
 - Never write to `~/.claude/projects/**/*.jsonl` — read-only, always.
+- `statusline` is the only feature besides KeepAlive allowed to spawn a
+  subprocess, and only the user's own configured statusline command,
+  argv-only (never a shell), bounded 5s timeout, always relays output and
+  exits 0. It never writes `~/.claude/settings.json`.
 - Don't add Linux/Windows support, a daemon, a public watch/interval flag,
   Homebrew/GitHub Release packaging, or direct Anthropic API calls without
   the user asking first — these are deliberate non-goals, not oversights.

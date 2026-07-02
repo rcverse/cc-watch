@@ -13,19 +13,24 @@ type Mode string
 const (
 	DefaultLimit = 25
 
-	ModeTUI     Mode = "tui"
-	ModeHelp    Mode = "help"
-	ModeVersion Mode = "version"
-	ModeJSON    Mode = "json"
-	ModeConfig  Mode = "config"
+	ModeTUI        Mode = "tui"
+	ModeHelp       Mode = "help"
+	ModeVersion    Mode = "version"
+	ModeJSON       Mode = "json"
+	ModeConfig     Mode = "config"
+	ModeStatusline Mode = "statusline"
 )
 
+const statuslineUsageError = "statusline: invalid arguments, expected one of: `cc-watch statusline`, `cc-watch statusline -- <command>`, `cc-watch statusline --check`"
+
 type Command struct {
-	Mode   Mode
-	Limit  int
-	ID     string
-	JSON   bool
-	Remind bool
+	Mode           Mode
+	Limit          int
+	ID             string
+	JSON           bool
+	Remind         bool
+	WrappedCommand []string
+	CheckConfig    bool
 }
 
 func ParseArgs(args []string) (Command, error) {
@@ -40,6 +45,29 @@ func ParseArgs(args []string) (Command, error) {
 		}
 		cmd.Mode = ModeConfig
 		return cmd, nil
+	}
+
+	if len(args) > 0 && args[0] == "statusline" {
+		cmd.Mode = ModeStatusline
+		rest := args[1:]
+		switch {
+		case len(rest) == 0:
+			return cmd, nil
+		case rest[0] == "--check":
+			if len(rest) > 1 {
+				return cmd, errors.New(statuslineUsageError)
+			}
+			cmd.CheckConfig = true
+			return cmd, nil
+		case rest[0] == "--":
+			if len(rest) < 2 {
+				return cmd, fmt.Errorf("statusline: no command given after --")
+			}
+			cmd.WrappedCommand = append([]string(nil), rest[1:]...)
+			return cmd, nil
+		default:
+			return cmd, errors.New(statuslineUsageError)
+		}
 	}
 
 	fs := flag.NewFlagSet("cc-watch", flag.ContinueOnError)
@@ -86,6 +114,9 @@ func ParseArgs(args []string) (Command, error) {
 func WriteHelp(w io.Writer) {
 	fmt.Fprint(w, `Usage: cc-watch [--n N] [--id <partial-id>] [--json] [--remind]
        cc-watch config
+       cc-watch statusline
+       cc-watch statusline -- <command> [args...]
+       cc-watch statusline --check
        cc-watch --help
        cc-watch --version
 
@@ -97,11 +128,19 @@ Options:
   --help, -h        show help
   --version         show version
 
+statusline:
+  Plugs into Claude Code's statusLine.command hook to append an estimated
+  "messages left before the 5-hour rate limit resets" readout.
+    cc-watch statusline               emit only cc-watch's own readout
+    cc-watch statusline -- <command>  wrap an existing statusline command
+    cc-watch statusline --check       read-only: report current wiring
+
 Examples:
   cc-watch
   cc-watch --n 10
   cc-watch --id d4b247b7
   cc-watch --json --id d4b247b7
   cc-watch config
+  cc-watch statusline --check
 `)
 }

@@ -125,13 +125,56 @@ Lives at `~/.config/cc-watch/config.json`. Edit it by hand or run
 no notifications, no KeepAlive automation. Point it at a script, a status
 bar, or a dashboard, if you must have one of those.
 
+## statusline
+
+Claude Code's account-wide 5-hour rate limit is a separate thing from the
+per-session cache TTL cc-watch otherwise tracks — and it matters, because a
+capped account can't send anything, including a KeepAlive ping. `cc-watch
+statusline` plugs into Claude Code's `statusLine.command` hook and appends a
+conservative "messages left before the limit resets" estimate to your
+existing statusline.
+
+```bash
+cc-watch statusline                   # emit only cc-watch's own readout
+cc-watch statusline -- <command>      # wrap your existing statusline command
+cc-watch statusline --check           # read-only: report current wiring
+```
+
+`--check` reads `~/.claude/settings.json` and prints the exact snippet to
+add or revert, without ever writing the file yourself — for example, if
+your existing statusline command is some tool, wiring it in looks like:
+
+```json
+{ "statusLine": { "type": "command", "command": "cc-watch statusline -- <your statusline command>" } }
+```
+
+If your existing statusline command is a shell pipeline rather than a
+single executable, wrap it in `sh -c '...'` first — cc-watch spawns the
+wrapped command directly (argv, no shell), so it can't run a pipe on its
+own.
+
+The appended readout looks like `5h 34%` or `5h 34% ~12 msg left`, or `!
+5h 87% cap before reset` when you're at risk of hitting the limit before a
+session's cache needs its next KeepAlive ping. "Messages left" is always an
+estimate — Claude Code never exposes an absolute token budget, only a
+percentage and a reset time — and it's deliberately conservative, since
+it's calibrated from your actual mix of messages rather than isolating
+KeepAlive's own (cheaper) cost. Set `NO_COLOR` to suppress the at-risk
+color.
+
 ## Local-first, no exceptions
 
 - Reads `~/.claude/projects/**/*.jsonl`. Never writes to them.
-- Writes only its own config at `~/.config/cc-watch/config.json`.
+- Writes only its own config at `~/.config/cc-watch/config.json` and its
+  own rate-limit history at `~/.config/cc-watch/ratelimit.json` (used by
+  `cc-watch statusline`; self-healing, no delete command needed).
 - Notifies through macOS `osascript`. Nothing leaves your machine.
 - Only runs `claude` locally, and only as part of a KeepAlive send you
-  configured.
+  configured. `cc-watch statusline` may also run one subprocess: your own
+  existing statusline command, if you chose to wrap it.
+- `cc-watch statusline --check` only reads `~/.claude/settings.json`. It
+  never writes it — applying or reverting the change is a manual step you
+  do yourself.
 - Never calls an Anthropic API directly, never runs as a background daemon.
 
 ## What this isn't
