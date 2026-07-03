@@ -1,6 +1,9 @@
 package tui
 
-import tea "github.com/charmbracelet/bubbletea"
+import (
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/richardchen/cc-watch/internal/keepalive"
+)
 
 func (m Model) activateFocusedAction(action string) (tea.Model, tea.Cmd) {
 	switch m.route {
@@ -30,8 +33,7 @@ func (m Model) activateListAction(action string) (tea.Model, tea.Cmd) {
 		m.toggleReminderForSelected()
 		return m, nil
 	case "keepalive":
-		m.toggleKeepAliveForSelected()
-		return m, nil
+		return m, m.toggleKeepAliveForSelected()
 	default:
 		return m.activateSharedAction(action)
 	}
@@ -43,11 +45,9 @@ func (m Model) activateWorkspaceAction(action string) (tea.Model, tea.Cmd) {
 		m.toggleReminderForSelected()
 		return m, nil
 	case "keepalive":
-		m.toggleKeepAliveForSelected()
-		return m, nil
+		return m, m.toggleKeepAliveForSelected()
 	case "keepalive_autosend":
-		m.toggleKeepAliveAutoSendForSelected()
-		return m, nil
+		return m, m.toggleKeepAliveAutoSendForSelected()
 	case "keepalive_send_now":
 		return m.sendKeepAliveNow()
 	case "keepalive_cancel", "keepalive_stop_waiting":
@@ -58,6 +58,12 @@ func (m Model) activateWorkspaceAction(action string) (tea.Model, tea.Cmd) {
 			m.keepAliveManager.Acknowledge(selected.SessionID)
 			m.lastAction = "acknowledge_keepalive"
 			m.focusIndex = m.defaultFocusIndex()
+			// Only ActionScopeComplete's state is newly notification-worthy
+			// here; a lingering (non-exhausted) error state is unchanged by
+			// Acknowledge and would otherwise re-fire its Failure notice.
+			if state := m.KeepAliveState(selected.SessionID); state.State == keepalive.StateScopeComplete {
+				return m, m.keepAliveLifecycleNotification(selected.SessionID, state)
+			}
 		}
 		return m, nil
 	case "back":

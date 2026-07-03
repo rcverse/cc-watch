@@ -126,7 +126,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if state.State == keepalive.StateConfirming {
 			return m, m.keepAliveConfirmationCommand(typed)
 		}
-		return m, nil
+		return m, m.keepAliveLifecycleNotification(typed.SessionID, state)
 	case KeepAliveConfirmationResultMsg:
 		if !m.keepAliveAsyncCurrent(typed.SessionID, typed.InstanceToken, typed.Generation, typed.SelectedID) {
 			m.lastAction = ErrKeepAliveStaleMessage.Error()
@@ -136,15 +136,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if errors.Is(typed.Err, keepalive.ErrConfirmationTimeout) {
 				m.keepAliveManager.MarkConfirmationTimeout(typed.SessionID, typed.InstanceToken)
 			} else {
-				m.keepAliveManager.MarkSubprocessFailure(typed.SessionID, typed.InstanceToken, typed.Err.Error())
+				m.keepAliveManager.MarkSubprocessFailure(typed.SessionID, typed.InstanceToken, typed.Err.Error(), false)
 			}
-			return m, nil
+			return m, m.keepAliveLifecycleNotification(typed.SessionID, m.KeepAliveState(typed.SessionID))
 		}
 		m.keepAliveManager.MarkSuccess(typed.SessionID, typed.InstanceToken, typed.ConfirmedAt)
-		if m.KeepAliveState(typed.SessionID).State == keepalive.StateSuccess {
+		state := m.KeepAliveState(typed.SessionID)
+		if state.State == keepalive.StateSuccess {
 			m.lastAction = "keepalive_confirmed"
 		}
-		return m, nil
+		return m, m.keepAliveLifecycleNotification(typed.SessionID, state)
 	case ManualRefreshMsg:
 		m.refresh.NotificationDegraded = ""
 		if m.deps.ResetNotificationSuppression != nil {
@@ -181,6 +182,7 @@ func (m *Model) reminderNotificationCommands() []tea.Cmd {
 		commands = append(commands, m.notificationCommand(notify.Event{
 			Kind:             notify.EventReminderThresholdCrossed,
 			SessionID:        event.sessionID,
+			ShortID:          event.shortID,
 			Project:          event.project,
 			ThresholdPercent: event.thresholdPercent,
 		}))
@@ -347,7 +349,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "k":
 		if m.route == RouteList || m.route == RouteWorkspace {
-			m.toggleKeepAliveForSelected()
+			return m, m.toggleKeepAliveForSelected()
 		}
 		return m, nil
 	case "u":
@@ -431,39 +433,82 @@ func (m *Model) applyKeepAliveActions(actions []keepalive.Action, commands *[]te
 			m.countdowns[action.SessionID] = action.CountdownSeconds
 		case keepalive.ActionManualPromptShown:
 			m.lastAction = "keepalive_manual_prompt"
+			if cmd := m.keepAliveLifecycleNotification(action.SessionID, m.KeepAliveState(action.SessionID)); cmd != nil {
+				*commands = append(*commands, cmd)
+			}
 		case keepalive.ActionStartRunner:
 			m.lastAction = "keepalive_runner_ready"
 			*commands = append(*commands, m.keepAliveRunnerCommand(action))
+		case keepalive.ActionScopeComplete:
+			m.lastAction = "keepalive_scope_complete"
+			if cmd := m.keepAliveLifecycleNotification(action.SessionID, m.KeepAliveState(action.SessionID)); cmd != nil {
+				*commands = append(*commands, cmd)
+			}
 		}
 	}
 	return *commands
 }
 
-func (m *Model) toggleKeepAliveAutoSendForSelected() {
+// keepAliveLifecycleNotification maps a KeepAlive state to the matching
+// notify.Event and returns the tea.Cmd to dispatch it, or nil if this state
+// doesn't warrant an OS notification (e.g. transient states stay TUI-only).
+func (m Model) keepAliveLifecycleNotification(sessionID string, state keepalive.SessionState) tea.Cmd {
+	if m.deps.NotifyEvent == nil {
+		return nil
+	}
+	event, ok := keepAliveNotifyEvent(sessionID, state)
+	if !ok {
+		return nil
+	}
+	if selected, found := findSessionByID(m.sessions, sessionID); found {
+		event.ShortID = selected.ShortID
+		event.Project = selected.Project
+	}
+	return m.notificationCommand(event)
+}
+
+func keepAliveNotifyEvent(sessionID string, state keepalive.SessionState) (notify.Event, bool) {
+	switch state.State {
+	case keepalive.StateManualReady:
+		return notify.Event{Kind: notify.EventKeepAliveManualPromptShown, SessionID: sessionID}, true
+	case keepalive.StateSuccess:
+		return notify.Event{Kind: notify.EventKeepAliveSuccess, SessionID: sessionID}, true
+	case keepalive.StateErrorNoClaude, keepalive.StateErrorSubprocess, keepalive.StateErrorTimeout:
+		return notify.Event{Kind: notify.EventKeepAliveFailure, SessionID: sessionID, Reason: state.LastFailure, RateLimited: state.RateLimited}, true
+	case keepalive.StateScopeComplete:
+		return notify.Event{Kind: notify.EventKeepAliveScopeComplete, SessionID: sessionID}, true
+	default:
+		return notify.Event{}, false
+	}
+}
+
+func (m *Model) toggleKeepAliveAutoSendForSelected() tea.Cmd {
 	selected := m.selectedSession()
 	if selected == nil {
-		return
+		return nil
 	}
 	if reason := m.keepAliveUnavailableReason(*selected); reason != "" {
 		m.disableKeepAlive(selected.SessionID)
 		m.lastAction = "keepalive_unavailable_expired"
 		m.setNotice("KeepAlive N/A "+reason, RoleMuted, 3*time.Second)
-		return
+		return nil
 	}
 	state := m.KeepAliveState(selected.SessionID)
 	if state.State == keepalive.StateSending || state.State == keepalive.StateConfirming || isKeepAliveFailure(state.State) {
 		m.lastAction = "keepalive_autosend_disabled"
-		return
+		return nil
 	}
 	next := !state.AutoSend
 	m.keepAliveManager.SetAutoSend(selected.SessionID, next)
+	m.lastAction = "toggle_keepalive_autosend"
 	if next && m.deps.CheckClaudeAvailable != nil {
 		if err := m.deps.CheckClaudeAvailable(); err != nil {
 			m.keepAliveManager.MarkNoClaude(selected.SessionID, state.InstanceToken, err.Error())
 			m.refresh.ClaudeUnavailableMessage = err.Error()
+			return m.keepAliveLifecycleNotification(selected.SessionID, m.KeepAliveState(selected.SessionID))
 		}
 	}
-	m.lastAction = "toggle_keepalive_autosend"
+	return nil
 }
 
 func (m Model) sendKeepAliveNow() (tea.Model, tea.Cmd) {
@@ -558,7 +603,9 @@ func (m Model) keepAliveRunnerCommand(action keepalive.Action) tea.Cmd {
 	target := keepalive.NewConfirmationTarget(selected.JSONLPath, time.Time{})
 	return func() tea.Msg {
 		startedAt := m.now
-		execution := keepalive.ExecuteRunner(context.Background(), action, runner, startedAt)
+		ctx, cancel := context.WithTimeout(context.Background(), keepalive.SendTimeout)
+		defer cancel()
+		execution := keepalive.ExecuteRunner(ctx, action, runner, startedAt)
 		result := execution.Result
 		target.After = result.StartedAt
 		return KeepAliveRunnerResultMsg{

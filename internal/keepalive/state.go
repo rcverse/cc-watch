@@ -100,15 +100,15 @@ func (m *Manager) MarkSendStarted(sessionID string, token int64, startedAt time.
 }
 
 func (m *Manager) MarkNoClaude(sessionID string, token int64, reason string) {
-	m.markFailure(sessionID, token, StateErrorNoClaude, reason)
+	m.markFailure(sessionID, token, StateErrorNoClaude, reason, false)
 }
 
-func (m *Manager) MarkSubprocessFailure(sessionID string, token int64, reason string) {
-	m.markFailure(sessionID, token, StateErrorSubprocess, reason)
+func (m *Manager) MarkSubprocessFailure(sessionID string, token int64, reason string, limited bool) {
+	m.markFailure(sessionID, token, StateErrorSubprocess, reason, limited)
 }
 
 func (m *Manager) MarkConfirmationTimeout(sessionID string, token int64) {
-	m.markFailure(sessionID, token, StateErrorTimeout, "confirmation timed out")
+	m.markFailure(sessionID, token, StateErrorTimeout, "confirmation timed out", false)
 }
 
 func (m *Manager) MarkSuccess(sessionID string, token int64, confirmedAt time.Time) {
@@ -148,7 +148,7 @@ func (m *Manager) evaluate(s session.Session, now time.Time) []Action {
 	if state.scopeExhausted() {
 		state.State = StateScopeComplete
 		m.states[s.SessionID] = state
-		return nil
+		return []Action{{Kind: ActionScopeComplete, SessionID: s.SessionID, InstanceToken: state.InstanceToken}}
 	}
 
 	timing := EvaluateTiming(s, now, m.cfg)
@@ -201,7 +201,7 @@ func (m *Manager) beginSend(state SessionState) []Action {
 	}}
 }
 
-func (m *Manager) markFailure(sessionID string, token int64, failedState State, reason string) {
+func (m *Manager) markFailure(sessionID string, token int64, failedState State, reason string, limited bool) {
 	state := m.State(sessionID)
 	if state.InstanceToken != token {
 		return
@@ -220,6 +220,7 @@ func (m *Manager) markFailure(sessionID string, token int64, failedState State, 
 	state.AutoSend = false
 	state.TriggerArmed = false
 	state.LastFailure = reason
+	state.RateLimited = limited
 	m.states[sessionID] = state
 }
 

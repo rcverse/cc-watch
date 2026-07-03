@@ -11,9 +11,7 @@ type EventKind string
 
 const (
 	EventReminderThresholdCrossed   EventKind = "reminder_threshold_crossed"
-	EventKeepAliveCountdownStarted  EventKind = "keepalive_countdown_started"
 	EventKeepAliveManualPromptShown EventKind = "keepalive_manual_prompt_shown"
-	EventKeepAliveSent              EventKind = "keepalive_sent"
 	EventKeepAliveSuccess           EventKind = "keepalive_success"
 	EventKeepAliveFailure           EventKind = "keepalive_failure"
 	EventKeepAliveScopeComplete     EventKind = "keepalive_scope_complete"
@@ -22,15 +20,19 @@ const (
 type Event struct {
 	Kind             EventKind
 	SessionID        string
+	ShortID          string
 	Project          string
 	ThresholdPercent int
 	CountdownSeconds int
 	Reason           string
+	RateLimited      bool
 }
 
 type Notification struct {
-	Title string
-	Body  string
+	Title    string
+	Subtitle string
+	Body     string
+	Sound    string
 }
 
 type Result struct {
@@ -81,6 +83,12 @@ func ExecRunner(name string, args ...string) error {
 
 func MacOSCommand(notification Notification) (string, []string) {
 	script := `display notification "` + escapeAppleScript(notification.Body) + `" with title "` + escapeAppleScript(notification.Title) + `"`
+	if notification.Subtitle != "" {
+		script += ` subtitle "` + escapeAppleScript(notification.Subtitle) + `"`
+	}
+	if notification.Sound != "" {
+		script += ` sound name "` + escapeAppleScript(notification.Sound) + `"`
+	}
 	return "osascript", []string{"-e", script}
 }
 
@@ -154,52 +162,75 @@ func (m *Manager) record(event Event, notification Notification, result Result) 
 }
 
 func FormatEvent(event Event) Notification {
+	subtitle := subtitleFor(event)
 	switch event.Kind {
 	case EventReminderThresholdCrossed:
 		return Notification{
-			Title: "Reminder alarm",
-			Body:  fmt.Sprintf("Reminder: %d%% cache remaining. No Claude message was sent.", event.ThresholdPercent),
-		}
-	case EventKeepAliveCountdownStarted:
-		return Notification{
-			Title: "KeepAlive countdown",
-			Body:  fmt.Sprintf("A Claude message may be sent after %ds unless canceled.", event.CountdownSeconds),
+			Title:    "cc-watch · Reminder",
+			Subtitle: subtitle,
+			Body:     fmt.Sprintf("%d%% cache remaining. No message sent — reminder only.", event.ThresholdPercent),
 		}
 	case EventKeepAliveManualPromptShown:
 		return Notification{
-			Title: "KeepAlive manual prompt",
-			Body:  "No Claude message was sent. Send manually or dismiss.",
-		}
-	case EventKeepAliveSent:
-		return Notification{
-			Title: "KeepAlive send started",
-			Body:  "Claude message send started for this session.",
+			Title:    "cc-watch · KeepAlive",
+			Subtitle: subtitle,
+			Body:     "Cache is about to expire. Auto-send is off — open cc-watch to send or dismiss.",
 		}
 	case EventKeepAliveSuccess:
 		return Notification{
-			Title: "KeepAlive sent and confirmed",
-			Body:  "Claude message was sent and session JSONL evidence confirmed the result.",
+			Title:    "cc-watch · KeepAlive",
+			Subtitle: subtitle,
+			Body:     "Keep-alive sent and confirmed. Cache window extended.",
 		}
 	case EventKeepAliveFailure:
-		reason := event.Reason
-		if reason == "" {
-			reason = "result not confirmed"
+		body := "Claude account is rate-limited — can't send. Auto-send is off until you re-enable it."
+		if !event.RateLimited {
+			reason := event.Reason
+			if reason == "" {
+				reason = "result not confirmed"
+			}
+			body = "Keep-alive send failed: " + truncateForNotification(reason, 80) + ". Auto-send is off until you re-enable it."
 		}
 		return Notification{
-			Title: "KeepAlive stopped",
-			Body:  "Claude message was not confirmed. " + reason,
+			Title:    "cc-watch · KeepAlive",
+			Subtitle: subtitle,
+			Body:     body,
+			Sound:    "Basso",
 		}
 	case EventKeepAliveScopeComplete:
 		return Notification{
-			Title: "KeepAlive scope complete",
-			Body:  "No more automatic sends remain for this session.",
+			Title:    "cc-watch · KeepAlive",
+			Subtitle: subtitle,
+			Body:     "No more automatic sends left for this session.",
 		}
 	default:
 		return Notification{
-			Title: "cc-watch event",
+			Title: "cc-watch",
 			Body:  "A cc-watch event occurred.",
 		}
 	}
+}
+
+func subtitleFor(event Event) string {
+	switch {
+	case event.ShortID != "" && event.Project != "":
+		return event.ShortID + " · " + event.Project
+	case event.ShortID != "":
+		return event.ShortID
+	default:
+		return event.Project
+	}
+}
+
+// truncateForNotification collapses whitespace (so multi-line CLI output
+// doesn't garble a single-line banner) and caps length for display.
+func truncateForNotification(s string, max int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max]) + "…"
 }
 
 func NewPlatformNotifier(runner Runner) Notifier {

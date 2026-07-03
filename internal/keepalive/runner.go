@@ -15,6 +15,11 @@ var (
 	ErrSubprocess        = errors.New("claude subprocess failed")
 )
 
+// SendTimeout bounds the real `claude -r ... -p ...` subprocess so a hang
+// (e.g. an unanswerable non-interactive permission prompt) can't leave a
+// send stuck in StateSending forever.
+const SendTimeout = 30 * time.Second
+
 type RunRequest struct {
 	SessionID string
 	Message   string
@@ -156,7 +161,7 @@ func (m *Manager) ApplyRunnerExecution(action Action, execution RunnerExecution)
 	}
 	result := execution.Result
 	if result.Err != nil || result.ExitCode != 0 || result.Limit {
-		m.MarkSubprocessFailure(action.SessionID, action.InstanceToken, failureMessage(result))
+		m.MarkSubprocessFailure(action.SessionID, action.InstanceToken, failureMessage(result), result.Limit)
 		return m.State(action.SessionID)
 	}
 	m.MarkSendStarted(action.SessionID, action.InstanceToken, result.StartedAt)
@@ -177,6 +182,12 @@ func runCommand(ctx context.Context, name string, args ...string) (string, strin
 		if errors.As(err, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		}
+		// A context-deadline kill leaves no exit code or output of its own
+		// to explain the failure (Send() below normalizes err to the
+		// generic ErrSubprocess), so record a distinguishable reason here.
+		if ctx.Err() == context.DeadlineExceeded && stderr.Len() == 0 {
+			stderr.WriteString("claude did not respond before the send timeout and was terminated")
+		}
 	}
 	return stdout.String(), stderr.String(), exitCode, err
 }
@@ -196,5 +207,10 @@ func failureMessage(result RunResult) string {
 
 func isClaudeLimit(output string) bool {
 	lower := strings.ToLower(output)
-	return strings.Contains(lower, "limit") || strings.Contains(lower, "usage")
+	for _, marker := range []string{"limit", "usage", "quota", "too many requests"} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }

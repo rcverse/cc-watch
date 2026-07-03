@@ -14,6 +14,7 @@ type reminderRuntime struct {
 
 type reminderRuntimeEvent struct {
 	sessionID        string
+	shortID          string
 	project          string
 	thresholdPercent int
 	remainingPercent float64
@@ -46,6 +47,7 @@ func (r reminderRuntime) check(now time.Time, sessions []session.Session) []remi
 			r.markFired(s.SessionID, threshold)
 			events = append(events, reminderRuntimeEvent{
 				sessionID:        s.SessionID,
+				shortID:          s.ShortID,
 				project:          s.Project,
 				thresholdPercent: threshold,
 				remainingPercent: remainingPercent,

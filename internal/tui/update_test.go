@@ -96,7 +96,7 @@ func TestDisplayTickFiresReminderNotificationThreshold(t *testing.T) {
 	if !ok {
 		t.Fatalf("notification command returned %#v, want NotificationResultMsg", msg)
 	}
-	if result.Event.Kind != notify.EventReminderThresholdCrossed || result.Event.ThresholdPercent != 20 {
+	if result.Event.Kind != notify.EventReminderThresholdCrossed || result.Event.ThresholdPercent != 20 || result.Event.ShortID != "reminder" {
 		t.Fatalf("event = %#v, want reminder threshold 20", result.Event)
 	}
 	if len(events) != 1 {
@@ -549,6 +549,42 @@ func TestListAcceleratorsToggleSelectedSession(t *testing.T) {
 	model = updated.(Model)
 	if model.KeepAliveEnabled("target-id") {
 		t.Fatalf("second k did not disable KeepAlive for selected session")
+	}
+}
+
+func TestDirectKeepAliveShortcutReturnsNotificationCommand(t *testing.T) {
+	now := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
+	cfg := config.Default().KeepAlive
+	cfg.AutoSend = false
+	s := workspaceSession(now)
+	last := now.Add(-56 * time.Minute)
+	s.LastMessageAt = &last
+	model := NewModel(Options{
+		Now:             now,
+		Sessions:        []session.Session{s},
+		KeepAliveConfig: cfg,
+		Dependencies: Dependencies{
+			NotifyEvent: func(event notify.Event) notify.Result {
+				return notify.Result{Delivered: true, Message: "delivered"}
+			},
+		},
+	})
+
+	updated, cmd := model.Update(keyRunes("k"))
+	model = updated.(Model)
+
+	if cmd == nil {
+		t.Fatal("k returned nil command, want KeepAlive notification command")
+	}
+	result, ok := cmd().(NotificationResultMsg)
+	if !ok {
+		t.Fatalf("k command returned %#v, want NotificationResultMsg", result)
+	}
+	if result.Event.Kind != notify.EventKeepAliveManualPromptShown || result.Event.ShortID != "workspace" {
+		t.Fatalf("event = %#v, want manual prompt for workspace", result.Event)
+	}
+	if !model.KeepAliveEnabled("workspace-id") {
+		t.Fatalf("k did not enable KeepAlive for workspace-id")
 	}
 }
 

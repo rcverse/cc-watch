@@ -29,6 +29,7 @@ const (
 	ActionCountdownStarted  ActionKind = "countdown_started"
 	ActionManualPromptShown ActionKind = "manual_prompt_shown"
 	ActionStartRunner       ActionKind = "start_runner"
+	ActionScopeComplete     ActionKind = "scope_complete"
 )
 
 type Action struct {
@@ -50,6 +51,7 @@ type SessionState struct {
 	LatestSafeSendAt time.Time
 	LastResult       string
 	LastFailure      string
+	RateLimited      bool
 	SafetyDisabled   bool
 }
 

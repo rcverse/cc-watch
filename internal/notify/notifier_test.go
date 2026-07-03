@@ -50,7 +50,7 @@ func TestRepeatedIdenticalFailureIsSuppressedUntilDistinctEventOrManualRefresh(t
 		t.Fatalf("notifier calls = %d, want 1 after suppressed duplicate", failing.calls)
 	}
 
-	distinct := manager.Notify(Event{Kind: EventKeepAliveCountdownStarted, SessionID: "one", CountdownSeconds: 30})
+	distinct := manager.Notify(Event{Kind: EventKeepAliveManualPromptShown, SessionID: "one"})
 	if distinct.Suppressed {
 		t.Fatalf("distinct event failure was suppressed: %#v", distinct)
 	}
@@ -62,7 +62,7 @@ func TestRepeatedIdenticalFailureIsSuppressedUntilDistinctEventOrManualRefresh(t
 	}
 
 	manager.ResetSuppression()
-	afterReset := manager.Notify(Event{Kind: EventKeepAliveCountdownStarted, SessionID: "one", CountdownSeconds: 30})
+	afterReset := manager.Notify(Event{Kind: EventKeepAliveManualPromptShown, SessionID: "one"})
 	if afterReset.Suppressed {
 		t.Fatalf("failure after manual reset was suppressed: %#v", afterReset)
 	}
@@ -79,7 +79,7 @@ func TestSuccessfulDistinctEventResetsFailureSuppression(t *testing.T) {
 	}}
 	manager := NewManager(notifier)
 	failedEvent := Event{Kind: EventReminderThresholdCrossed, SessionID: "one", ThresholdPercent: 20}
-	distinctEvent := Event{Kind: EventKeepAliveCountdownStarted, SessionID: "one", CountdownSeconds: 30}
+	distinctEvent := Event{Kind: EventKeepAliveManualPromptShown, SessionID: "one"}
 
 	first := manager.Notify(failedEvent)
 	second := manager.Notify(distinctEvent)
@@ -101,49 +101,66 @@ func TestEventWordingSeparatesReminderAlarmFromKeepAliveAutomation(t *testing.T)
 	}{
 		{
 			name:  "reminder alarm",
-			event: Event{Kind: EventReminderThresholdCrossed, ThresholdPercent: 20},
-			want:  []string{"Reminder alarm", "20%", "No Claude message was sent"},
-		},
-		{
-			name:  "keepalive countdown",
-			event: Event{Kind: EventKeepAliveCountdownStarted, CountdownSeconds: 30},
-			want:  []string{"KeepAlive countdown", "may be sent after 30s", "unless canceled"},
+			event: Event{Kind: EventReminderThresholdCrossed, ThresholdPercent: 20, ShortID: "abc12345", Project: "demo"},
+			want:  []string{"cc-watch · Reminder", "abc12345 · demo", "20%", "No message sent"},
 		},
 		{
 			name:  "manual prompt",
-			event: Event{Kind: EventKeepAliveManualPromptShown},
-			want:  []string{"KeepAlive manual prompt", "No Claude message was sent"},
-		},
-		{
-			name:  "sent",
-			event: Event{Kind: EventKeepAliveSent},
-			want:  []string{"KeepAlive send started"},
+			event: Event{Kind: EventKeepAliveManualPromptShown, ShortID: "abc12345", Project: "demo"},
+			want:  []string{"cc-watch · KeepAlive", "abc12345 · demo", "Auto-send is off"},
 		},
 		{
 			name:  "success",
-			event: Event{Kind: EventKeepAliveSuccess},
-			want:  []string{"KeepAlive sent and confirmed"},
+			event: Event{Kind: EventKeepAliveSuccess, ShortID: "abc12345", Project: "demo"},
+			want:  []string{"cc-watch · KeepAlive", "abc12345 · demo", "sent and confirmed"},
 		},
 		{
-			name:  "failure",
-			event: Event{Kind: EventKeepAliveFailure, Reason: "confirmation timed out"},
-			want:  []string{"KeepAlive stopped", "not confirmed", "confirmation timed out"},
+			name:  "failure generic",
+			event: Event{Kind: EventKeepAliveFailure, Reason: "confirmation timed out", ShortID: "abc12345", Project: "demo"},
+			want:  []string{"cc-watch · KeepAlive", "abc12345 · demo", "send failed", "confirmation timed out", "Auto-send is off"},
+		},
+		{
+			name:  "failure rate limited",
+			event: Event{Kind: EventKeepAliveFailure, Reason: "rate limit exceeded", RateLimited: true, ShortID: "abc12345", Project: "demo"},
+			want:  []string{"cc-watch · KeepAlive", "abc12345 · demo", "rate-limited", "Auto-send is off"},
 		},
 		{
 			name:  "scope complete",
-			event: Event{Kind: EventKeepAliveScopeComplete},
-			want:  []string{"KeepAlive scope complete", "No more automatic sends"},
+			event: Event{Kind: EventKeepAliveScopeComplete, ShortID: "abc12345", Project: "demo"},
+			want:  []string{"cc-watch · KeepAlive", "abc12345 · demo", "No more automatic sends"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			notification := FormatEvent(tc.event)
-			combined := notification.Title + "\n" + notification.Body
+			combined := notification.Title + "\n" + notification.Subtitle + "\n" + notification.Body
 			for _, want := range tc.want {
 				if !strings.Contains(combined, want) {
 					t.Fatalf("wording missing %q:\n%s", want, combined)
 				}
 			}
 		})
+	}
+}
+
+func TestFailureNotificationPlaysAlertSound(t *testing.T) {
+	notification := FormatEvent(Event{Kind: EventKeepAliveFailure, Reason: "boom"})
+	if notification.Sound != "Basso" {
+		t.Fatalf("failure sound = %q, want Basso", notification.Sound)
+	}
+	other := FormatEvent(Event{Kind: EventKeepAliveSuccess})
+	if other.Sound != "" {
+		t.Fatalf("success sound = %q, want silent", other.Sound)
+	}
+}
+
+func TestTruncateForNotificationCollapsesWhitespaceAndCaps(t *testing.T) {
+	got := truncateForNotification("line one\nline two\nline three", 13)
+	if got != "line one line…" {
+		t.Fatalf("truncateForNotification = %q", got)
+	}
+	short := truncateForNotification("short", 80)
+	if short != "short" {
+		t.Fatalf("truncateForNotification short = %q, want unchanged", short)
 	}
 }
 

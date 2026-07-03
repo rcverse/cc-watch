@@ -920,9 +920,9 @@ func TestNotificationDeliveryFailureIsVisibleAsDegradedStateAndStatus(t *testing
 
 	view := model.View()
 	for _, want := range []string{
-		"notification failed: Reminder alarm",
+		"notification failed: cc-watch · Reminder",
 		"osascript failed",
-		"No Claude message was sent",
+		"No message sent",
 	} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("view missing %q:\n%s", want, view)
@@ -933,7 +933,7 @@ func TestNotificationDeliveryFailureIsVisibleAsDegradedStateAndStatus(t *testing
 func TestNotificationDeliverySuccessRecordsStatusWithoutDegradedBanner(t *testing.T) {
 	model := NewModel(Options{})
 	updated, _ := model.Update(NotificationResultMsg{
-		Event: notify.Event{Kind: notify.EventKeepAliveCountdownStarted, CountdownSeconds: 30},
+		Event: notify.Event{Kind: notify.EventKeepAliveManualPromptShown},
 		Result: notify.Result{
 			Delivered: true,
 			Message:   "delivered",
@@ -945,7 +945,7 @@ func TestNotificationDeliverySuccessRecordsStatusWithoutDegradedBanner(t *testin
 	if strings.Contains(view, "Notify degraded") {
 		t.Fatalf("success view contains degraded banner:\n%s", view)
 	}
-	for _, notWant := range []string{"notification delivered:", "may be sent after 30s unless canceled"} {
+	for _, notWant := range []string{"notification delivered:", "Auto-send is off — open cc-watch to send or dismiss."} {
 		if strings.Contains(view, notWant) {
 			t.Fatalf("success notification leaked into TUI banner %q:\n%s", notWant, view)
 		}

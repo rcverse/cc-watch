@@ -187,7 +187,7 @@ func TestStateMachineImmediateManualAndFailureStates(t *testing.T) {
 		want State
 	}{
 		{name: "no claude", fail: func(m *Manager, id string, token int64) { m.MarkNoClaude(id, token, "claude command not found") }, want: StateErrorNoClaude},
-		{name: "subprocess", fail: func(m *Manager, id string, token int64) { m.MarkSubprocessFailure(id, token, "exit status 1") }, want: StateErrorSubprocess},
+		{name: "subprocess", fail: func(m *Manager, id string, token int64) { m.MarkSubprocessFailure(id, token, "exit status 1", false) }, want: StateErrorSubprocess},
 		{name: "timeout", fail: func(m *Manager, id string, token int64) { m.MarkConfirmationTimeout(id, token) }, want: StateErrorTimeout},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -250,9 +250,12 @@ func TestStateMachineIsEdgeTriggeredScopedAndPerSession(t *testing.T) {
 		t.Fatalf("scope not isolated: a=%#v b=%#v", manager.State("a"), manager.State("b"))
 	}
 
-	manager.MarkSubprocessFailure("a", sendA[0].InstanceToken, "limit exceeded")
+	manager.MarkSubprocessFailure("a", sendA[0].InstanceToken, "limit exceeded", true)
 	if got := manager.State("a").State; got != StateErrorSubprocess {
 		t.Fatalf("a state = %q, want subprocess error", got)
+	}
+	if !manager.State("a").RateLimited {
+		t.Fatalf("a RateLimited = false, want true")
 	}
 	if got := manager.State("b").State; got != StateCountdown {
 		t.Fatalf("b state = %q, want unchanged countdown", got)
@@ -369,13 +372,39 @@ func TestFailureAcknowledgeMovesExhaustedScopeToScopeComplete(t *testing.T) {
 
 	start := manager.Enable(activeSession("fail-done", now, time.Hour, 5*time.Minute), now)[0]
 	send := manager.SendNow("fail-done", start.InstanceToken, now)[0]
-	manager.MarkSubprocessFailure("fail-done", send.InstanceToken, "exit status 1")
+	manager.MarkSubprocessFailure("fail-done", send.InstanceToken, "exit status 1", false)
 	if got := manager.State("fail-done").State; got != StateErrorSubprocess {
 		t.Fatalf("state = %q, want subprocess error before acknowledge", got)
 	}
 	manager.Acknowledge("fail-done")
 	if got := manager.State("fail-done").State; got != StateScopeComplete {
 		t.Fatalf("state = %q, want scope complete after exhausted failure acknowledge", got)
+	}
+}
+
+func TestReEnableAfterScopeExhaustedEmitsScopeCompleteAction(t *testing.T) {
+	cfg := config.Default().KeepAlive
+	cfg.Scope.MaxSends = 1
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	manager := NewManager(cfg)
+
+	s := activeSession("re-enable", now, time.Hour, 5*time.Minute)
+	start := manager.Enable(s, now)[0]
+	send := manager.SendNow("re-enable", start.InstanceToken, now)[0]
+	manager.MarkSendStarted("re-enable", send.InstanceToken, now)
+	manager.MarkSuccess("re-enable", send.InstanceToken, now)
+	manager.Acknowledge("re-enable")
+	if got := manager.State("re-enable").State; got != StateScopeComplete {
+		t.Fatalf("state = %q, want scope complete before disable", got)
+	}
+
+	manager.Disable("re-enable")
+	actions := manager.Enable(s, now)
+	if len(actions) != 1 || actions[0].Kind != ActionScopeComplete {
+		t.Fatalf("re-enable after exhausted scope actions = %#v, want single ActionScopeComplete", actions)
+	}
+	if got := manager.State("re-enable").State; got != StateScopeComplete {
+		t.Fatalf("state = %q, want scope complete after re-enable", got)
 	}
 }
 

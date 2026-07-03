@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/richardchen/cc-watch/internal/keepalive"
 	"github.com/richardchen/cc-watch/internal/refresh"
 	"github.com/richardchen/cc-watch/internal/session"
@@ -508,17 +509,17 @@ func (m *Model) toggleReminderForSelected() {
 	m.reminderEnabled[selected.SessionID] = !m.reminderEnabled[selected.SessionID]
 }
 
-func (m *Model) toggleKeepAliveForSelected() {
+func (m *Model) toggleKeepAliveForSelected() tea.Cmd {
 	m.lastAction = "toggle_keepalive"
 	selected := m.selectedSession()
 	if selected == nil {
-		return
+		return nil
 	}
 	if reason := m.keepAliveUnavailableReason(*selected); reason != "" {
 		m.disableKeepAlive(selected.SessionID)
 		m.lastAction = "keepalive_unavailable_expired"
 		m.setNotice("KeepAlive N/A "+reason, RoleMuted, 3*time.Second)
-		return
+		return nil
 	}
 	currentAction := m.FocusedAction()
 	state := m.KeepAliveState(selected.SessionID)
@@ -527,18 +528,22 @@ func (m *Model) toggleKeepAliveForSelected() {
 		m.keepAliveEnabled[selected.SessionID] = false
 		m.setNotice("KeepAlive cancelled", RoleInfo, 3*time.Second)
 		m.restoreFocusAction(currentAction)
-		return
+		return nil
 	}
 	actions := m.keepAliveManager.Enable(*selected, m.now)
 	m.keepAliveEnabled[selected.SessionID] = true
+	m.restoreFocusAction(currentAction)
+	// CheckAvailability can overwrite the state actions above were computed
+	// from, so treat the two as mutually exclusive rather than notifying
+	// for both.
 	if m.deps.CheckClaudeAvailable != nil && m.KeepAliveState(selected.SessionID).AutoSend {
 		if err := m.deps.CheckClaudeAvailable(); err != nil {
 			m.keepAliveManager.CheckAvailability(selected.SessionID, availabilityChecker{err: err})
 			m.refresh.ClaudeUnavailableMessage = err.Error()
+			return m.keepAliveLifecycleNotification(selected.SessionID, m.KeepAliveState(selected.SessionID))
 		}
 	}
-	m.applyKeepAliveActions(actions, nil)
-	m.restoreFocusAction(currentAction)
+	return tea.Batch(m.applyKeepAliveActions(actions, nil)...)
 }
 
 func (m Model) shouldShowClaudeUnavailable() bool {
