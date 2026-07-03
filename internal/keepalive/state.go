@@ -248,5 +248,5 @@ func latestSafeSendAt(s session.Session) time.Time {
 		return time.Time{}
 	}
 	ttl, _ := effectiveTTL(s)
-	return s.LastMessageAt.Add(time.Duration(ttl-safetyMarginSeconds) * time.Second)
+	return s.LastMessageAt.Add(time.Duration(ttl-sendDeadlineMarginSeconds) * time.Second)
 }

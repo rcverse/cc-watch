@@ -9,7 +9,18 @@ import (
 
 const (
 	conservativeTTLSeconds = 300
-	safetyMarginSeconds    = 30
+	// safetyMarginSeconds sizes the countdown: it aims to finish this far
+	// before expiry so the send has time to land.
+	safetyMarginSeconds = 30
+	// sendDeadlineMarginSeconds is the hard stop when the countdown actually
+	// elapses -- deliberately smaller than safetyMarginSeconds. The countdown
+	// is tick-counted, so it always takes a beat longer than its nominal
+	// duration; if the deadline used the full 30s margin it would coincide
+	// with the countdown's own end and any drift would silently bail auto-send
+	// to a manual prompt. That gap made auto-send effectively never fire for
+	// 5-minute and unknown-tier caches. The smaller floor absorbs normal drift
+	// while still refusing to auto-send within seconds of expiry.
+	sendDeadlineMarginSeconds = 10
 )
 
 type TimingDecision struct {

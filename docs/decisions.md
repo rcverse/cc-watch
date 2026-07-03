@@ -60,13 +60,24 @@ one of these areas, read the relevant section first.
 
 ```
 effective_trigger_s   = min(trigger_before_expiry_m * 60, ttl_seconds * 0.20)
-effective_countdown_s = min(countdown_s, effective_trigger_s - 30)   # 30s safety margin
+effective_countdown_s = min(countdown_s, effective_trigger_s - 30)   # 30s countdown-sizing margin
+latest_safe_send_at   = last_message_at + ttl_seconds - 10           # 10s hard-stop margin
 ```
 
-If the safety margin can't be preserved, Auto-send is disabled for that
-instance and the UI falls back to a manual prompt. With defaults, a 1-hour
-cache triggers at 5 minutes remaining; a 5-minute cache triggers at 1 minute
-remaining.
+If the countdown-sizing margin can't be preserved, Auto-send is disabled for
+that instance and the UI falls back to a manual prompt. With defaults, a
+1-hour cache triggers at 5 minutes remaining; a 5-minute cache triggers at 1
+minute remaining.
+
+The countdown is sized to finish ~30s before expiry, but the hard send
+deadline (`latest_safe_send_at`) uses a **smaller** 10s margin on purpose. The
+countdown is tick-counted, so it always elapses a beat after its nominal
+duration; if the deadline used the same 30s margin it would coincide with the
+countdown's own end and any drift would silently bail Auto-send to a manual
+prompt — which made Auto-send effectively never fire for 5-minute and
+unknown-tier caches (their countdown ends right at the 30s mark). The 10s
+hard-stop absorbs normal drift while still refusing to auto-send within
+seconds of expiry.
 
 ## Refresh architecture
 

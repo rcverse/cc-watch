@@ -354,14 +354,39 @@ func TestCountdownElapsedDoesNotSendWhenAutoSendTurnsOffOrSafetyDeadlineIsMissed
 		t.Fatalf("auto-off state = %#v, want manual_ready without scope use", state)
 	}
 
+	// A 5m cache with 60s remaining expires at now+60; the hard send deadline
+	// sits 10s before that (now+50). A countdown that only elapses past the
+	// deadline -- e.g. after the machine slept -- bails to manual.
 	delayed := NewManager(cfg)
 	start = delayed.Enable(activeSession("delayed", now, 5*time.Minute, time.Minute), now)[0]
-	if actions := delayed.CountdownElapsed("delayed", start.InstanceToken, now.Add(31*time.Second)); len(actions) != 1 || actions[0].Kind != ActionManualPromptShown {
+	if actions := delayed.CountdownElapsed("delayed", start.InstanceToken, now.Add(51*time.Second)); len(actions) != 1 || actions[0].Kind != ActionManualPromptShown {
 		t.Fatalf("delayed countdown actions = %#v, want manual prompt and no runner", actions)
 	}
 	state = delayed.State("delayed")
 	if state.State != StateManualReady || state.ScopeUsed != 0 || !state.SafetyDisabled {
 		t.Fatalf("delayed state = %#v, want safety-disabled manual_ready without scope use", state)
+	}
+}
+
+func TestAutoSendFiresForShortCacheDespiteCountdownDrift(t *testing.T) {
+	cfg := config.Default().KeepAlive
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	m := NewManager(cfg)
+
+	// A 5-minute cache entering its trigger window with 60s remaining: the
+	// countdown is 30s and the naive safety deadline sits exactly 30s out, so
+	// the tick-counted countdown (which always takes >=30 real seconds) elapses
+	// a beat late and must still auto-send, not silently bail to manual.
+	actions := m.Enable(activeSession("short", now, 5*time.Minute, 60*time.Second), now)
+	if len(actions) != 1 || actions[0].Kind != ActionCountdownStarted {
+		t.Fatalf("Enable actions = %#v, want a countdown", actions)
+	}
+	token := actions[0].InstanceToken
+
+	elapse := now.Add(time.Duration(cfg.CountdownSeconds+2) * time.Second)
+	got := m.CountdownElapsed("short", token, elapse)
+	if len(got) != 1 || got[0].Kind != ActionStartRunner {
+		t.Fatalf("countdown elapsed actions = %#v, want auto-send (start_runner)", got)
 	}
 }
 
