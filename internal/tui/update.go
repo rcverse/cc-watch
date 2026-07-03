@@ -600,12 +600,14 @@ func (m Model) keepAliveRunnerCommand(action keepalive.Action) tea.Cmd {
 	runner := m.deps.KeepAliveRunner
 	generation := m.refreshGeneration
 	selectedID := m.SelectedSessionID()
+	action.Dir = selected.Cwd
 	target := keepalive.NewConfirmationTarget(selected.JSONLPath, time.Time{})
 	return func() tea.Msg {
 		startedAt := m.now
 		ctx, cancel := context.WithTimeout(context.Background(), keepalive.SendTimeout)
 		defer cancel()
 		execution := keepalive.ExecuteRunner(ctx, action, runner, startedAt)
+		keepalive.LogSend(action, execution)
 		result := execution.Result
 		target.After = result.StartedAt
 		return KeepAliveRunnerResultMsg{
@@ -637,6 +639,7 @@ func (m Model) keepAliveConfirmationCommand(msg KeepAliveRunnerResultMsg) tea.Cm
 		} else {
 			result, err = keepalive.WaitForConfirmation(ctx, msg.ConfirmationTarget.Check)
 		}
+		keepalive.LogConfirm(msg.SessionID, msg.InstanceToken, msg.ConfirmationTarget, result, err)
 		return KeepAliveConfirmationResultMsg{SessionID: msg.SessionID, InstanceToken: msg.InstanceToken, ConfirmedAt: result.ConfirmedAt, Err: err, Generation: generation, SelectedID: selectedID}
 	}
 }

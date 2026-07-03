@@ -83,14 +83,21 @@ predictable rather than clever:
 - Arms only in the final few minutes before a cache expires.
 - Shows a countdown before it does anything — you can send now, cancel, or
   let it run.
-- Sends by running `claude -r <session-id> -p "<your message>"` locally,
-  then confirms success by watching that session's own JSONL for new
-  evidence. No evidence, no success claimed.
+- Sends by running `claude -r <session-id> -p "<your message>"` from that
+  session's own project directory (`claude --resume` is scoped to it), then
+  confirms success by watching that session's own JSONL for new evidence. No
+  evidence, no success claimed.
 - Capped at a configured number of sends per session, and turns itself off
   after a failure instead of retrying forever.
 
 Keep the KeepAlive message short — you're trying to hold a cache window
 open, not start a philosophical detour.
+
+Every send and confirmation is recorded in
+`~/.config/cc-watch/keepalive.log` (JSON lines: the directory it ran in,
+exit code, and why it failed) — the first place to look when a send didn't
+work. It's bounded to ~2 MiB and rotates once; set `CC_WATCH_KEEPALIVE_LOG=off`
+to disable it.
 
 ## Configuration
 

@@ -194,6 +194,19 @@ func TestParseMalformedTimestampWarningDoesNotDropUsage(t *testing.T) {
 	assertWarning(t, s.Warnings, WarningMalformedTimestamp)
 }
 
+func TestParseCapturesLastNonEmptyCwd(t *testing.T) {
+	lines := `{"cwd":"/Users/x/proj","timestamp":"2026-07-03T10:00:00Z"}` + "\n" +
+		`{"timestamp":"2026-07-03T10:00:01Z"}` + "\n" +
+		`{"cwd":"/Users/x/proj/sub","timestamp":"2026-07-03T10:00:02Z"}` + "\n"
+	s, err := ParseReader(strings.NewReader(lines), "cwd.jsonl", time.Time{})
+	if err != nil {
+		t.Fatalf("ParseReader returned error: %v", err)
+	}
+	if s.Cwd != "/Users/x/proj/sub" {
+		t.Fatalf("Cwd = %q, want /Users/x/proj/sub", s.Cwd)
+	}
+}
+
 func TestParseFallsBackToNestedUsageWhenTopLevelUsageIsEmpty(t *testing.T) {
 	s, err := ParseReader(strings.NewReader(`{"timestamp":"2026-06-03T00:00:00Z","usage":{},"message":{"role":"assistant","usage":{"cache_read_input_tokens":11,"output_tokens":4}}}`+"\n"), "empty-top-usage.jsonl", time.Time{})
 	if err != nil {

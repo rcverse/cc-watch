@@ -38,6 +38,7 @@ type Action struct {
 	InstanceToken    int64
 	CountdownSeconds int
 	Message          string
+	Dir              string
 }
 
 type SessionState struct {

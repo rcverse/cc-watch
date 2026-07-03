@@ -539,15 +539,60 @@ func TestConfirmationWaitTimeoutPath(t *testing.T) {
 }
 
 func TestManualFallbackCommandUsesSafeDisplayQuoting(t *testing.T) {
-	fallback := ManualFallbackCommand("abc123", `don't "; rm -rf / #`)
+	fallback := ManualFallbackCommand("abc123", `don't "; rm -rf / #`, "/tmp/my dir")
 
 	wantArgs := []string{"claude", "-r", "abc123", "-p", `don't "; rm -rf / #`}
 	if strings.Join(fallback.Args, "\x00") != strings.Join(wantArgs, "\x00") {
 		t.Fatalf("Args = %#v, want %#v", fallback.Args, wantArgs)
 	}
-	wantDisplay := `claude -r abc123 -p 'don'\''t "; rm -rf / #'`
+	wantDisplay := `cd '/tmp/my dir' && claude -r abc123 -p 'don'\''t "; rm -rf / #'`
 	if fallback.Display != wantDisplay {
 		t.Fatalf("Display = %q, want %q", fallback.Display, wantDisplay)
+	}
+}
+
+func TestSubprocessRunnerLimitOnlyOnFailedExit(t *testing.T) {
+	run := func(stdout, stderr string, exitCode int) RunResult {
+		r := SubprocessRunner{
+			LookPath: func(string) (string, error) { return "/usr/bin/claude", nil },
+			Command: func(_ context.Context, _, _ string, _ ...string) (string, string, int, error) {
+				var err error
+				if exitCode != 0 {
+					err = errors.New("exit")
+				}
+				return stdout, stderr, exitCode, err
+			},
+		}
+		return r.Send(context.Background(), RunRequest{SessionID: "s1", Message: "hi"})
+	}
+
+	// Success whose reply mentions "usage" must not be read as a limit.
+	if got := run("Sure, your token usage looks fine.", "", 0); got.Limit || got.Err != nil {
+		t.Fatalf("success with 'usage' in reply: Limit=%v Err=%v, want false/nil", got.Limit, got.Err)
+	}
+	// A real limit arrives on a failed exit.
+	if got := run("", "Claude usage limit reached", 1); !got.Limit || !errors.Is(got.Err, ErrClaudeLimit) {
+		t.Fatalf("failed with limit stderr: Limit=%v Err=%v, want true/ErrClaudeLimit", got.Limit, got.Err)
+	}
+}
+
+func TestSubprocessRunnerRunsInSessionDir(t *testing.T) {
+	var gotDir, gotName string
+	var gotArgs []string
+	r := SubprocessRunner{
+		LookPath: func(string) (string, error) { return "/usr/bin/claude", nil },
+		Command: func(_ context.Context, dir, name string, args ...string) (string, string, int, error) {
+			gotDir, gotName, gotArgs = dir, name, args
+			return "", "", 0, nil
+		},
+	}
+	r.Send(context.Background(), RunRequest{SessionID: "s1", Message: "hi", Dir: "/proj/dir"})
+	if gotDir != "/proj/dir" {
+		t.Fatalf("dir = %q, want /proj/dir", gotDir)
+	}
+	wantArgv := []string{"claude", "-r", "s1", "-p", "hi"}
+	if strings.Join(append([]string{gotName}, gotArgs...), "\x00") != strings.Join(wantArgv, "\x00") {
+		t.Fatalf("argv = %#v, want %#v", append([]string{gotName}, gotArgs...), wantArgv)
 	}
 }
 

@@ -55,6 +55,7 @@ type Session struct {
 	SessionID       string
 	ShortID         string
 	Project         string
+	Cwd             string
 	JSONLPath       string
 	FileModifiedAt  time.Time
 	CacheWindow     CacheWindow

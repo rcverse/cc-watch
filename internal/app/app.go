@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -197,6 +198,9 @@ func tuiDependencies(cmd Command, deps Dependencies, home string) tui.Dependenci
 		}
 	}
 	runner := keepalive.NewSubprocessRunner()
+	if os.Getenv("CC_WATCH_KEEPALIVE_LOG") != "off" {
+		keepalive.LogDir = filepath.Join(home, ".config", "cc-watch")
+	}
 	return tui.Dependencies{
 		RefreshSnapshot: func(_ refresh.Source, _ int, selected *session.Session) tui.RefreshSnapshot {
 			if selected != nil {

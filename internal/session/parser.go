@@ -84,6 +84,17 @@ func (p *lineParser) parseLine(raw string) {
 	p.parseTimestamp(obj)
 	p.parseUsage(obj)
 	p.parseUserMessage(obj)
+	p.parseCwd(obj)
+}
+
+// parseCwd records the absolute working directory the session runs in, carried
+// on message entries. KeepAlive needs it to run `claude --resume` from the same
+// directory -- resume is scoped to the project dir, so a wrong cwd fails with
+// "No conversation found". Last non-empty wins, so a mid-session /cd is honored.
+func (p *lineParser) parseCwd(obj map[string]any) {
+	if cwd, ok := obj["cwd"].(string); ok && cwd != "" {
+		p.session.Cwd = cwd
+	}
 }
 
 func (p *lineParser) parseTimestamp(obj map[string]any) {

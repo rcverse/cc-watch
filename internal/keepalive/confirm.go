@@ -98,11 +98,17 @@ func WaitForConfirmation(ctx context.Context, check func() (ConfirmationResult, 
 	}
 }
 
-func ManualFallbackCommand(sessionID, message string) FallbackCommand {
+func ManualFallbackCommand(sessionID, message, dir string) FallbackCommand {
 	args := []string{"claude", "-r", sessionID, "-p", message}
+	display := shellJoin(args)
+	if dir != "" {
+		// `claude --resume` is scoped to the session's directory, so the
+		// copy-paste fallback must cd there first or it fails the same way.
+		display = "cd " + shellQuote(dir) + " && " + display
+	}
 	return FallbackCommand{
 		Args:    append([]string(nil), args...),
-		Display: shellJoin(args),
+		Display: display,
 	}
 }
 

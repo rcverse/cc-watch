@@ -23,6 +23,10 @@ const SendTimeout = 30 * time.Second
 type RunRequest struct {
 	SessionID string
 	Message   string
+	// Dir is the session's project directory. `claude --resume` lookup is
+	// scoped to the current directory, so the send must run there or it fails
+	// with "No conversation found". Empty means inherit cc-watch's own cwd.
+	Dir string
 }
 
 type RunResult struct {
@@ -46,7 +50,7 @@ type RunnerExecution struct {
 
 type SubprocessRunner struct {
 	LookPath func(string) (string, error)
-	Command  func(context.Context, string, ...string) (string, string, int, error)
+	Command  func(ctx context.Context, dir, name string, args ...string) (string, string, int, error)
 }
 
 func NewSubprocessRunner() SubprocessRunner {
@@ -76,18 +80,23 @@ func (r SubprocessRunner) Send(ctx context.Context, req RunRequest) RunResult {
 	if command == nil {
 		command = runCommand
 	}
-	stdout, stderr, exitCode, err := command(ctx, "claude", "-r", req.SessionID, "-p", req.Message)
+	stdout, stderr, exitCode, err := command(ctx, req.Dir, "claude", "-r", req.SessionID, "-p", req.Message)
+	// Only a failed send can be a rate limit. A successful send exits 0 with
+	// claude's own reply on stdout, which may legitimately contain words like
+	// "usage" or "limit" -- scanning it unconditionally would misread a success
+	// as a limit and disable Auto-send.
+	failed := err != nil || exitCode != 0
 	result := RunResult{
 		StartedAt: startedAt,
 		ExitCode:  exitCode,
 		Stdout:    stdout,
 		Stderr:    stderr,
-		Limit:     isClaudeLimit(stdout) || isClaudeLimit(stderr),
+		Limit:     failed && (isClaudeLimit(stdout) || isClaudeLimit(stderr)),
 		Err:       err,
 	}
 	if result.Limit {
 		result.Err = ErrClaudeLimit
-	} else if err != nil || exitCode != 0 {
+	} else if failed {
 		result.Err = ErrSubprocess
 	}
 	return result
@@ -136,7 +145,7 @@ func ExecuteRunner(ctx context.Context, action Action, runner ClaudeRunner, now 
 			ClaudeUnavailable: true,
 		}
 	}
-	result := runner.Send(ctx, RunRequest{SessionID: action.SessionID, Message: action.Message})
+	result := runner.Send(ctx, RunRequest{SessionID: action.SessionID, Message: action.Message, Dir: action.Dir})
 	if result.StartedAt.IsZero() {
 		result.StartedAt = now
 	}
@@ -168,8 +177,9 @@ func (m *Manager) ApplyRunnerExecution(action Action, execution RunnerExecution)
 	return m.State(action.SessionID)
 }
 
-func runCommand(ctx context.Context, name string, args ...string) (string, string, int, error) {
+func runCommand(ctx context.Context, dir, name string, args ...string) (string, string, int, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Dir = dir
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout

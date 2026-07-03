@@ -42,6 +42,17 @@ one of these areas, read the relevant section first.
   re-enables it.
 - Scope counts a send at initiation, not at confirmation, so a failed
   confirmation can't trigger a retry loop.
+- **The send runs from the session's own project directory** (`cmd.Dir` =
+  the `cwd` parsed from the transcript). `claude --resume` lookup is scoped to
+  the current directory, so running from anywhere else fails with "No
+  conversation found with session ID". An unparsed cwd falls back to
+  inheriting cc-watch's own cwd. The manual-fallback command shown in the TUI
+  is `cd <dir> && claude -r ...` for the same reason.
+- **Every send/confirm is appended to `~/.config/cc-watch/keepalive.log`**
+  (slog JSONL: cwd, exit, classification, truncated stdout/stderr, confirm
+  outcome). It's the only durable record — in-memory state is overwritten on
+  the next refresh. Bounded to ~2 MiB via single-backup rotation at startup;
+  disable with `CC_WATCH_KEEPALIVE_LOG=off`.
 - **No production code or test may perform a real Claude send.** Tests use
   fake runners and fixture HOME/session files. This rule is non-negotiable.
 

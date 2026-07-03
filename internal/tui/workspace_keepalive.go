@@ -123,7 +123,7 @@ func (m Model) keepAliveCard(s session.Session, state keepalive.SessionState) st
 		fmt.Fprintf(&b, "Next         Use manual fallback or re-enable after fixing\n")
 		fmt.Fprintf(&b, "Msg Preview  %q\n", m.keepAliveConfig.Message)
 		fmt.Fprintf(&b, "Scope        %d / %d sends used · failed: %s\n", state.ScopeUsed, maxSends(state), reason)
-		fmt.Fprintf(&b, "Fallback     %s\n", keepalive.ManualFallbackCommand(s.SessionID, m.keepAliveConfig.Message).Display)
+		fmt.Fprintf(&b, "Fallback     %s\n", keepalive.ManualFallbackCommand(s.SessionID, m.keepAliveConfig.Message, s.Cwd).Display)
 	case keepalive.StateScopeComplete:
 		fmt.Fprintf(&b, "Next         Turn KeepAlive off or wait for a new eligible cache window\n")
 		fmt.Fprintf(&b, "Msg Preview  %q\n", m.keepAliveConfig.Message)
