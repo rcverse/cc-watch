@@ -210,7 +210,6 @@ func NewModel(options Options) Model {
 		Debounce:          refreshTiming.Debounce,
 		SafetyInterval:    refreshTiming.SafetyInterval,
 		InitialNow:        now,
-		InitialSessions:   sessions,
 		InitialGeneration: options.RefreshGeneration,
 	})
 	model := Model{

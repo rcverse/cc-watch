@@ -2,10 +2,10 @@ package tui
 
 import (
 	"math"
-	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 const (
@@ -69,27 +69,6 @@ func (s SemanticStyles) Render(role StyleRole, value string) string {
 		style = lipgloss.NewStyle()
 	}
 	return style.Render(value)
-}
-
-func (s SemanticStyles) Has(role StyleRole) bool {
-	_, ok := s.roles[role]
-	return ok
-}
-
-func (s SemanticStyles) Badge(role StyleRole, label string) string {
-	style, ok := s.roles[role]
-	if !ok {
-		style = lipgloss.NewStyle()
-	}
-	return style.Render("[" + label + "]")
-}
-
-func RenderPanel(title string, body string) string {
-	width := maxLineWidth(title, body)
-	if width < 24 {
-		width = 24
-	}
-	return RenderPanelWidth(title, body, width)
 }
 
 func RenderPanelWidth(title string, body string, width int) string {
@@ -179,32 +158,10 @@ func hitRatePercentRole(percent float64) StyleRole {
 	return RoleDanger
 }
 
-func Divider(label string) string {
-	if label == "" {
-		return "────────"
-	}
-	return "── " + label + " " + strings.Repeat("─", 8)
-}
-
-func Header(title string, details ...string) string {
-	parts := []string{title}
-	for _, detail := range details {
-		if detail != "" {
-			parts = append(parts, detail)
-		}
-	}
-	return strings.Join(parts, "  │  ") + "\n"
-}
-
 func stripANSI(s string) string {
-	re := regexp.MustCompile(`\x1b\[[0-9;]*m`)
-	return re.ReplaceAllString(s, "")
+	return ansi.Strip(s)
 }
 
 func visibleWidth(s string) int {
 	return lipgloss.Width(s)
-}
-
-func maxLineWidth(title string, body string) int {
-	return max(visibleWidth(title), visibleWidth(body))
 }

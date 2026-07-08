@@ -18,12 +18,6 @@ type ScopeConfig struct {
 	MaxSends int    `json:"max_sends"`
 }
 
-type SessionDefaults struct {
-	ReminderThresholds []int
-	KeepAliveAutoSend  bool
-	KeepAliveMaxSends  int
-}
-
 func Default() Config {
 	return Config{
 		ReminderThresholds: []int{20, 10},
@@ -37,13 +31,5 @@ func Default() Config {
 				MaxSends: 1,
 			},
 		},
-	}
-}
-
-func NewSessionDefaults(cfg Config) SessionDefaults {
-	return SessionDefaults{
-		ReminderThresholds: append([]int(nil), cfg.ReminderThresholds...),
-		KeepAliveAutoSend:  cfg.KeepAlive.AutoSend,
-		KeepAliveMaxSends:  cfg.KeepAlive.Scope.MaxSends,
 	}
 }

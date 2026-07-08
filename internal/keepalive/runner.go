@@ -121,16 +121,6 @@ func (m *Manager) CheckAvailability(sessionID string, runner ClaudeRunner) error
 	return nil
 }
 
-func (m *Manager) Run(ctx context.Context, action Action, runner ClaudeRunner, now time.Time) RunResult {
-	state := m.State(action.SessionID)
-	if action.Kind != ActionStartRunner || state.State != StateSending || state.InstanceToken != action.InstanceToken {
-		return RunResult{StartedAt: now}
-	}
-	execution := ExecuteRunner(ctx, action, runner, now)
-	m.ApplyRunnerExecution(action, execution)
-	return execution.Result
-}
-
 func ExecuteRunner(ctx context.Context, action Action, runner ClaudeRunner, now time.Time) RunnerExecution {
 	if runner == nil {
 		err := ErrClaudeUnavailable
@@ -173,7 +163,7 @@ func (m *Manager) ApplyRunnerExecution(action Action, execution RunnerExecution)
 		m.MarkSubprocessFailure(action.SessionID, action.InstanceToken, failureMessage(result), result.Limit)
 		return m.State(action.SessionID)
 	}
-	m.MarkSendStarted(action.SessionID, action.InstanceToken, result.StartedAt)
+	m.MarkSendStarted(action.SessionID, action.InstanceToken)
 	return m.State(action.SessionID)
 }
 

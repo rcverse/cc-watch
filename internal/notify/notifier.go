@@ -55,10 +55,7 @@ type Notifier interface {
 
 type Runner func(name string, args ...string) error
 
-type CommandBuilder func(Notification) (string, []string)
-
 type CommandNotifier struct {
-	build  CommandBuilder
 	runner Runner
 }
 
@@ -71,10 +68,6 @@ type Manager struct {
 
 func NewManager(notifier Notifier) *Manager {
 	return &Manager{notifier: notifier}
-}
-
-func NewCommandNotifier(build CommandBuilder, runner Runner) CommandNotifier {
-	return CommandNotifier{build: build, runner: runner}
 }
 
 func ExecRunner(name string, args ...string) error {
@@ -99,7 +92,7 @@ func escapeAppleScript(value string) string {
 
 func (n CommandNotifier) Notify(event Event) Result {
 	notification := FormatEvent(event)
-	name, args := n.build(notification)
+	name, args := MacOSCommand(notification)
 	if n.runner == nil {
 		err := errors.New("notification runner unavailable")
 		return Result{Degraded: true, Message: err.Error(), Err: err}
@@ -234,7 +227,7 @@ func truncateForNotification(s string, max int) string {
 }
 
 func NewPlatformNotifier(runner Runner) Notifier {
-	return NewCommandNotifier(MacOSCommand, runner)
+	return CommandNotifier{runner: runner}
 }
 
 func eventKey(event Event) string {

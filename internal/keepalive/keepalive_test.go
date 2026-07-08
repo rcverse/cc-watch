@@ -138,11 +138,11 @@ func TestStateMachineTransitionsThroughRequiredStates(t *testing.T) {
 		t.Fatalf("state after send start = %#v, want sending with one scope used", st)
 	}
 
-	manager.MarkSendStarted("stateful", sendToken, now.Add(5*time.Minute+31*time.Second))
+	manager.MarkSendStarted("stateful", sendToken)
 	if got := manager.State("stateful").State; got != StateConfirming {
 		t.Fatalf("state = %q, want %q", got, StateConfirming)
 	}
-	manager.MarkSuccess("stateful", sendToken, now.Add(5*time.Minute+40*time.Second))
+	manager.MarkSuccess("stateful", sendToken)
 	if got := manager.State("stateful").State; got != StateSuccess {
 		t.Fatalf("state = %q, want %q", got, StateSuccess)
 	}
@@ -193,12 +193,12 @@ func TestStateMachineImmediateManualAndFailureStates(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := NewManager(config.Default().KeepAlive)
 			start := m.Enable(activeSession(tc.name, now, time.Hour, 5*time.Minute), now)[0]
-			send := m.SendNow(tc.name, start.InstanceToken, now)
+			send := m.SendNow(tc.name, start.InstanceToken)
 			if len(send) != 1 {
 				t.Fatalf("SendNow actions = %#v, want runner start", send)
 			}
 			if tc.want == StateErrorTimeout {
-				m.MarkSendStarted(tc.name, send[0].InstanceToken, now)
+				m.MarkSendStarted(tc.name, send[0].InstanceToken)
 			}
 			tc.fail(m, tc.name, send[0].InstanceToken)
 			if got := m.State(tc.name).State; got != tc.want {
@@ -239,11 +239,11 @@ func TestStateMachineIsEdgeTriggeredScopedAndPerSession(t *testing.T) {
 		t.Fatalf("repeated tick actions = %#v, want edge-triggered silence", repeat)
 	}
 
-	sendA := manager.SendNow("a", actions[0].InstanceToken, now)
+	sendA := manager.SendNow("a", actions[0].InstanceToken)
 	if len(sendA) != 1 {
 		t.Fatalf("SendNow(a) actions = %#v, want runner start", sendA)
 	}
-	if repeatedSend := manager.SendNow("a", actions[0].InstanceToken, now); len(repeatedSend) != 0 {
+	if repeatedSend := manager.SendNow("a", actions[0].InstanceToken); len(repeatedSend) != 0 {
 		t.Fatalf("single-flight repeated send actions = %#v, want none", repeatedSend)
 	}
 	if manager.State("a").ScopeUsed != 1 || manager.State("b").ScopeUsed != 0 {
@@ -295,10 +295,10 @@ func TestStateMachineIgnoresStaleTokenEventsAfterCancellationAndRefresh(t *testi
 	}
 
 	next := manager.State("stale").InstanceToken
-	send := manager.SendNow("stale", next, now)
-	manager.MarkSendStarted("stale", send[0].InstanceToken, now)
+	send := manager.SendNow("stale", next)
+	manager.MarkSendStarted("stale", send[0].InstanceToken)
 	manager.Cancel("stale", send[0].InstanceToken)
-	manager.MarkSuccess("stale", send[0].InstanceToken, now.Add(time.Second))
+	manager.MarkSuccess("stale", send[0].InstanceToken)
 	if got := manager.State("stale").State; got != StateCancelledInstance {
 		t.Fatalf("stale confirmation changed state to %q, want cancelled", got)
 	}
@@ -311,9 +311,9 @@ func TestStateMachineDoesNotRearmWithinSameTriggerWindowWhenScopeRemains(t *test
 	manager := NewManager(cfg)
 
 	start := manager.Enable(activeSession("rearm", now, time.Hour, 5*time.Minute), now)[0]
-	send := manager.SendNow("rearm", start.InstanceToken, now)[0]
-	manager.MarkSendStarted("rearm", send.InstanceToken, now)
-	manager.MarkSuccess("rearm", send.InstanceToken, now.Add(time.Second))
+	send := manager.SendNow("rearm", start.InstanceToken)[0]
+	manager.MarkSendStarted("rearm", send.InstanceToken)
+	manager.MarkSuccess("rearm", send.InstanceToken)
 	manager.Acknowledge("rearm")
 	if got := manager.State("rearm").State; got != StateMonitoringIdle {
 		t.Fatalf("state = %q, want monitoring idle while waiting for edge reset", got)
@@ -396,7 +396,7 @@ func TestFailureAcknowledgeMovesExhaustedScopeToScopeComplete(t *testing.T) {
 	manager := NewManager(cfg)
 
 	start := manager.Enable(activeSession("fail-done", now, time.Hour, 5*time.Minute), now)[0]
-	send := manager.SendNow("fail-done", start.InstanceToken, now)[0]
+	send := manager.SendNow("fail-done", start.InstanceToken)[0]
 	manager.MarkSubprocessFailure("fail-done", send.InstanceToken, "exit status 1", false)
 	if got := manager.State("fail-done").State; got != StateErrorSubprocess {
 		t.Fatalf("state = %q, want subprocess error before acknowledge", got)
@@ -415,9 +415,9 @@ func TestReEnableAfterScopeExhaustedEmitsScopeCompleteAction(t *testing.T) {
 
 	s := activeSession("re-enable", now, time.Hour, 5*time.Minute)
 	start := manager.Enable(s, now)[0]
-	send := manager.SendNow("re-enable", start.InstanceToken, now)[0]
-	manager.MarkSendStarted("re-enable", send.InstanceToken, now)
-	manager.MarkSuccess("re-enable", send.InstanceToken, now)
+	send := manager.SendNow("re-enable", start.InstanceToken)[0]
+	manager.MarkSendStarted("re-enable", send.InstanceToken)
+	manager.MarkSuccess("re-enable", send.InstanceToken)
 	manager.Acknowledge("re-enable")
 	if got := manager.State("re-enable").State; got != StateScopeComplete {
 		t.Fatalf("state = %q, want scope complete before disable", got)
@@ -451,11 +451,12 @@ func TestRunnerAvailabilityFailuresAreVisibleAndBounded(t *testing.T) {
 	beforeSend := NewManager(cfg)
 	start := beforeSend.Enable(activeSession("before-send", now, time.Hour, 5*time.Minute), now)[0]
 	send := beforeSend.CountdownElapsed("before-send", start.InstanceToken, now.Add(30*time.Second))[0]
-	result := beforeSend.Run(context.Background(), send, fakeClaudeRunner{availableErr: errors.New("claude command not found")}, now)
+	execution := ExecuteRunner(context.Background(), send, fakeClaudeRunner{availableErr: errors.New("claude command not found")}, now)
+	state = beforeSend.ApplyRunnerExecution(send, execution)
+	result := execution.Result
 	if result.Err == nil {
 		t.Fatal("Run returned nil error, want unavailable error")
 	}
-	state = beforeSend.State("before-send")
 	if state.State != StateErrorNoClaude || state.ScopeUsed != 1 || state.AutoSend {
 		t.Fatalf("send-time unavailable state = %#v, want no-claude with one attempted scope and auto-send stopped", state)
 	}
@@ -476,13 +477,14 @@ func TestRunnerSubprocessFailuresAndLimitErrorsStopAutoSend(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			manager := NewManager(cfg)
 			start := manager.Enable(activeSession(tc.name, now, time.Hour, 5*time.Minute), now)[0]
-			send := manager.SendNow(tc.name, start.InstanceToken, now)[0]
+			send := manager.SendNow(tc.name, start.InstanceToken)[0]
 
-			result := manager.Run(context.Background(), send, fakeClaudeRunner{sendResult: tc.result}, now)
+			execution := ExecuteRunner(context.Background(), send, fakeClaudeRunner{sendResult: tc.result}, now)
+			state := manager.ApplyRunnerExecution(send, execution)
+			result := execution.Result
 			if result.Err == nil {
 				t.Fatal("Run returned nil error, want subprocess failure")
 			}
-			state := manager.State(tc.name)
 			if state.State != StateErrorSubprocess || state.AutoSend {
 				t.Fatalf("state = %#v, want subprocess failure with auto-send stopped", state)
 			}

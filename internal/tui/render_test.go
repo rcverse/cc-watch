@@ -32,7 +32,7 @@ func TestSemanticStylesExposeRequiredRoles(t *testing.T) {
 	}
 
 	for _, role := range required {
-		if !styles.Has(role) {
+		if _, ok := styles.roles[role]; !ok {
 			t.Fatalf("style role %q missing", role)
 		}
 	}
@@ -69,28 +69,8 @@ func TestSemanticStylesUseMutedCoherentTerminalPalette(t *testing.T) {
 	}
 }
 
-func TestStateBadgesIncludeTextNotOnlyColor(t *testing.T) {
-	styles := DefaultStyles()
-	for _, tc := range []struct {
-		role  StyleRole
-		label string
-	}{
-		{RoleInfo, "active"},
-		{RoleWarning, "countdown"},
-		{RoleDanger, "failed"},
-		{RoleSuccess, "done"},
-		{RoleDisabled, "disabled"},
-		{RoleDegraded, "watcher degraded"},
-	} {
-		rendered := styles.Badge(tc.role, tc.label)
-		if !strings.Contains(rendered, tc.label) {
-			t.Fatalf("badge %q for %q missing text label: %q", tc.role, tc.label, rendered)
-		}
-	}
-}
-
 func TestVisualPrimitivesRenderPanelsAndProgressBars(t *testing.T) {
-	panel := RenderPanel("Status", "Cache window: 1h\nTTL elapsed")
+	panel := RenderPanelWidth("Status", "Cache window: 1h\nTTL elapsed", 24)
 	for _, want := range []string{"╭", "╮", "╰", "╯", "Status", "Cache window: 1h"} {
 		if !strings.Contains(panel, want) {
 			t.Fatalf("panel missing %q:\n%s", want, panel)
@@ -478,7 +458,7 @@ func TestMessageExcerptsUseColoredLabelsAndItalicTextWithoutBackground(t *testin
 	if strings.Contains(view, "[first]") || strings.Contains(view, "[last]") || strings.Contains(view, "\x1b[") && strings.Contains(view, "48;") {
 		t.Fatalf("message labels still look like background chips:\n%s", view)
 	}
-	if !DefaultStyles().Has(RoleExcerptText) || !strings.Contains(stripANSI(view), "first can you check") || !strings.Contains(stripANSI(view), "last  please continue") {
+	if _, ok := DefaultStyles().roles[RoleExcerptText]; !ok || !strings.Contains(stripANSI(view), "first can you check") || !strings.Contains(stripANSI(view), "last  please continue") {
 		t.Fatalf("message excerpts are not routed through the excerpt text role:\n%s", view)
 	}
 }
@@ -1485,7 +1465,7 @@ func TestListRowsUseDomainSemanticRoles(t *testing.T) {
 	now := time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)
 	styles := DefaultStyles()
 	for _, role := range []StyleRole{RoleExcerptLabel, RoleReminder, RoleKeepAlive} {
-		if !styles.Has(role) {
+		if _, ok := styles.roles[role]; !ok {
 			t.Fatalf("domain role %q missing", role)
 		}
 	}

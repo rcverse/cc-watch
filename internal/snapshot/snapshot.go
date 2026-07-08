@@ -235,14 +235,6 @@ func cloneConfig(cfg config.Config) config.Config {
 	return cfg
 }
 
-func cloneSessions(sessions []session.Session) []session.Session {
-	cloned := make([]session.Session, 0, len(sessions))
-	for _, s := range sessions {
-		cloned = append(cloned, cloneSession(s))
-	}
-	return cloned
-}
-
 func cloneSession(s session.Session) session.Session {
 	s.CacheWindow.Evidence = append([]string(nil), s.CacheWindow.Evidence...)
 	s.Gaps = append([]session.Gap(nil), s.Gaps...)

@@ -106,7 +106,7 @@ func (p *lineParser) parseTimestamp(obj map[string]any) (time.Time, bool) {
 	if !ok || rawTS == "" {
 		return time.Time{}, false
 	}
-	ts, err := time.Parse(time.RFC3339Nano, strings.Replace(rawTS, "Z", "+00:00", 1))
+	ts, err := time.Parse(time.RFC3339Nano, rawTS)
 	if err != nil {
 		p.warn(WarningMalformedTimestamp, err.Error())
 		return time.Time{}, false

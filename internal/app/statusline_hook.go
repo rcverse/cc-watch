@@ -234,10 +234,7 @@ func readStatuslineCommand(home string) (string, error) {
 }
 
 func statuslineSettingsSnippet(command string) string {
-	escaped, err := json.Marshal(command)
-	if err != nil {
-		escaped = []byte(`""`)
-	}
+	escaped, _ := json.Marshal(command)
 	return fmt.Sprintf(`"statusLine": {"type": "command", "command": %s}`, escaped)
 }
 

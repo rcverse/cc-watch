@@ -166,37 +166,6 @@ func TestResetRestoresDefaults(t *testing.T) {
 	}
 }
 
-func TestCancelPerformsNoWrite(t *testing.T) {
-	home := t.TempDir()
-	path := ConfigPath(home)
-
-	if err := Cancel(home, Default()); err != nil {
-		t.Fatalf("Cancel returned error: %v", err)
-	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("config path stat error = %v, want not exist", err)
-	}
-}
-
-func TestActiveSessionStateIsSnapshotNotMutatedByConfigChanges(t *testing.T) {
-	cfg := Default()
-	active := NewSessionDefaults(cfg)
-
-	cfg.KeepAlive.AutoSend = false
-	cfg.KeepAlive.Scope.MaxSends = 5
-	cfg.ReminderThresholds[0] = 99
-
-	if !active.KeepAliveAutoSend {
-		t.Fatal("active KeepAliveAutoSend changed after config edit")
-	}
-	if active.KeepAliveMaxSends != 1 {
-		t.Fatalf("active KeepAliveMaxSends = %d, want original value 1", active.KeepAliveMaxSends)
-	}
-	if active.ReminderThresholds[0] != 20 {
-		t.Fatalf("active ReminderThresholds[0] = %d, want copied value 20", active.ReminderThresholds[0])
-	}
-}
-
 func TestValidateRejectsUnsafeValuesAndSummarizesAffectedAutosend(t *testing.T) {
 	cfg := Default()
 	cfg.ReminderThresholds = []int{10, 20}

@@ -78,7 +78,3 @@ func Save(home string, cfg Config) error {
 func Reset(home string) error {
 	return Save(home, Default())
 }
-
-func Cancel(_ string, _ Config) error {
-	return nil
-}

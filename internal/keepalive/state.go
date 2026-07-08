@@ -59,8 +59,7 @@ func (m *Manager) CountdownElapsed(sessionID string, token int64, now time.Time)
 	return m.beginSend(state)
 }
 
-func (m *Manager) SendNow(sessionID string, token int64, now time.Time) []Action {
-	_ = now
+func (m *Manager) SendNow(sessionID string, token int64) []Action {
 	state := m.State(sessionID)
 	if state.InstanceToken != token {
 		return nil
@@ -89,8 +88,7 @@ func (m *Manager) Dismiss(sessionID string, token int64) {
 	m.Cancel(sessionID, token)
 }
 
-func (m *Manager) MarkSendStarted(sessionID string, token int64, startedAt time.Time) {
-	_ = startedAt
+func (m *Manager) MarkSendStarted(sessionID string, token int64) {
 	state := m.State(sessionID)
 	if state.State != StateSending || state.InstanceToken != token {
 		return
@@ -111,8 +109,7 @@ func (m *Manager) MarkConfirmationTimeout(sessionID string, token int64) {
 	m.markFailure(sessionID, token, StateErrorTimeout, "confirmation timed out", false)
 }
 
-func (m *Manager) MarkSuccess(sessionID string, token int64, confirmedAt time.Time) {
-	_ = confirmedAt
+func (m *Manager) MarkSuccess(sessionID string, token int64) {
 	state := m.State(sessionID)
 	if state.State != StateConfirming || state.InstanceToken != token {
 		return

@@ -140,7 +140,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, m.keepAliveLifecycleNotification(typed.SessionID, m.KeepAliveState(typed.SessionID))
 		}
-		m.keepAliveManager.MarkSuccess(typed.SessionID, typed.InstanceToken, typed.ConfirmedAt)
+		m.keepAliveManager.MarkSuccess(typed.SessionID, typed.InstanceToken)
 		state := m.KeepAliveState(typed.SessionID)
 		if state.State == keepalive.StateSuccess {
 			m.lastAction = "keepalive_confirmed"
@@ -528,7 +528,7 @@ func (m Model) sendKeepAliveNow() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	state := m.KeepAliveState(selected.SessionID)
-	actions := m.keepAliveManager.SendNow(selected.SessionID, state.InstanceToken, m.now)
+	actions := m.keepAliveManager.SendNow(selected.SessionID, state.InstanceToken)
 	commands := m.applyKeepAliveActions(actions, nil)
 	m.lastAction = "send_keepalive_now"
 	m.focusIndex = m.defaultFocusIndex()

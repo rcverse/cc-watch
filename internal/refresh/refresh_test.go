@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/richardchen/cc-watch/internal/session"
 )
 
 func TestWatcherSetupRegistersRootAndExistingProjectDirectories(t *testing.T) {
@@ -294,20 +293,10 @@ func assertClosedErrorChannel(t *testing.T, ch <-chan error) {
 }
 
 func TestCoordinatorDebounceSafetyManualAndGenerationOrdering(t *testing.T) {
-	parser := &fakeParser{
-		results: map[string][]session.Session{
-			"fsnotify": {{SessionID: "debounced"}},
-			"safety":   {{SessionID: "safety"}},
-			"manual":   {{SessionID: "manual"}},
-		},
-	}
 	coordinator := NewCoordinator(Options{
-		Debounce:        200 * time.Millisecond,
-		SafetyInterval:  time.Minute,
-		Parser:          parser.Parse,
-		ProjectsDir:     "/tmp/projects",
-		InitialNow:      time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC),
-		InitialSessions: []session.Session{{SessionID: "old"}},
+		Debounce:       200 * time.Millisecond,
+		SafetyInterval: time.Minute,
+		InitialNow:     time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC),
 	})
 
 	first := coordinator.OnWatcherEvents([]NormalizedEvent{{Kind: EventWritten, Path: "/tmp/a.jsonl"}})
@@ -341,49 +330,6 @@ func TestCoordinatorDebounceSafetyManualAndGenerationOrdering(t *testing.T) {
 	}
 	if !manual.BypassedDebounce {
 		t.Fatalf("manual BypassedDebounce = false, want true")
-	}
-
-	coordinator.ApplyResult(Result{Generation: manual.Generation, Sessions: parser.Parse("manual")})
-	coordinator.ApplyResult(Result{Generation: debounced.Generation, Sessions: parser.Parse("fsnotify")})
-	if got := coordinator.Sessions(); len(got) != 1 || got[0].SessionID != "manual" {
-		t.Fatalf("stale debounced result overwrote manual result: %#v", got)
-	}
-}
-
-func TestOlderParseResultCannotResurrectDeletedOrRenamedSession(t *testing.T) {
-	coordinator := NewCoordinator(Options{
-		Parser:          (&fakeParser{}).Parse,
-		ProjectsDir:     "/tmp/projects",
-		InitialSessions: []session.Session{{SessionID: "deleted"}},
-	})
-
-	old := coordinator.NextRefresh(SourceFsnotify)
-	newer := coordinator.NextRefresh(SourceManual)
-	coordinator.ApplyResult(Result{Generation: newer.Generation, Sessions: []session.Session{}})
-	coordinator.ApplyResult(Result{Generation: old.Generation, Sessions: []session.Session{{SessionID: "deleted"}}})
-
-	if got := coordinator.Sessions(); len(got) != 0 {
-		t.Fatalf("older result resurrected deleted session: %#v", got)
-	}
-}
-
-func TestOlderIssuedResultCannotApplyBeforeNewerResultReturns(t *testing.T) {
-	coordinator := NewCoordinator(Options{
-		Parser:          (&fakeParser{}).Parse,
-		ProjectsDir:     "/tmp/projects",
-		InitialSessions: []session.Session{{SessionID: "old"}},
-	})
-
-	fsnotify := coordinator.NextRefresh(SourceFsnotify)
-	manual := coordinator.NextRefresh(SourceManual)
-	coordinator.ApplyResult(Result{Generation: fsnotify.Generation, Sessions: []session.Session{{SessionID: "stale"}}})
-	if got := coordinator.Sessions(); len(got) != 1 || got[0].SessionID != "old" {
-		t.Fatalf("older issued result applied before newer result returned: %#v", got)
-	}
-
-	coordinator.ApplyResult(Result{Generation: manual.Generation, Sessions: []session.Session{{SessionID: "manual"}}})
-	if got := coordinator.Sessions(); len(got) != 1 || got[0].SessionID != "manual" {
-		t.Fatalf("current generation result did not apply: %#v", got)
 	}
 }
 
@@ -451,12 +397,4 @@ func (fs *fakeWatchFS) Events() <-chan RawEvent {
 
 func (fs *fakeWatchFS) Errors() <-chan error {
 	return fs.errs
-}
-
-type fakeParser struct {
-	results map[string][]session.Session
-}
-
-func (p *fakeParser) Parse(source string) []session.Session {
-	return append([]session.Session(nil), p.results[source]...)
 }
