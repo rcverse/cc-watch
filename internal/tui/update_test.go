@@ -868,8 +868,21 @@ func TestWorkspaceDetailsDisclosureDoesNotBecomeFocusRow(t *testing.T) {
 	updated, _ = overflow.Update(tea.KeyMsg{Type: tea.KeyDown})
 	overflow = updated.(Model)
 	after := overflow.View()
-	if before == after || !strings.Contains(after, "more gap(s)") {
-		t.Fatalf("details scroll did not change bounded gap window:\nbefore:\n%s\nafter:\n%s", before, after)
+	if before == after || overflow.FocusedAction() != "details_scroll" {
+		t.Fatalf("expanded details did not scroll in place:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+	before = overflow.View()
+	updated, _ = overflow.Update(tea.KeyMsg{Type: tea.KeySpace})
+	overflow = updated.(Model)
+	if overflow.View() != before {
+		t.Fatalf("space should not change expanded details scroll mode:\nbefore:\n%s\nafter:\n%s", before, overflow.View())
+	}
+	for i := 0; i < 20; i++ {
+		updated, _ = overflow.Update(tea.KeyMsg{Type: tea.KeyDown})
+		overflow = updated.(Model)
+	}
+	if overflow.FocusedAction() != "details_scroll" || strings.Contains(overflow.View(), "› Session Info · details") {
+		t.Fatalf("details scroll boundary moved focus out of details:\n%s", overflow.View())
 	}
 }
 

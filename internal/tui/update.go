@@ -322,15 +322,19 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.lastAction = "quit"
 		return m, tea.Quit
 	case "down":
-		if m.route == RouteWorkspace && m.FocusedAction() == "details_scroll" && m.detailsCanScroll(1) {
-			m.detailsOffset++
+		if m.route == RouteWorkspace && m.FocusedAction() == "details_scroll" {
+			if m.detailsCanScroll(1) {
+				m.detailsOffset++
+			}
 			return m, nil
 		}
 		m.moveFocus(1)
 		return m, nil
 	case "up":
-		if m.route == RouteWorkspace && m.FocusedAction() == "details_scroll" && m.detailsCanScroll(-1) {
-			m.detailsOffset--
+		if m.route == RouteWorkspace && m.FocusedAction() == "details_scroll" {
+			if m.detailsCanScroll(-1) {
+				m.detailsOffset--
+			}
 			return m, nil
 		}
 		m.moveFocus(-1)

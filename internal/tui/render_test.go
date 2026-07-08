@@ -184,7 +184,7 @@ func TestAdaptiveListViewFitsEightyColumnsAndCapsExpiredProgress(t *testing.T) {
 	})
 
 	view := model.View()
-	assertMaxLineWidth(t, view, 80)
+	assertMaxLineWidth(t, view, 100)
 	for _, want := range []string{"Claude Code Watch", "› #1", "1-hour cache", "× Expired   9h02m ago", "100%", "KeepAlive N/A"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("adaptive list missing %q:\n%s", want, view)
@@ -213,7 +213,7 @@ func TestListViewStaysReadableOnWideTerminals(t *testing.T) {
 		)},
 	}).View()
 
-	assertMaxLineWidth(t, view, 80)
+	assertMaxLineWidth(t, view, 100)
 	if strings.Contains(view, "duration ") || strings.Contains(view, "warnings ") {
 		t.Fatalf("wide-only list details leaked into capped list view:\n%s", view)
 	}
@@ -387,7 +387,7 @@ func TestListKeepsEveryVisibleRowExcerptAndAddsTitleBreathingRoom(t *testing.T) 
 		t.Fatalf("list title spacing differs from workspace; separator=%d row=%d:\n%s", separatorIndex, rowIndex, view)
 	}
 	assertMaxLines(t, view, 30)
-	for _, want := range []string{"#1", "#4", "5ac2bc00", "Users-r...m-skills", "Page 1/2"} {
+	for _, want := range []string{"#1", "#4", "5ac2bc00", "custom-skills", "Page 1/2"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("list missing %q:\n%s", want, view)
 		}
@@ -395,7 +395,7 @@ func TestListKeepsEveryVisibleRowExcerptAndAddsTitleBreathingRoom(t *testing.T) 
 	if strings.Contains(plain, "#5") {
 		t.Fatalf("first page should show four complete rows, not five compact rows:\n%s", view)
 	}
-	if strings.Count(plain, "first  Let's discuss") != 4 || strings.Count(plain, "last  Base directory") != 4 {
+	if strings.Count(plain, "first Let's discuss") != 4 || strings.Count(plain, "last  Base directory") != 4 {
 		t.Fatalf("list should keep excerpts for every visible row:\n%s", view)
 	}
 }
@@ -455,7 +455,7 @@ func TestWorkspacePolishRemovesDuplicateSessionRowAndUsesMessageChips(t *testing
 	}).View()
 	plain := stripANSI(view)
 
-	for _, want := range []string{"first  can you check", "last  please continue", "ACTIVE", "█", "33%", "40m00s left", "1-hour cache"} {
+	for _, want := range []string{"first can you check", "last  please continue", "ACTIVE", "█", "33%", "40m00s left", "1-hour cache"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("workspace polish missing %q:\n%s", want, view)
 		}
@@ -478,7 +478,7 @@ func TestMessageExcerptsUseColoredLabelsAndItalicTextWithoutBackground(t *testin
 	if strings.Contains(view, "[first]") || strings.Contains(view, "[last]") || strings.Contains(view, "\x1b[") && strings.Contains(view, "48;") {
 		t.Fatalf("message labels still look like background chips:\n%s", view)
 	}
-	if !DefaultStyles().Has(RoleExcerptText) || !strings.Contains(stripANSI(view), "first  can you check") || !strings.Contains(stripANSI(view), "last  please continue") {
+	if !DefaultStyles().Has(RoleExcerptText) || !strings.Contains(stripANSI(view), "first can you check") || !strings.Contains(stripANSI(view), "last  please continue") {
 		t.Fatalf("message excerpts are not routed through the excerpt text role:\n%s", view)
 	}
 }
@@ -522,7 +522,7 @@ func TestConfigEditingUsesSeparatePromptPanel(t *testing.T) {
 	model := updated.(Model)
 	view := model.View()
 
-	for _, want := range []string{"╭─ Settings", "╭─ Editing", "KeepAlive trigger", "Current input", "3", "↵ save field", "⎋ cancel edit"} {
+	for _, want := range []string{"╭─ Settings", "╭─ Editing", "KeepAlive trigger", "Current input", "3", "▌", "↵ save field", "⎋ cancel edit"} {
 		if !strings.Contains(stripANSI(view), want) {
 			t.Fatalf("config edit view missing %q:\n%s", want, view)
 		}
@@ -661,7 +661,7 @@ func TestListViewResponsivePriorityFields(t *testing.T) {
 			t.Fatalf("wide view missing %q:\n%s", want, wide)
 		}
 	}
-	assertMaxLineWidth(t, wide, 80)
+	assertMaxLineWidth(t, wide, 100)
 }
 
 func TestListViewSanitizesMultilineExcerptsAndKeepsRowsBounded(t *testing.T) {
@@ -802,10 +802,10 @@ func TestConfigEditorRendersFieldsSummaryWarningsAndValidation(t *testing.T) {
 		"send after countdown",
 		"Max sends",
 		"Preview",
-		"1h cache:",
-		"5m cache:",
+		"1h cache",
+		"5m cache",
 		"Validation",
-		"Cannot save.",
+		"✗ Cannot save.",
 		"countdown may not fit the 5m cache trigger window",
 		"↑↓ move  ↵ edit  space toggle  s save  d reset  ⎋ cancel",
 	} {
@@ -1087,8 +1087,8 @@ func TestWorkspacePanelsUseClosedConsistentFrames(t *testing.T) {
 		if width != widths[0] {
 			t.Fatalf("workspace panel widths differ: %v\n%s", widths, view)
 		}
-		if width > 80 {
-			t.Fatalf("workspace panel width = %d, want <= 80:\n%s", width, view)
+		if width > 100 {
+			t.Fatalf("workspace panel width = %d, want <= 100:\n%s", width, view)
 		}
 	}
 }
@@ -1106,8 +1106,8 @@ func TestConfigPanelsStayReadableOnWideTerminals(t *testing.T) {
 		t.Fatalf("config rendered no framed panels:\n%s", view)
 	}
 	for _, width := range widths {
-		if width > 80 {
-			t.Fatalf("config panel width = %d, want <= 80:\n%s", width, view)
+		if width > 100 {
+			t.Fatalf("config panel width = %d, want <= 100:\n%s", width, view)
 		}
 	}
 }
@@ -1196,7 +1196,13 @@ func TestSessionInfoDetailsDisclosureAndGapSorting(t *testing.T) {
 	if strings.Contains(details, "Mid-session Gaps >1min                                  ↕") {
 		t.Fatalf("details sort label is visually detached:\n%s", details)
 	}
-	if !strings.Contains(details, "3 more gap(s); use ↑↓") {
+	if strings.Contains(details, "› Session Info · details") {
+		t.Fatalf("details focus should highlight frame, not title:\n%s", details)
+	}
+	if !strings.Contains(details, DefaultStyles().Render(RoleIdentity, "╭─ ")) {
+		t.Fatalf("focused details frame is not highlighted:\n%s", details)
+	}
+	if !strings.Contains(details, "↓ 3 more gap(s) below; use ↑↓ scroll") {
 		t.Fatalf("details view missing scroll affordance after one visible gap:\n%s", details)
 	}
 	assertMaxLines(t, details, 24)
@@ -1209,8 +1215,100 @@ func TestSessionInfoDetailsDisclosureAndGapSorting(t *testing.T) {
 			t.Fatalf("newest details missing %q:\n%s", want, newest)
 		}
 	}
-	if !strings.Contains(newest, "64s") || !strings.Contains(newest, "3 more gap(s); use ↑↓") {
+	if !strings.Contains(newest, "64s") || !strings.Contains(newest, "↓ 3 more gap(s) below; use ↑↓ scroll") {
 		t.Fatalf("newest details missing visible newest gap or scroll affordance:\n%s", newest)
+	}
+}
+
+func TestGapLinesColorizeOnlyPauseAndResetChips(t *testing.T) {
+	now := time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)
+	s := workspaceSession(now)
+	pause := session.Gap{Seconds: 64, From: now.Add(-2 * time.Minute), To: now.Add(-time.Minute)}
+	reset := session.Gap{Seconds: 184, From: now.Add(-30 * time.Minute), To: now.Add(-26 * time.Minute), Reset: true}
+	s.Gaps = []session.Gap{pause, reset}
+	styles := DefaultStyles()
+
+	if got := formatGapLine(pause, s, false); !strings.Contains(got, styles.Render(RoleInfo, "• pause")) {
+		t.Fatalf("pause gap missing colored chip:\n%s", got)
+	}
+	if got := formatGapLine(reset, s, false); !strings.Contains(got, styles.Render(RoleDanger, "! RESET")) {
+		t.Fatalf("reset gap missing colored chip:\n%s", got)
+	}
+}
+
+func TestWorkspaceDetailsShowsRewindWindowsWithExpiredCutoff(t *testing.T) {
+	now := time.Date(2026, 6, 3, 13, 0, 0, 0, time.Local)
+	s := workspaceSession(now)
+	activeOld := now.Add(-50 * time.Minute)
+	activeNew := now.Add(-10 * time.Minute)
+	expiredNew := now.Add(-70 * time.Minute)
+	expiredOld := now.Add(-90 * time.Minute)
+	s.RecentMessages = []session.MessageWindow{
+		{At: expiredOld, Role: "user", Excerpt: "older expired prompt"},
+		{At: expiredNew, Role: "user", Excerpt: "newest expired prompt"},
+		{At: activeOld, Role: "user", Excerpt: "older active prompt"},
+		{At: activeNew, Role: "user", Excerpt: "newest active prompt " + strings.Repeat("with long text ", 12)},
+	}
+
+	model := NewModel(Options{
+		Now:        now,
+		Width:      100,
+		Height:     32,
+		Sessions:   []session.Session{s},
+		SelectedID: "workspace-id",
+	})
+	updated, _ := model.Update(keyRunes("v"))
+	view := updated.(Model).View()
+	plain := stripANSI(view)
+
+	for _, want := range []string{
+		"Recent Message Cache Status",
+		"12:50:00",
+		"50m00s left",
+		"newest active prompt",
+		"11:50:00",
+		"expired 10m00s",
+		"newest expired prompt",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("workspace details missing %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(plain, "older expired prompt") {
+		t.Fatalf("workspace details showed more than one expired cutoff row:\n%s", view)
+	}
+	if strings.Contains(plain, " user ") {
+		t.Fatalf("workspace details still renders redundant user role column:\n%s", view)
+	}
+	styles := DefaultStyles()
+	for _, want := range []string{
+		styles.Render(RoleSuccess, "● ACTIVE"),
+		styles.Render(RoleDanger, "× EXPIRED"),
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("workspace details missing styled rewind status %q:\n%s", want, view)
+		}
+	}
+	if count := strings.Count(view, styles.Render(RoleSuccess, "● ACTIVE")); count < 2 {
+		t.Fatalf("styled active chip count = %d, want at least 2:\n%s", count, view)
+	}
+	assertMaxLineWidth(t, view, 100)
+}
+
+func TestMessageChipsAreSharedAcrossListAndWorkspace(t *testing.T) {
+	now := time.Date(2026, 6, 3, 13, 0, 0, 0, time.UTC)
+	s := workspaceSession(now)
+	s.Messages.FirstUserExcerpt = strings.Repeat("first chip must stay colored even on long workspace rows ", 4)
+	list := NewModel(Options{Now: now, Sessions: []session.Session{s}}).View()
+	workspace := NewModel(Options{Now: now, SelectedID: s.SessionID, Sessions: []session.Session{s}}).View()
+
+	for _, chip := range []string{messageChip("first"), messageChip("last")} {
+		if !strings.Contains(list, chip) {
+			t.Fatalf("list missing shared chip %q:\n%s", chip, list)
+		}
+		if !strings.Contains(workspace, chip) {
+			t.Fatalf("workspace missing shared chip %q:\n%s", chip, workspace)
+		}
 	}
 }
 
@@ -1255,12 +1353,12 @@ func TestWorkspaceKeepAliveCardStatesRenderSafetyContract(t *testing.T) {
 		{
 			name:  "watching auto-send on",
 			state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateMonitoringIdle, AutoSend: true, MaxSends: 1},
-			want:  []string{"KeepAlive · watching", "Next", "Countdown at", "Msg Preview", "Scope", "0 / 1 sends · auto-send"},
+			want:  []string{"KeepAlive · watching", "Next", "Message at", "countdown starts", "Msg Preview", "Scope", "0 / 1 sends · auto-send on"},
 		},
 		{
 			name:  "watching auto-send off",
 			state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateMonitoringIdle, AutoSend: false, MaxSends: 1},
-			want:  []string{"KeepAlive · watching", "Next", "Manual prompt at", "Msg Preview", "Scope", "0 / 1 sends · auto-send"},
+			want:  []string{"KeepAlive · watching", "Next", "Manual prompt at", "auto-send off", "Msg Preview", "Scope", "0 / 1 sends · auto-send off"},
 		},
 		{
 			name:  "countdown",
@@ -1315,6 +1413,28 @@ func TestWorkspaceKeepAliveCardStatesRenderSafetyContract(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestWorkspaceKeepAliveNextTimeUsesLocalDisplayZone(t *testing.T) {
+	oldLocal := time.Local
+	time.Local = time.FixedZone("HKT", 8*3600)
+	t.Cleanup(func() { time.Local = oldLocal })
+
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	model := NewModel(Options{
+		Now:        now,
+		Width:      120,
+		Height:     32,
+		SelectedID: "workspace-id",
+		Sessions:   []session.Session{workspaceSession(now)},
+		KeepAliveStates: map[string]keepalive.SessionState{
+			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateMonitoringIdle, AutoSend: true, MaxSends: 1},
+		},
+	})
+
+	if view := model.View(); !strings.Contains(view, "Message at 20:01:30") {
+		t.Fatalf("KeepAlive next time did not use local display zone:\n%s", view)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/richardchen/cc-watch/internal/keepalive"
 	"github.com/richardchen/cc-watch/internal/refresh"
 	"github.com/richardchen/cc-watch/internal/session"
@@ -216,14 +217,14 @@ func (m Model) renderListRow(index int, s session.Session) string {
 	firstExcerpt := displayExcerpt(s.Messages.FirstUserExcerpt)
 	lastExcerpt := displayExcerpt(s.Messages.LastUserExcerpt)
 	if firstExcerpt != "" {
-		fmt.Fprintf(&b, "  %s  %s\n", messageLabel("first"), messageText(truncateEnd(firstExcerpt, max(width-16, 18))))
+		fmt.Fprintf(&b, "  %s %s\n", messageChip("first"), messageText(truncateEnd(firstExcerpt, max(width-16, 18))))
 	}
 	if lastExcerpt != "" {
 		available := max(width-13, 18)
 		if width < 90 {
 			available = max(width-13, 18)
 		}
-		fmt.Fprintf(&b, "  %s  %s\n", messageLabel("last"), messageText(truncateEnd(lastExcerpt, available)))
+		fmt.Fprintf(&b, "  %s %s\n", messageChip("last"), messageText(truncateEnd(lastExcerpt, available)))
 	}
 	if len(s.Warnings) > 0 && width < 120 {
 		fmt.Fprintf(&b, "     %s\n", styles.Render(RoleWarning, fmt.Sprintf("! %d parse warning(s)", len(s.Warnings))))
@@ -385,7 +386,7 @@ func truncateANSI(value string, max int) string {
 	if max <= 0 || visibleWidth(stripANSI(value)) <= max {
 		return value
 	}
-	return truncateEnd(stripANSI(value), max)
+	return ansi.Truncate(value, max, "...")
 }
 
 func (m Model) listFooter() string {

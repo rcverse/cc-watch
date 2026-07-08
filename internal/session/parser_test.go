@@ -2,6 +2,7 @@ package session
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"path/filepath"
 	"strings"
@@ -124,6 +125,54 @@ func TestParseTimestamplessFile(t *testing.T) {
 	}
 	if s.TokenStats.CacheWrites != 7 || s.TokenStats.CacheReads != 3 || s.TokenStats.OutputTokens != 1 {
 		t.Fatalf("TokenStats = %+v", s.TokenStats)
+	}
+}
+
+func TestParseReaderKeepsRecentMessageWindows(t *testing.T) {
+	input := strings.NewReader(strings.Join([]string{
+		`{"timestamp":"2026-06-03T00:00:00Z","message":{"role":"user","content":"<local-command-caveat>Caveat: hidden"}}`,
+		`{"timestamp":"2026-06-03T00:00:30Z","message":{"role":"user","content":"<local-command-stdout>Set model to Opus</local-command-stdout>"}}`,
+		`{"timestamp":"2026-06-03T00:00:00Z","message":{"role":"user","content":"first prompt"},"usage":{"ephemeral_1h_input_tokens":1}}`,
+		`{"timestamp":"2026-06-03T00:01:00Z","message":{"role":"assistant","content":"first answer"}}`,
+		`{"timestamp":"2026-06-03T00:01:30Z","message":{"role":"user","content":"<command-name>/reload-skills</command-name>"}}`,
+		`{"timestamp":"2026-06-03T00:02:00Z","message":{"role":"user","content":[{"type":"text","text":"second prompt from block"},{"type":"tool_use","name":"ignored"}]}}`,
+	}, "\n"))
+
+	s, err := ParseReader(input, "recent.jsonl", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.RecentMessages) != 2 {
+		t.Fatalf("len(RecentMessages) = %d, want 2", len(s.RecentMessages))
+	}
+	if s.RecentMessages[0].Role != "user" || s.RecentMessages[0].Excerpt != "first prompt" {
+		t.Fatalf("first recent message = %#v", s.RecentMessages[0])
+	}
+	if s.RecentMessages[1].Role != "user" || s.RecentMessages[1].Excerpt != "second prompt from block" {
+		t.Fatalf("last recent message = %#v", s.RecentMessages[1])
+	}
+	if s.Messages.FirstUserExcerpt != "first prompt" {
+		t.Fatalf("FirstUserExcerpt = %q, want first prompt", s.Messages.FirstUserExcerpt)
+	}
+	if s.Messages.LastUserExcerpt != "second prompt from block" {
+		t.Fatalf("LastUserExcerpt = %q, want second prompt from block", s.Messages.LastUserExcerpt)
+	}
+}
+
+func TestParseReaderCapsRecentMessageWindows(t *testing.T) {
+	var lines []string
+	for i := 0; i < recentMessageLimit+1; i++ {
+		lines = append(lines, `{"timestamp":"2026-06-03T00:`+fmt.Sprintf("%02d", i)+`:00Z","message":{"role":"user","content":"prompt `+fmt.Sprint(i)+`"}}`)
+	}
+	s, err := ParseReader(strings.NewReader(strings.Join(lines, "\n")), "recent-cap.jsonl", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.RecentMessages) != recentMessageLimit {
+		t.Fatalf("len(RecentMessages) = %d, want %d", len(s.RecentMessages), recentMessageLimit)
+	}
+	if s.RecentMessages[0].Excerpt != "prompt 1" {
+		t.Fatalf("first retained excerpt = %q, want prompt 1", s.RecentMessages[0].Excerpt)
 	}
 }
 

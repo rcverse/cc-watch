@@ -30,6 +30,12 @@ type Messages struct {
 	LastUserExcerpt  string
 }
 
+type MessageWindow struct {
+	At      time.Time
+	Role    string
+	Excerpt string
+}
+
 type Gap struct {
 	Seconds float64
 	From    time.Time
@@ -64,6 +70,7 @@ type Session struct {
 	DurationSeconds *int
 	LastMessageAt   *time.Time
 	Messages        Messages
+	RecentMessages  []MessageWindow
 	TokenStats      TokenStats
 	Gaps            []Gap
 	ResetCount      int

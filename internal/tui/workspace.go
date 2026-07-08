@@ -4,10 +4,19 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/richardchen/cc-watch/internal/keepalive"
 	"github.com/richardchen/cc-watch/internal/session"
 )
+
+const rewindWindowActiveLimit = 6
+
+type rewindWindowRow struct {
+	message session.MessageWindow
+	status  session.StatusState
+	seconds int
+}
 
 func (m Model) workspaceView() string {
 	selected := m.selectedSession()
@@ -70,8 +79,8 @@ func (m Model) sessionInfoCard(s session.Session) string {
 	var b strings.Builder
 	styles := DefaultStyles()
 	fmt.Fprintf(&b, "%s   %s\n", styles.Render(RoleMuted, "Session ID"), truncateMiddle(s.SessionID, max(m.width-18, 24)))
-	fmt.Fprintf(&b, "%s     %s  %s\n", styles.Render(RoleMuted, "Messages"), messageLabel("first"), messageText(truncateEnd(emptyDash(displayExcerpt(s.Messages.FirstUserExcerpt)), max(m.width-27, 18))))
-	fmt.Fprintf(&b, "             %s  %s\n", messageLabel("last"), messageText(truncateEnd(emptyDash(displayExcerpt(s.Messages.LastUserExcerpt)), max(m.width-27, 18))))
+	fmt.Fprintf(&b, "%s\n", workspaceMessageLine(styles.Render(RoleMuted, "Messages")+"     ", "first", s.Messages.FirstUserExcerpt, m.workspacePanelWidth()))
+	fmt.Fprintf(&b, "%s\n", workspaceMessageLine("             ", "last", s.Messages.LastUserExcerpt, m.workspacePanelWidth()))
 	fmt.Fprintf(&b, "%s       writes %d  reads %d  hit %s %.0f%%\n", styles.Render(RoleMuted, "Tokens"), s.TokenStats.CacheWrites, s.TokenStats.CacheReads, HitRateProgressBar(s.TokenStats.HitRate, 8), s.TokenStats.HitRate)
 	fmt.Fprintf(&b, "%s         %s  %s\n", styles.Render(RoleMuted, "Gaps"), gapSummary(s), styles.Render(RoleMuted, "v details"))
 	return m.renderWorkspacePanel("Session Info", b.String())
@@ -93,16 +102,16 @@ func (m Model) compactOperationalWorkspace() bool {
 func (m Model) sessionInfoDetailsCard(s session.Session) string {
 	var b strings.Builder
 	title := "Session Info · details"
-	if m.FocusedAction() == "details_scroll" {
-		title = DefaultStyles().Render(RoleIdentity, "› "+title)
-	}
 	styles := DefaultStyles()
 	fmt.Fprintf(&b, "%s   %s\n", styles.Render(RoleMuted, "Session ID"), truncateMiddle(s.SessionID, max(m.width-18, 24)))
-	fmt.Fprintf(&b, "%s        %s\n", styles.Render(RoleMuted, "JSONL"), truncateMiddle(s.JSONLPath, max(m.width-18, 24)))
+	fmt.Fprintf(&b, "%s       %s\n", styles.Render(RoleMuted, "JSONL"), truncateMiddle(s.JSONLPath, max(m.width-18, 24)))
 	fmt.Fprintf(&b, "%s      parsed %s · file modified %s\n", styles.Render(RoleMuted, "Updated"), m.now.Local().Format("15:04:05"), s.FileModifiedAt.Local().Format("15:04:05"))
-	fmt.Fprintf(&b, "%s     %s  %s\n", styles.Render(RoleMuted, "Messages"), messageLabel("first"), messageText(truncateEnd(emptyDash(displayExcerpt(s.Messages.FirstUserExcerpt)), max(m.width-27, 18))))
-	fmt.Fprintf(&b, "             %s  %s\n", messageLabel("last"), messageText(truncateEnd(emptyDash(displayExcerpt(s.Messages.LastUserExcerpt)), max(m.width-27, 18))))
+	fmt.Fprintf(&b, "%s\n", workspaceMessageLine(styles.Render(RoleMuted, "Messages")+"     ", "first", s.Messages.FirstUserExcerpt, m.workspacePanelWidth()))
+	fmt.Fprintf(&b, "%s\n", workspaceMessageLine("             ", "last", s.Messages.LastUserExcerpt, m.workspacePanelWidth()))
 	fmt.Fprintf(&b, "%s  writes %d · reads %d · hit %s %.0f%% · output %d\n", styles.Render(RoleMuted, "Token Stats"), s.TokenStats.CacheWrites, s.TokenStats.CacheReads, HitRateProgressBar(s.TokenStats.HitRate, 10), s.TokenStats.HitRate, s.TokenStats.OutputTokens)
+	if section := m.rewindWindowsSection(s); section != "" {
+		b.WriteString(section)
+	}
 	fmt.Fprintf(&b, "%s\n", styles.Render(RoleMuted, "Mid-session Gaps >1min · "+m.gapSortLabel()))
 	gaps := m.visibleDetailGaps(s)
 	if len(gaps) == 0 {
@@ -112,18 +121,87 @@ func (m Model) sessionInfoDetailsCard(s session.Session) string {
 			fmt.Fprintf(&b, "%s\n", truncateANSI(formatGapLine(gap, s, m.gapSortNewest), max(m.width-4, 20)))
 		}
 	}
-	if total := len(s.Gaps); total > len(gaps) {
-		fmt.Fprintf(&b, "%s\n", styles.Render(RoleMuted, fmt.Sprintf("%d more gap(s); use ↑↓ while details is focused", total-len(gaps))))
+	if scroll := m.detailScrollAffordance(len(s.Gaps), len(gaps)); scroll != "" {
+		fmt.Fprintf(&b, "%s\n", styles.Render(RoleMuted, scroll))
 	}
 	if s.ResetCount > 0 {
 		fmt.Fprintf(&b, "%s %d cache reset(s) - rebuilt from scratch %d time(s).\n", styles.Render(RoleWarning, "!"), s.ResetCount, s.ResetCount)
 	}
-	return m.renderWorkspacePanel(title, b.String())
+	return m.renderWorkspacePanelFocused(title, b.String(), m.FocusedAction() == "details_scroll")
+}
+
+func (m Model) rewindWindowsSection(s session.Session) string {
+	styles := DefaultStyles()
+	if len(s.RecentMessages) == 0 {
+		return ""
+	}
+	if !s.CacheWindow.Known {
+		return fmt.Sprintf("%s\n%s\n", styles.Render(RoleMuted, "Recent Message Cache Status"), styles.Render(RoleMuted, "TTL unknown; message cache status unavailable."))
+	}
+	rows := rewindWindowRows(s, m.now, rewindWindowActiveLimit)
+	if len(rows) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s\n", styles.Render(RoleMuted, "Recent Message Cache Status"))
+	for _, row := range rows {
+		fmt.Fprintf(&b, "%s\n", formatRewindWindowRow(row, m.workspacePanelWidth()))
+	}
+	return b.String()
+}
+
+func rewindWindowRows(s session.Session, now time.Time, activeLimit int) []rewindWindowRow {
+	if !s.CacheWindow.Known || s.CacheWindow.TTLSeconds <= 0 {
+		return nil
+	}
+	var rows []rewindWindowRow
+	var cutoff *rewindWindowRow
+	for i := len(s.RecentMessages) - 1; i >= 0; i-- {
+		message := s.RecentMessages[i]
+		remaining := int(message.At.Add(time.Duration(s.CacheWindow.TTLSeconds) * time.Second).Sub(now).Seconds())
+		if remaining >= 0 {
+			if len(rows) < activeLimit {
+				rows = append(rows, rewindWindowRow{message: message, status: session.StatusActive, seconds: remaining})
+			}
+			continue
+		}
+		if cutoff == nil {
+			row := rewindWindowRow{message: message, status: session.StatusExpired, seconds: -remaining}
+			cutoff = &row
+		}
+	}
+	if cutoff != nil {
+		rows = append(rows, *cutoff)
+	}
+	return rows
+}
+
+func formatRewindWindowRow(row rewindWindowRow, width int) string {
+	styles := DefaultStyles()
+	role := RoleSuccess
+	chip := "● ACTIVE"
+	status := formatStatusDuration(row.seconds) + " left"
+	if row.status == session.StatusExpired {
+		role = RoleDanger
+		chip = "× EXPIRED"
+		status = "expired " + formatStatusDuration(row.seconds)
+	}
+	prefixWidth := len("× EXPIRED") + 2 + len("15:04:05") + 2 + 13 + 2
+	excerpt := truncateEnd(displayExcerpt(row.message.Excerpt), max(width-prefixWidth, 8))
+	return fmt.Sprintf("%s  %s  %-13s  %s", styles.Render(role, chip), row.message.At.Local().Format("15:04:05"), status, messageText(excerpt))
 }
 
 func (m Model) renderWorkspacePanel(title string, body string) string {
+	return m.renderWorkspacePanelFocused(title, body, false)
+}
+
+func (m Model) renderWorkspacePanelFocused(title string, body string, focused bool) string {
 	width := m.workspacePanelWidth()
-	return RenderPanelWidth(DefaultStyles().Render(RoleIdentity, title), truncateBodyLines(body, width), width)
+	title = DefaultStyles().Render(RoleIdentity, title)
+	if focused {
+		return RenderPanelWidthFocused(title, truncateBodyLines(body, width), width)
+	}
+	return RenderPanelWidth(title, truncateBodyLines(body, width), width)
 }
 
 func (m Model) workspacePanelWidth() int {
@@ -169,6 +247,17 @@ func messageLabel(label string) string {
 		return styles.Render(RoleLastLabel, label)
 	}
 	return styles.Render(RoleFirstLabel, label)
+}
+
+func messageChip(label string) string {
+	return padANSI(messageLabel(label), 5)
+}
+
+func workspaceMessageLine(prefix string, label string, text string, width int) string {
+	chip := messageChip(label)
+	available := max(width-visibleWidth(stripANSI(prefix))-visibleWidth(stripANSI(chip))-1, 8)
+	excerpt := truncateEnd(emptyDash(displayExcerpt(text)), available)
+	return fmt.Sprintf("%s%s %s", prefix, chip, messageText(excerpt))
 }
 
 func messageText(value string) string {
@@ -284,12 +373,30 @@ func (m Model) detailsCanScroll(delta int) bool {
 	return next >= 0 && next <= len(selected.Gaps)-limit
 }
 
+func (m Model) detailScrollAffordance(total int, visible int) string {
+	above := m.detailsOffset
+	below := total - m.detailsOffset - visible
+	switch {
+	case above > 0 && below > 0:
+		return fmt.Sprintf("↑ %d above · ↓ %d below; use ↑↓ scroll", above, below)
+	case below > 0:
+		return fmt.Sprintf("↓ %d more gap(s) below; use ↑↓ scroll", below)
+	case above > 0:
+		return fmt.Sprintf("↑ %d earlier gap(s) above; use ↑↓ scroll", above)
+	default:
+		return ""
+	}
+}
+
 func formatGapLine(gap session.Gap, s session.Session, newest bool) string {
-	prefix := "-"
+	styles := DefaultStyles()
+	prefix := "•"
 	label := "pause"
+	role := RoleInfo
 	if gap.Reset {
 		prefix = "!"
 		label = "RESET"
+		role = RoleDanger
 	}
 	tag := ""
 	if !newest {
@@ -315,7 +422,7 @@ func formatGapLine(gap session.Gap, s session.Session, newest bool) string {
 			tag = "   latest"
 		}
 	}
-	return fmt.Sprintf("%s %-5s %5.0fs    %s -> %s%s", prefix, label, gap.Seconds, gap.From.Local().Format("15:04:05"), gap.To.Local().Format("15:04:05"), tag)
+	return fmt.Sprintf("%s %5.0fs    %s -> %s%s", styles.Render(role, fmt.Sprintf("%s %-5s", prefix, label)), gap.Seconds, gap.From.Local().Format("15:04:05"), gap.To.Local().Format("15:04:05"), tag)
 }
 
 func (m Model) workspaceControls(s session.Session) string {
@@ -423,6 +530,12 @@ func onOffText(enabled bool, risky bool) string {
 
 func (m Model) workspaceFooter() string {
 	if m.sessionInfoExpanded {
+		if m.FocusedAction() == "details_scroll" {
+			if m.width <= 90 {
+				return cueLine("↑↓ scroll  v collapse  s sort  b/⎋ back  q quit")
+			}
+			return cueLine("↑↓ scroll details  v collapse  s sort gaps  u update  b/⎋ back  q quit")
+		}
 		if m.width <= 90 {
 			return cueLine("v collapse  s sort  u update  b/⎋ back  q quit")
 		}
@@ -463,16 +576,10 @@ func (m Model) workspaceFocusActions() []string {
 		actions = append(actions, action.id)
 	}
 	if m.sessionInfoExpanded {
-		var filtered []string
 		if m.detailsScrollable() {
-			filtered = append(filtered, "details_scroll")
+			return []string{"details_scroll"}
 		}
-		for _, action := range actions {
-			if action != "back" {
-				filtered = append(filtered, action)
-			}
-		}
-		return filtered
+		return nil
 	}
 	if m.compactOperationalWorkspace() {
 		filtered := actions[:0]
@@ -570,11 +677,11 @@ func maxSends(state keepalive.SessionState) int {
 	return state.MaxSends
 }
 
-func autoSendBox(enabled bool) string {
+func onOffPlain(enabled bool) string {
 	if enabled {
-		return "[x] on"
+		return "on"
 	}
-	return "[ ] off"
+	return "off"
 }
 
 func successEvidence(state keepalive.SessionState) string {

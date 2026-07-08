@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	maxPanelBodyWidth  = 76
+	maxPanelBodyWidth  = 96
 	maxVisualLineWidth = maxPanelBodyWidth + 4
 )
 
@@ -93,6 +93,14 @@ func RenderPanel(title string, body string) string {
 }
 
 func RenderPanelWidth(title string, body string, width int) string {
+	return renderPanelWidth(title, body, width, RoleNeutral)
+}
+
+func RenderPanelWidthFocused(title string, body string, width int) string {
+	return renderPanelWidth(title, body, width, RoleIdentity)
+}
+
+func renderPanelWidth(title string, body string, width int, borderRole StyleRole) string {
 	if width < 24 {
 		width = 24
 	}
@@ -100,21 +108,28 @@ func RenderPanelWidth(title string, body string, width int) string {
 	if width < titleWidth+1 {
 		width = titleWidth + 1
 	}
+	styles := DefaultStyles()
+	border := func(value string) string { return styles.Render(borderRole, value) }
 	var b strings.Builder
-	b.WriteString("╭─ ")
+	b.WriteString(border("╭─ "))
 	b.WriteString(title)
-	b.WriteString(" ")
-	b.WriteString(strings.Repeat("─", max(width-titleWidth-1, 0)))
-	b.WriteString("╮\n")
+	b.WriteString(border(" "))
+	b.WriteString(border(strings.Repeat("─", max(width-titleWidth-1, 0))))
+	b.WriteString(border("╮"))
+	b.WriteString("\n")
 	for _, line := range strings.Split(strings.TrimRight(body, "\n"), "\n") {
-		b.WriteString("│ ")
+		b.WriteString(border("│"))
+		b.WriteString(" ")
 		b.WriteString(line)
 		b.WriteString(strings.Repeat(" ", max(width-visibleWidth(line), 0)))
-		b.WriteString(" │\n")
+		b.WriteString(" ")
+		b.WriteString(border("│"))
+		b.WriteString("\n")
 	}
-	b.WriteString("╰")
-	b.WriteString(strings.Repeat("─", width+2))
-	b.WriteString("╯\n")
+	b.WriteString(border("╰"))
+	b.WriteString(border(strings.Repeat("─", width+2)))
+	b.WriteString(border("╯"))
+	b.WriteString("\n")
 	return b.String()
 }
 

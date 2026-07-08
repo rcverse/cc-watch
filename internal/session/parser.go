@@ -12,6 +12,8 @@ import (
 	"time"
 )
 
+const recentMessageLimit = 20
+
 func ParseFile(path string) (Session, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -63,11 +65,12 @@ func ParseReader(r io.Reader, path string, fileModifiedAt time.Time) (Session, e
 }
 
 type lineParser struct {
-	session    Session
-	totals     map[string]int
-	timestamps []time.Time
-	userTexts  []string
-	line       int
+	session        Session
+	totals         map[string]int
+	timestamps     []time.Time
+	recentMessages []MessageWindow
+	userTexts      []string
+	line           int
 }
 
 func (p *lineParser) parseLine(raw string) {
@@ -81,8 +84,9 @@ func (p *lineParser) parseLine(raw string) {
 		return
 	}
 
-	p.parseTimestamp(obj)
+	ts, hasTimestamp := p.parseTimestamp(obj)
 	p.parseUsage(obj)
+	p.parseMessageWindow(obj, ts, hasTimestamp)
 	p.parseUserMessage(obj)
 	p.parseCwd(obj)
 }
@@ -97,17 +101,18 @@ func (p *lineParser) parseCwd(obj map[string]any) {
 	}
 }
 
-func (p *lineParser) parseTimestamp(obj map[string]any) {
+func (p *lineParser) parseTimestamp(obj map[string]any) (time.Time, bool) {
 	rawTS, ok := obj["timestamp"].(string)
 	if !ok || rawTS == "" {
-		return
+		return time.Time{}, false
 	}
 	ts, err := time.Parse(time.RFC3339Nano, strings.Replace(rawTS, "Z", "+00:00", 1))
 	if err != nil {
 		p.warn(WarningMalformedTimestamp, err.Error())
-		return
+		return time.Time{}, false
 	}
 	p.timestamps = append(p.timestamps, ts)
+	return ts, true
 }
 
 func (p *lineParser) parseUsage(obj map[string]any) {
@@ -142,15 +147,49 @@ func (p *lineParser) parseUserMessage(obj map[string]any) {
 	}
 
 	text := contentText(message["content"])
-	if text != "" {
+	if displayUserText(text) {
 		p.userTexts = append(p.userTexts, text)
 	}
+}
+
+func (p *lineParser) parseMessageWindow(obj map[string]any, ts time.Time, hasTimestamp bool) {
+	if !hasTimestamp {
+		return
+	}
+	message := mapValue(obj["message"])
+	if message == nil {
+		return
+	}
+	role, _ := message["role"].(string)
+	if role != "user" {
+		return
+	}
+	text := contentText(message["content"])
+	if !displayUserText(text) {
+		return
+	}
+	p.recentMessages = append(p.recentMessages, MessageWindow{
+		At:      ts,
+		Role:    role,
+		Excerpt: text,
+	})
+	if len(p.recentMessages) > recentMessageLimit {
+		p.recentMessages = p.recentMessages[len(p.recentMessages)-recentMessageLimit:]
+	}
+}
+
+func displayUserText(text string) bool {
+	return text != "" && !strings.HasPrefix(text, "<local-command-") && !strings.HasPrefix(text, "<command-name>")
 }
 
 func (p *lineParser) finish() {
 	sort.Slice(p.timestamps, func(i, j int) bool {
 		return p.timestamps[i].Before(p.timestamps[j])
 	})
+	sort.Slice(p.recentMessages, func(i, j int) bool {
+		return p.recentMessages[i].At.Before(p.recentMessages[j].At)
+	})
+	p.session.RecentMessages = append([]MessageWindow(nil), p.recentMessages...)
 
 	if len(p.timestamps) > 0 {
 		started := p.timestamps[0]

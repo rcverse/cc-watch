@@ -57,7 +57,7 @@ func (m Model) configView() string {
 	if m.configEditing {
 		var edit strings.Builder
 		fmt.Fprintf(&edit, "%s %s\n", styles.Render(RoleInfo, configFieldLabel(m.configEditingField)), styles.Render(RoleMuted, "is active"))
-		fmt.Fprintf(&edit, "%s  %s\n", styles.Render(RoleMuted, "Current input"), m.configInput)
+		fmt.Fprintf(&edit, "%s  %s%s\n", styles.Render(RoleMuted, "Current input"), m.configInput, styles.Render(RoleIdentity, "▌"))
 		fmt.Fprintf(&edit, "%s\n", styles.Render(RoleMuted, "↵ save field  ⎋ cancel edit"))
 		b.WriteString(m.renderConfigPanel("Editing", edit.String()))
 	}
@@ -71,12 +71,12 @@ func (m Model) configView() string {
 
 	var validation strings.Builder
 	if err := m.configEditorValidation(); err != nil {
-		fmt.Fprintf(&validation, "%s\n", styles.Render(RoleDanger, "Cannot save. "+err.Error()))
+		fmt.Fprintf(&validation, "%s\n", styles.Render(RoleDanger, "✗ Cannot save. "+err.Error()))
 	} else {
-		fmt.Fprintf(&validation, "%s\n", styles.Render(RoleSuccess, "OK"))
+		fmt.Fprintf(&validation, "%s\n", styles.Render(RoleSuccess, "✓ OK"))
 	}
 	if m.configSaveError != "" {
-		fmt.Fprintf(&validation, "%s\n", styles.Render(RoleDanger, "Save failed: "+m.configSaveError))
+		fmt.Fprintf(&validation, "%s\n", styles.Render(RoleDanger, "✗ Save failed: "+m.configSaveError))
 	}
 	if m.configResetConfirm {
 		validation.WriteString("\n")
@@ -330,10 +330,11 @@ func (m Model) cancelConfig() (tea.Model, tea.Cmd) {
 
 func configBehaviorSummary(cfg config.Config) string {
 	summary := config.EffectiveKeepAliveSummary(cfg)
+	styles := DefaultStyles()
 	var b strings.Builder
-	fmt.Fprintf(&b, "  1h cache: countdown starts at %02dm left, %s\n", summary.EffectiveTriggerSeconds1Hour/60, countdownOutcome(cfg.KeepAlive.AutoSend, summary.EffectiveCountdown1Hour, summary.AutoSendDisabledFor1Hour))
-	fmt.Fprintf(&b, "  5m cache: countdown starts at %02dm left, %s\n", summary.EffectiveTriggerSeconds5Minute/60, countdownOutcome(cfg.KeepAlive.AutoSend, summary.EffectiveCountdown5Minute, summary.AutoSendDisabledFor5Minute))
-	fmt.Fprintf(&b, "  Scope: stop after %d attempted or successful send\n", cfg.KeepAlive.Scope.MaxSends)
+	fmt.Fprintf(&b, "  %s %s left · %s\n", padANSI(styles.Render(RoleCacheTier, "1h cache"), 10), styles.Render(RoleInfo, formatStatusDuration(summary.EffectiveTriggerSeconds1Hour)), countdownOutcome(cfg.KeepAlive.AutoSend, summary.EffectiveCountdown1Hour, summary.AutoSendDisabledFor1Hour))
+	fmt.Fprintf(&b, "  %s %s left · %s\n", padANSI(styles.Render(RoleCacheTier, "5m cache"), 10), styles.Render(RoleInfo, formatStatusDuration(summary.EffectiveTriggerSeconds5Minute)), countdownOutcome(cfg.KeepAlive.AutoSend, summary.EffectiveCountdown5Minute, summary.AutoSendDisabledFor5Minute))
+	fmt.Fprintf(&b, "  %s stop after %s attempted or successful send\n", padANSI(styles.Render(RoleMuted, "Scope"), 10), styles.Render(RoleInfo, fmt.Sprintf("%d", cfg.KeepAlive.Scope.MaxSends)))
 	return b.String()
 }
 
@@ -342,16 +343,9 @@ func countdownOutcome(autoSend bool, countdown int, disabled bool) string {
 		return "manual prompt only; no auto-send"
 	}
 	if disabled {
-		return "auto-send disabled for affected sessions"
+		return DefaultStyles().Render(RoleWarning, "auto-send disabled for affected sessions")
 	}
-	return fmt.Sprintf("auto-send after %ds unless canceled", countdown)
-}
-
-func autoSendDefaultText(enabled bool) string {
-	if enabled {
-		return "[x] enabled, sends Claude message"
-	}
-	return "[ ] disabled, manual prompt only"
+	return fmt.Sprintf("auto-send after %s unless canceled", DefaultStyles().Render(RoleInfo, formatStatusDuration(countdown)))
 }
 
 func thresholdsText(thresholds []int) string {

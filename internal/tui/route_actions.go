@@ -41,6 +41,8 @@ func (m Model) activateListAction(action string) (tea.Model, tea.Cmd) {
 
 func (m Model) activateWorkspaceAction(action string) (tea.Model, tea.Cmd) {
 	switch action {
+	case "details_scroll":
+		return m, nil
 	case "reminder":
 		m.toggleReminderForSelected()
 		return m, nil
