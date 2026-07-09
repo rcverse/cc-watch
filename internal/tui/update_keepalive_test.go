@@ -16,7 +16,6 @@ func TestDisplayTickEvaluatesKeepAliveMonitoringSessions(t *testing.T) {
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 	last := now.Add(-56 * time.Minute)
 	cfg := config.Default().KeepAlive
-	cfg.AutoSend = true
 	cfg.CountdownSeconds = 30
 	model := NewModel(Options{
 		Now:             now,
@@ -31,7 +30,7 @@ func TestDisplayTickEvaluatesKeepAliveMonitoringSessions(t *testing.T) {
 			CacheWindow:   session.CacheWindow{Label: "1h", TTLSeconds: 3600, Known: true},
 		}},
 		KeepAliveStates: map[string]keepalive.SessionState{
-			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateMonitoringIdle, AutoSend: true, TriggerArmed: true, MaxSends: 1},
+			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateMonitoringIdle, TriggerArmed: true, MaxSends: 1},
 		},
 	})
 
@@ -83,15 +82,12 @@ func TestExpiredSessionDisablesExistingKeepAliveAndCannotSend(t *testing.T) {
 	expired := workspaceSession(now)
 	expired.LastMessageAt = &expiredLast
 	expired.CacheWindow = session.CacheWindow{Tier: session.Tier1Hour, Label: "1h", TTLSeconds: 3600, Known: true}
-	cfg := config.Default().KeepAlive
-	cfg.AutoSend = false
 	model := NewModel(Options{
-		Now:             now,
-		SelectedID:      expired.SessionID,
-		Sessions:        []session.Session{expired},
-		KeepAliveConfig: cfg,
+		Now:        now,
+		SelectedID: expired.SessionID,
+		Sessions:   []session.Session{expired},
 		KeepAliveStates: map[string]keepalive.SessionState{
-			expired.SessionID: {SessionID: expired.SessionID, State: keepalive.StateMonitoringIdle, AutoSend: false, MaxSends: 1},
+			expired.SessionID: {SessionID: expired.SessionID, State: keepalive.StateMonitoringIdle, MaxSends: 1},
 		},
 	})
 
@@ -104,7 +100,7 @@ func TestExpiredSessionDisablesExistingKeepAliveAndCannotSend(t *testing.T) {
 	if state := model.KeepAliveState(expired.SessionID); state.State != keepalive.StateOff {
 		t.Fatalf("expired monitoring state = %#v, want off", state)
 	}
-	if strings.Contains(model.View(), "KeepAlive · manual prompt") || strings.Contains(model.View(), "Send now") {
+	if strings.Contains(model.View(), "Send now") {
 		t.Fatalf("expired session still exposes KeepAlive send UI:\n%s", model.View())
 	}
 
@@ -113,55 +109,22 @@ func TestExpiredSessionDisablesExistingKeepAliveAndCannotSend(t *testing.T) {
 		SelectedID: expired.SessionID,
 		Sessions:   []session.Session{expired},
 		KeepAliveStates: map[string]keepalive.SessionState{
-			expired.SessionID: {SessionID: expired.SessionID, State: keepalive.StateManualReady, AutoSend: false, InstanceToken: 7, MaxSends: 1},
+			expired.SessionID: {SessionID: expired.SessionID, State: keepalive.StatePaused, InstanceToken: 7, MaxSends: 1},
 		},
 	})
-	updated, cmd = model.Update(keyRunes("s"))
+	updated, cmd = model.Update(DisplayTickMsg{Now: now.Add(time.Second)})
 	model = updated.(Model)
-	if cmd != nil || model.LastAction() == "send_keepalive_now" {
-		t.Fatalf("expired manual-ready send produced cmd=%v action=%q", cmd, model.LastAction())
+	if cmd != nil {
+		t.Fatalf("expired paused display tick produced cmd=%v, want nil", cmd)
 	}
 	if state := model.KeepAliveState(expired.SessionID); state.State != keepalive.StateOff {
-		t.Fatalf("expired manual-ready state = %#v, want off", state)
-	}
-}
-
-func TestWorkspaceAutoSendTogglePreflightsClaudeAvailability(t *testing.T) {
-	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
-	cfg := config.Default().KeepAlive
-	cfg.AutoSend = false
-	model := NewModel(Options{
-		Now:             now,
-		SelectedID:      "workspace-id",
-		Sessions:        []session.Session{workspaceSession(now)},
-		KeepAliveConfig: cfg,
-		KeepAliveStates: map[string]keepalive.SessionState{
-			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateManualReady, AutoSend: false, InstanceToken: 5, MaxSends: 1},
-		},
-		Dependencies: Dependencies{
-			CheckClaudeAvailable: func() error { return errForTest("claude command not found") },
-		},
-	})
-
-	model = moveWorkspaceFocusTo(t, model, "keepalive_autosend")
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	model = updated.(Model)
-
-	if cmd != nil {
-		t.Fatalf("auto-send toggle returned command, want nil")
-	}
-	state := model.KeepAliveState("workspace-id")
-	if state.State != keepalive.StateErrorNoClaude || state.AutoSend {
-		t.Fatalf("state = %#v, want no-claude and auto-send stopped", state)
-	}
-	if !strings.Contains(model.View(), "claude unavailable: claude command not found") {
-		t.Fatalf("view missing claude unavailable banner:\n%s", model.View())
+		t.Fatalf("expired paused state = %#v, want off", state)
 	}
 }
 
 func TestWorkspaceIgnoresStaleKeepAliveAsyncMessages(t *testing.T) {
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
-	state := keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateCountdown, AutoSend: true, InstanceToken: 41, MaxSends: 1}
+	state := keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateCountdown, InstanceToken: 41, MaxSends: 1}
 	model := NewModel(Options{
 		Now:        now,
 		SelectedID: "workspace-id",
@@ -173,8 +136,8 @@ func TestWorkspaceIgnoresStaleKeepAliveAsyncMessages(t *testing.T) {
 
 	updated, _ := model.Update(keyRunes("x"))
 	model = updated.(Model)
-	if got := model.KeepAliveState("workspace-id").State; got != keepalive.StateCancelledInstance {
-		t.Fatalf("x state = %q, want cancelled", got)
+	if got := model.KeepAliveState("workspace-id").State; got != keepalive.StateMonitoringIdle {
+		t.Fatalf("x state = %q, want monitoring idle", got)
 	}
 
 	for _, msg := range []tea.Msg{
@@ -184,8 +147,8 @@ func TestWorkspaceIgnoresStaleKeepAliveAsyncMessages(t *testing.T) {
 	} {
 		updated, _ = model.Update(msg)
 		model = updated.(Model)
-		if got := model.KeepAliveState("workspace-id").State; got != keepalive.StateCancelledInstance {
-			t.Fatalf("stale msg %#v changed state to %q, want cancelled", msg, got)
+		if got := model.KeepAliveState("workspace-id").State; got != keepalive.StateMonitoringIdle {
+			t.Fatalf("stale msg %#v changed state to %q, want monitoring idle", msg, got)
 		}
 	}
 
@@ -210,7 +173,7 @@ func TestWorkspaceKeepAliveActionsProduceRunnerAndConfirmationCommands(t *testin
 		SelectedID: "workspace-id",
 		Sessions:   []session.Session{workspaceSession(now)},
 		KeepAliveStates: map[string]keepalive.SessionState{
-			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateManualReady, AutoSend: false, InstanceToken: 21, MaxSends: 1},
+			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateCountdown, InstanceToken: 21, MaxSends: 1},
 		},
 		Dependencies: Dependencies{
 			KeepAliveRunner: runner,
@@ -247,8 +210,11 @@ func TestWorkspaceKeepAliveActionsProduceRunnerAndConfirmationCommands(t *testin
 	}
 	updated, _ = model.Update(confirmMsg)
 	model = updated.(Model)
-	if got := model.KeepAliveState("workspace-id").State; got != keepalive.StateSuccess {
-		t.Fatalf("state = %q, want success", got)
+	if got := model.KeepAliveState("workspace-id").State; got != keepalive.StateScopeComplete {
+		t.Fatalf("state = %q, want limit reached", got)
+	}
+	if !strings.Contains(model.View(), "✓ KeepAlive sent and confirmed") {
+		t.Fatalf("view missing success notice:\n%s", model.View())
 	}
 }
 
@@ -259,8 +225,7 @@ func TestWorkspaceKeepAliveRunnerUsesRuntimePolicy(t *testing.T) {
 	s := workspaceSession(now)
 	manager.SetState(keepalive.SessionState{
 		SessionID:     s.SessionID,
-		State:         keepalive.StateManualReady,
-		AutoSend:      false,
+		State:         keepalive.StateCountdown,
 		MaxSends:      1,
 		InstanceToken: 7,
 	})
@@ -335,26 +300,29 @@ func TestConfigEditorResetRequiresRepeatConfirmation(t *testing.T) {
 
 func TestConfigEditorSaveDoesNotMutateActiveKeepAliveState(t *testing.T) {
 	cfg := config.Default()
-	cfg.KeepAlive.AutoSend = false
 	model := NewModel(Options{
 		StartMode: StartConfig,
 		Config:    cfg,
 		Sessions:  []session.Session{workspaceSession(time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC))},
 		KeepAliveStates: map[string]keepalive.SessionState{
-			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateMonitoringIdle, AutoSend: false, MaxSends: 1},
+			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateMonitoringIdle, MaxSends: 1},
 		},
 		Dependencies: Dependencies{
 			SaveConfig: func(config.Config) error { return nil },
 		},
 	})
 
-	model = moveConfigFocusTo(t, model, "config_autosend")
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeySpace})
+	model = moveConfigFocusTo(t, model, "config_max_sends")
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+	updated, _ = model.Update(keyRunes("7"))
+	model = updated.(Model)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated.(Model)
 	updated, _ = model.Update(keyRunes("s"))
 	model = updated.(Model)
 
-	if state := model.KeepAliveState("workspace-id"); state.AutoSend {
+	if state := model.KeepAliveState("workspace-id"); state.MaxSends != 1 {
 		t.Fatalf("config save mutated active KeepAlive state: %#v", state)
 	}
 }

@@ -18,10 +18,8 @@ func TestDefaultConfigMatchesProductDefaults(t *testing.T) {
 			TriggerBeforeExpiryMinutes: 5,
 			CountdownSeconds:           30,
 			Message:                    `Keep-alive check. Reply "yes" only.`,
-			AutoSend:                   true,
 			Scope: ScopeConfig{
-				Mode:     "max_sends",
-				MaxSends: 1,
+				MaxSends: 5,
 			},
 		},
 	}
@@ -40,9 +38,7 @@ func TestLoadReadsConfigFromHome(t *testing.T) {
 			TriggerBeforeExpiryMinutes: 7,
 			CountdownSeconds:           45,
 			Message:                    "still there?",
-			AutoSend:                   false,
 			Scope: ScopeConfig{
-				Mode:     "max_sends",
 				MaxSends: 3,
 			},
 		},
@@ -69,7 +65,7 @@ func TestLoadMergesPartialConfigWithDefaults(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	if err := os.WriteFile(path, []byte(`{"keep_alive":{"auto_send":false}}`), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(`{"keep_alive":{"message":"custom"}}`), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
@@ -77,8 +73,8 @@ func TestLoadMergesPartialConfigWithDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
-	if result.Config.KeepAlive.AutoSend {
-		t.Fatalf("AutoSend = true, want partial config override false")
+	if result.Config.KeepAlive.Message != "custom" {
+		t.Fatalf("Message = %q, want partial config override", result.Config.KeepAlive.Message)
 	}
 	if result.Config.KeepAlive.TriggerBeforeExpiryMinutes != Default().KeepAlive.TriggerBeforeExpiryMinutes {
 		t.Fatalf("trigger = %d, want default", result.Config.KeepAlive.TriggerBeforeExpiryMinutes)
@@ -195,8 +191,8 @@ func TestValidateRejectsUnsafeValuesAndSummarizesAffectedAutosend(t *testing.T) 
 
 	cfg.KeepAlive.CountdownSeconds = 280
 	summary = EffectiveKeepAliveSummary(cfg)
-	if !summary.AutoSendDisabledFor5Minute {
-		t.Fatalf("AutoSendDisabledFor5Minute = false, want true: %#v", summary)
+	if !summary.SendPausedFor5Minute {
+		t.Fatalf("SendPausedFor5Minute = false, want true: %#v", summary)
 	}
 	if summary.Warning == "" {
 		t.Fatalf("Warning is empty, want visible warning summary")

@@ -16,8 +16,8 @@ func (e ValidationError) Error() string {
 }
 
 type KeepAliveSummary struct {
-	AutoSendDisabledFor1Hour       bool
-	AutoSendDisabledFor5Minute     bool
+	SendPausedFor1Hour             bool
+	SendPausedFor5Minute           bool
 	EffectiveCountdown1Hour        int
 	EffectiveCountdown5Minute      int
 	EffectiveTriggerSeconds1Hour   int
@@ -36,9 +36,6 @@ func Validate(cfg Config) error {
 	if cfg.KeepAlive.CountdownSeconds <= 0 {
 		messages = append(messages, "countdown_s must be positive")
 	}
-	if cfg.KeepAlive.Scope.Mode != "max_sends" {
-		messages = append(messages, "scope.mode must be max_sends")
-	}
 	if cfg.KeepAlive.Scope.MaxSends <= 0 {
 		messages = append(messages, "scope.max_sends must be positive")
 	}
@@ -54,10 +51,10 @@ func EffectiveKeepAliveSummary(cfg Config) KeepAliveSummary {
 		EffectiveTriggerSeconds1Hour:   min(trigger, 3600/5),
 		EffectiveTriggerSeconds5Minute: min(trigger, 300/5),
 	}
-	summary.EffectiveCountdown1Hour, summary.AutoSendDisabledFor1Hour = effectiveCountdown(cfg.KeepAlive.CountdownSeconds, summary.EffectiveTriggerSeconds1Hour)
-	summary.EffectiveCountdown5Minute, summary.AutoSendDisabledFor5Minute = effectiveCountdown(cfg.KeepAlive.CountdownSeconds, summary.EffectiveTriggerSeconds5Minute)
-	if cfg.KeepAlive.AutoSend && (summary.AutoSendDisabledFor1Hour || summary.AutoSendDisabledFor5Minute) {
-		summary.Warning = "auto-send will be disabled for affected sessions because countdown plus safety margin does not fit"
+	summary.EffectiveCountdown1Hour, summary.SendPausedFor1Hour = effectiveCountdown(cfg.KeepAlive.CountdownSeconds, summary.EffectiveTriggerSeconds1Hour)
+	summary.EffectiveCountdown5Minute, summary.SendPausedFor5Minute = effectiveCountdown(cfg.KeepAlive.CountdownSeconds, summary.EffectiveTriggerSeconds5Minute)
+	if summary.SendPausedFor1Hour || summary.SendPausedFor5Minute {
+		summary.Warning = "automatic sends will pause for affected sessions because countdown plus safety margin does not fit"
 	}
 	return summary
 }

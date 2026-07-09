@@ -1,8 +1,9 @@
 package tui
 
 import (
+	"time"
+
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/richardchen/cc-watch/internal/keepalive"
 )
 
 func (m Model) activateFocusedAction(action string) (tea.Model, tea.Cmd) {
@@ -48,25 +49,18 @@ func (m Model) activateWorkspaceAction(action string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "keepalive":
 		return m, m.toggleKeepAliveForSelected()
-	case "keepalive_autosend":
-		return m, m.toggleKeepAliveAutoSendForSelected()
+	case "keepalive_reset_limit":
+		if selected := m.selectedSession(); selected != nil {
+			m.keepAliveManager.ResetLimit(selected.SessionID)
+			m.lastAction = "reset_keepalive_limit"
+			m.setNotice("✓ KeepAlive limit reset", RoleSuccess, 3*time.Second)
+			m.focusIndex = m.defaultFocusIndex()
+		}
+		return m, nil
 	case "keepalive_send_now":
 		return m.sendKeepAliveNow()
 	case "keepalive_cancel", "keepalive_stop_waiting":
 		m.cancelKeepAlive()
-		return m, nil
-	case "keepalive_acknowledge":
-		if selected := m.selectedSession(); selected != nil {
-			m.keepAliveManager.Acknowledge(selected.SessionID)
-			m.lastAction = "acknowledge_keepalive"
-			m.focusIndex = m.defaultFocusIndex()
-			// Only ActionScopeComplete's state is newly notification-worthy
-			// here; a lingering (non-exhausted) error state is unchanged by
-			// Acknowledge and would otherwise re-fire its Failure notice.
-			if state := m.KeepAliveState(selected.SessionID); state.State == keepalive.StateScopeComplete {
-				return m, m.keepAliveLifecycleNotification(selected.SessionID, state)
-			}
-		}
 		return m, nil
 	case "back":
 		m.route = RouteList
@@ -81,9 +75,6 @@ func (m Model) activateConfigAction(action string) (tea.Model, tea.Cmd) {
 	switch action {
 	case "config_reminder_thresholds", "config_trigger", "config_countdown", "config_message", "config_max_sends":
 		m.startConfigEdit(action)
-		return m, nil
-	case "config_autosend":
-		m.toggleConfigAutoSend()
 		return m, nil
 	case "config_save":
 		return m.saveConfig()

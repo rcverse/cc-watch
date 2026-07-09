@@ -33,12 +33,13 @@ case "$VERSION" in
     ;;
 esac
 
-JSON_OUTPUT="$(HOME="$ROOT/internal/session/testdata/smoke-home" "$TARGET" --json)"
-case "$JSON_OUTPUT" in
-  *'"schema_version": 1'*'"sessions":'*'"error": null'*) ;;
+HELP_OUTPUT="$("$TARGET" --help)"
+case "$HELP_OUTPUT" in
+  *"Usage: cc-watch"* )
+    ;;
   *)
-    echo "installed binary JSON smoke failed" >&2
-    echo "$JSON_OUTPUT" >&2
+    echo "installed binary help smoke failed" >&2
+    echo "$HELP_OUTPUT" >&2
     exit 1
     ;;
 esac

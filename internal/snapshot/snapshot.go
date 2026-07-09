@@ -43,8 +43,6 @@ type ReminderState struct {
 
 type KeepAliveState struct {
 	Enabled  bool
-	AutoSend bool
-	Mode     string
 	MaxSends int
 	State    string
 }
@@ -222,8 +220,6 @@ func (r *Result) populateRuntime(remind bool) {
 		}
 		r.KeepAlive[s.SessionID] = KeepAliveState{
 			Enabled:  false,
-			AutoSend: r.Config.KeepAlive.AutoSend,
-			Mode:     r.Config.KeepAlive.Scope.Mode,
 			MaxSends: r.Config.KeepAlive.Scope.MaxSends,
 			State:    "off",
 		}

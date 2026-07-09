@@ -16,10 +16,9 @@ const (
 	// elapses -- deliberately smaller than safetyMarginSeconds. The countdown
 	// is tick-counted, so it always takes a beat longer than its nominal
 	// duration; if the deadline used the full 30s margin it would coincide
-	// with the countdown's own end and any drift would silently bail auto-send
-	// to a manual prompt. That gap made auto-send effectively never fire for
+	// with the countdown's own end and any drift would silently pause sends for
 	// 5-minute and unknown-tier caches. The smaller floor absorbs normal drift
-	// while still refusing to auto-send within seconds of expiry.
+	// while still refusing to send within seconds of expiry.
 	sendDeadlineMarginSeconds = 10
 )
 
@@ -29,7 +28,7 @@ type TimingDecision struct {
 	EffectiveCountdownSeconds int
 	RemainingSeconds          int
 	InsideTrigger             bool
-	AutoSendAllowed           bool
+	SendAllowed               bool
 	SafetyClamped             bool
 	UsesConservativeTTL       bool
 }
@@ -61,7 +60,7 @@ func EvaluateTiming(s session.Session, now time.Time, cfg config.KeepAliveConfig
 		EffectiveCountdownSeconds: countdown,
 		RemainingSeconds:          remaining,
 		InsideTrigger:             insideTrigger,
-		AutoSendAllowed:           !disabled,
+		SendAllowed:               !disabled,
 		SafetyClamped:             clamped,
 		UsesConservativeTTL:       conservative,
 	}

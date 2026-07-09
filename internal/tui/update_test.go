@@ -250,7 +250,6 @@ func TestAdvertisedShortcutsAreHandledForCurrentRoute(t *testing.T) {
 func TestFocusActionAlwaysHasVisibleMarker(t *testing.T) {
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 	cfg := config.Default().KeepAlive
-	cfg.AutoSend = false
 	cases := []struct {
 		name    string
 		options Options
@@ -278,7 +277,7 @@ func TestFocusActionAlwaysHasVisibleMarker(t *testing.T) {
 				Sessions:        []session.Session{workspaceSession(now)},
 				KeepAliveConfig: cfg,
 				KeepAliveStates: map[string]keepalive.SessionState{
-					"workspace-id": {SessionID: "workspace-id", State: keepalive.StateManualReady, AutoSend: false, MaxSends: 1, InstanceToken: 8},
+					"workspace-id": {SessionID: "workspace-id", State: keepalive.StatePaused, MaxSends: 1, InstanceToken: 8},
 				},
 			},
 		},
@@ -552,10 +551,9 @@ func TestListAcceleratorsToggleSelectedSession(t *testing.T) {
 	}
 }
 
-func TestDirectKeepAliveShortcutReturnsNotificationCommand(t *testing.T) {
+func TestDirectKeepAliveShortcutStartsCountdownWithoutNotification(t *testing.T) {
 	now := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
 	cfg := config.Default().KeepAlive
-	cfg.AutoSend = false
 	s := workspaceSession(now)
 	last := now.Add(-56 * time.Minute)
 	s.LastMessageAt = &last
@@ -573,18 +571,14 @@ func TestDirectKeepAliveShortcutReturnsNotificationCommand(t *testing.T) {
 	updated, cmd := model.Update(keyRunes("k"))
 	model = updated.(Model)
 
-	if cmd == nil {
-		t.Fatal("k returned nil command, want KeepAlive notification command")
-	}
-	result, ok := cmd().(NotificationResultMsg)
-	if !ok {
-		t.Fatalf("k command returned %#v, want NotificationResultMsg", result)
-	}
-	if result.Event.Kind != notify.EventKeepAliveManualPromptShown || result.Event.ShortID != "workspace" {
-		t.Fatalf("event = %#v, want manual prompt for workspace", result.Event)
+	if cmd != nil {
+		t.Fatalf("k returned command %#v, want countdown to stay TUI-only", cmd())
 	}
 	if !model.KeepAliveEnabled("workspace-id") {
 		t.Fatalf("k did not enable KeepAlive for workspace-id")
+	}
+	if got := model.KeepAliveState("workspace-id").State; got != keepalive.StateCountdown {
+		t.Fatalf("state = %q, want countdown", got)
 	}
 }
 
@@ -602,7 +596,7 @@ func TestWorkspaceFocusOrderAndFocusedActions(t *testing.T) {
 		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyDown})
 		model = updated.(Model)
 	}
-	for _, want := range []string{"reminder", "keepalive", "keepalive_autosend", "back"} {
+	for _, want := range []string{"reminder", "keepalive", "back"} {
 		if !seen[want] {
 			t.Fatalf("workspace focus action %q was not reachable; saw %#v", want, seen)
 		}
@@ -617,7 +611,6 @@ func TestWorkspaceFocusOrderAndFocusedActions(t *testing.T) {
 func TestWorkspaceEnterAndSpaceToggleFocusedControls(t *testing.T) {
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 	cfg := config.Default().KeepAlive
-	cfg.AutoSend = true
 	model := NewModel(Options{
 		Now:             now,
 		SelectedID:      "workspace-id",
@@ -648,14 +641,36 @@ func TestWorkspaceEnterAndSpaceToggleFocusedControls(t *testing.T) {
 		t.Fatalf("KeepAlive toggle moved focus to %q, want keepalive", model.FocusedAction())
 	}
 
-	model = moveWorkspaceFocusTo(t, model, "keepalive_autosend")
-	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+}
+
+func TestWorkspaceResetLimitRearmsKeepAlive(t *testing.T) {
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	model := NewModel(Options{
+		Now:        now,
+		SelectedID: "workspace-id",
+		Sessions:   []session.Session{workspaceSession(now)},
+		KeepAliveStates: map[string]keepalive.SessionState{
+			"workspace-id": {
+				SessionID: "workspace-id",
+				State:     keepalive.StateScopeComplete,
+				ScopeUsed: 5,
+				MaxSends:  5,
+			},
+		},
+	})
+	model = moveWorkspaceFocusTo(t, model, "keepalive_reset_limit")
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated.(Model)
 	if cmd != nil {
-		t.Fatalf("enter on Auto-send returned command, want nil")
+		t.Fatalf("reset limit returned command, want nil")
 	}
-	if model.KeepAliveState("workspace-id").AutoSend {
-		t.Fatalf("enter did not toggle Auto-send off for selected session")
+	got := model.KeepAliveState("workspace-id")
+	if got.State != keepalive.StateMonitoringIdle || got.ScopeUsed != 0 {
+		t.Fatalf("state = %#v, want armed zero sends", got)
+	}
+	if !strings.Contains(model.View(), "✓ KeepAlive limit reset") {
+		t.Fatalf("reset limit missing notice:\n%s", model.View())
 	}
 }
 
@@ -695,7 +710,7 @@ func TestWorkspaceActionFeedbackForUpdateAndCancelWatching(t *testing.T) {
 		t.Fatalf("workspace c still triggers Copy ID feedback/action:\n%s", model.View())
 	}
 
-	state := keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateMonitoringIdle, AutoSend: true, MaxSends: 1}
+	state := keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateMonitoringIdle, MaxSends: 1}
 	model = NewModel(Options{
 		Now:        now,
 		SelectedID: "workspace-id",
@@ -778,7 +793,7 @@ func TestExpiredWorkspaceReminderIsNAAndCannotToggle(t *testing.T) {
 	}
 }
 
-func TestWorkspaceFailureKeepsAutosendFocusableWithDisabledReason(t *testing.T) {
+func TestWorkspaceFailureOffersResetLimit(t *testing.T) {
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 	model := NewModel(Options{
 		Now:        now,
@@ -788,8 +803,8 @@ func TestWorkspaceFailureKeepsAutosendFocusableWithDisabledReason(t *testing.T) 
 			"workspace-id": {
 				SessionID:   "workspace-id",
 				State:       keepalive.StateErrorNoClaude,
-				AutoSend:    false,
 				LastFailure: "claude command not found",
+				ScopeUsed:   1,
 				MaxSends:    1,
 			},
 		},
@@ -801,15 +816,15 @@ func TestWorkspaceFailureKeepsAutosendFocusableWithDisabledReason(t *testing.T) 
 		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyDown})
 		model = updated.(Model)
 	}
-	if !seen["keepalive_autosend"] {
-		t.Fatalf("failure focus did not include disabled Auto-send setting; saw %#v", seen)
+	if !seen["keepalive_reset_limit"] {
+		t.Fatalf("failure focus did not include reset limit; saw %#v", seen)
 	}
-	if !strings.Contains(model.View(), "disabled after failure") {
-		t.Fatalf("failure view missing disabled reason:\n%s", model.View())
+	if !strings.Contains(model.View(), "Reset limit") {
+		t.Fatalf("failure view missing reset limit:\n%s", model.View())
 	}
 }
 
-func TestWorkspaceSendingAndConfirmingShowAutosendDisabledReason(t *testing.T) {
+func TestWorkspaceSendingAndConfirmingShowTransientKeepAliveStatus(t *testing.T) {
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 	for _, state := range []keepalive.State{keepalive.StateSending, keepalive.StateConfirming} {
 		model := NewModel(Options{
@@ -817,11 +832,14 @@ func TestWorkspaceSendingAndConfirmingShowAutosendDisabledReason(t *testing.T) {
 			SelectedID: "workspace-id",
 			Sessions:   []session.Session{workspaceSession(now)},
 			KeepAliveStates: map[string]keepalive.SessionState{
-				"workspace-id": {SessionID: "workspace-id", State: state, AutoSend: true, InstanceToken: 7, MaxSends: 1},
+				"workspace-id": {SessionID: "workspace-id", State: state, InstanceToken: 7, MaxSends: 1},
 			},
 		})
-		if !strings.Contains(model.View(), "disabled while") {
-			t.Fatalf("%s view missing Auto-send disabled reason:\n%s", state, model.View())
+		if !strings.Contains(model.View(), "KeepAlive · ✓ Armed") {
+			t.Fatalf("%s view missing armed chip:\n%s", state, model.View())
+		}
+		if !strings.Contains(model.View(), "Sending message now") && !strings.Contains(model.View(), "Checking for confirmation") {
+			t.Fatalf("%s view missing transient send/check text:\n%s", state, model.View())
 		}
 	}
 }
@@ -895,9 +913,8 @@ func TestWorkspaceShortcutAvailabilityAndDefaultActiveFocus(t *testing.T) {
 		sendOK bool
 		xOK    bool
 	}{
-		{name: "countdown", state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateCountdown, AutoSend: true, InstanceToken: 1, MaxSends: 1}, focus: "keepalive_send_now", sendOK: true, xOK: true},
-		{name: "manual", state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateManualReady, AutoSend: false, InstanceToken: 2, MaxSends: 1}, focus: "keepalive_send_now", sendOK: true, xOK: true},
-		{name: "confirming", state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateConfirming, AutoSend: true, InstanceToken: 3, MaxSends: 1}, focus: "keepalive_stop_waiting", sendOK: false, xOK: true},
+		{name: "countdown", state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateCountdown, InstanceToken: 1, MaxSends: 1}, focus: "keepalive_send_now", sendOK: true, xOK: true},
+		{name: "confirming", state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateConfirming, InstanceToken: 3, MaxSends: 1}, focus: "keepalive_stop_waiting", sendOK: false, xOK: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			model := NewModel(Options{

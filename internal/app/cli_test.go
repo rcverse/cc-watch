@@ -2,11 +2,8 @@ package app
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"io"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -36,7 +33,7 @@ func TestHelpExitsSuccessfully(t *testing.T) {
 			t.Fatalf("help output still advertises retired flag %q:\n%s", notWant, stdout.String())
 		}
 	}
-	for _, want := range []string{"Examples:", "cc-watch --json --id d4b247b7"} {
+	for _, want := range []string{"Examples:", "cc-watch --id d4b247b7"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("help output missing %q:\n%s", want, stdout.String())
 		}
@@ -78,72 +75,6 @@ func TestRetiredWatchFlagIsUnknown(t *testing.T) {
 	}
 	if strings.Contains(stderr.String(), "not part of cc-watch v2") {
 		t.Fatalf("stderr still treats watch as known retired mode:\n%s", stderr.String())
-	}
-}
-
-func TestJSONDispatchIsNonInteractive(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	now := time.Date(2026, 6, 3, 12, 0, 0, 0, time.UTC)
-	last := now.Add(-5 * time.Minute)
-	deps := fakeDeps(t)
-	deps.Now = func() time.Time { return now }
-	deps.DiscoverHome = func(home string, limit int) (session.DiscoveryResult, error) {
-		return session.DiscoveryResult{
-			Sessions: []session.SessionFile{{
-				SessionID: "11111111-1111-1111-1111-111111111111",
-				ShortID:   "11111111",
-				Project:   "tmp",
-				Path:      "/tmp/session.jsonl",
-				ModTime:   now,
-			}},
-		}, nil
-	}
-	deps.ParseFile = func(path string) (session.Session, error) {
-		return session.Session{
-			SessionID:      "11111111-1111-1111-1111-111111111111",
-			ShortID:        "11111111",
-			Project:        "tmp",
-			JSONLPath:      path,
-			FileModifiedAt: now,
-			LastMessageAt:  &last,
-			CacheWindow: session.CacheWindow{
-				Tier:       session.Tier1Hour,
-				Label:      "1h",
-				TTLSeconds: 3600,
-				Known:      true,
-			},
-		}, nil
-	}
-
-	code := RunWithDeps([]string{"--json", "--id", "11111111", "--n", "3"}, &stdout, &stderr, deps.Dependencies)
-
-	if code != 0 {
-		t.Fatalf("Run(--json) exit code = %d, want 0; stderr:\n%s", code, stderr.String())
-	}
-	if stderr.Len() != 0 {
-		t.Fatalf("stderr = %q, want empty", stderr.String())
-	}
-	if deps.tuiStarts != 0 {
-		t.Fatalf("interactive side effects: tui=%d", deps.tuiStarts)
-	}
-	var doc map[string]any
-	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
-		t.Fatalf("stdout is not JSON: %v\n%s", err, stdout.String())
-	}
-	if doc["schema_version"] != float64(1) {
-		t.Fatalf("schema_version = %#v, want 1", doc["schema_version"])
-	}
-	if doc["selected_session"] == nil {
-		t.Fatalf("selected_session = nil, want selected session JSON:\n%s", stdout.String())
-	}
-	selected := doc["selected_session"].(map[string]any)
-	reminder := selected["reminder"].(map[string]any)
-	if reminder["available"] != true || reminder["enabled"] != false {
-		t.Fatalf("reminder state = %#v, want available and disabled by default", reminder)
-	}
-	keepAlive := selected["keep_alive"].(map[string]any)
-	if keepAlive["available"] != true || keepAlive["enabled"] != false || keepAlive["auto_send"] != true || keepAlive["state"] != "off" {
-		t.Fatalf("keep_alive state = %#v, want available off state with default auto-send", keepAlive)
 	}
 }
 
@@ -427,12 +358,9 @@ func TestTUIStartupWithRemindEnablesLoadedSessionRemindersOnly(t *testing.T) {
 	if !options.ReminderEnabled["reminded-id"] {
 		t.Fatalf("reminder map = %#v, want loaded session enabled", options.ReminderEnabled)
 	}
-	if len(options.KeepAliveEnabled) != 0 {
-		t.Fatalf("KeepAlive enabled map = %#v, want --remind to leave KeepAlive off", options.KeepAliveEnabled)
-	}
 }
 
-func TestJSONAndTUIUseSameSelectedDiscoverySemantics(t *testing.T) {
+func TestTUISelectedDispatchPreservesID(t *testing.T) {
 	deps := testDepsWithTwoSessions(t)
 	var tuiCommand Command
 	deps.StartTUI = func(cmd Command) error {
@@ -445,19 +373,6 @@ func TestJSONAndTUIUseSameSelectedDiscoverySemantics(t *testing.T) {
 	}
 	if tuiCommand.ID != "2222" {
 		t.Fatalf("TUI command ID = %q, want 2222", tuiCommand.ID)
-	}
-
-	var stdout bytes.Buffer
-	if code := RunWithDeps([]string{"--json", "--id", "2222"}, &stdout, io.Discard, deps.Dependencies); code != 0 {
-		t.Fatalf("JSON selected run exit = %d, want 0; output=%s", code, stdout.String())
-	}
-	var doc map[string]any
-	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
-		t.Fatalf("json unmarshal: %v", err)
-	}
-	selected := doc["selected_session"].(map[string]any)
-	if selected["session_id"] != "22222222-2222-2222-2222-222222222222" {
-		t.Fatalf("selected session id = %v", selected["session_id"])
 	}
 }
 
@@ -801,8 +716,8 @@ func TestConfigEditorStartupLoadsAndSavesConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config load after save: %v", err)
 	}
-	if !loaded.Config.KeepAlive.AutoSend {
-		t.Fatalf("saved config did not preserve default auto-send on: %#v", loaded.Config)
+	if loaded.Config.KeepAlive.Scope.MaxSends != config.Default().KeepAlive.Scope.MaxSends {
+		t.Fatalf("saved config changed max sends: %#v", loaded.Config)
 	}
 }
 
@@ -902,160 +817,6 @@ func TestParseStatuslineArgsGrammar(t *testing.T) {
 				t.Fatalf("cmd = %#v, want %#v", cmd, tt.want)
 			}
 		})
-	}
-}
-
-func TestJSONNoMatchReturnsContractError(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	deps := fakeDeps(t)
-	deps.DiscoverHome = func(home string, limit int) (session.DiscoveryResult, error) {
-		return session.DiscoveryResult{
-			Sessions: []session.SessionFile{{
-				SessionID: "11111111-1111-1111-1111-111111111111",
-				ShortID:   "11111111",
-				Project:   "tmp",
-				Path:      "/tmp/session.jsonl",
-			}},
-		}, nil
-	}
-
-	code := RunWithDeps([]string{"--json", "--id", "zzz"}, &stdout, &stderr, deps.Dependencies)
-
-	if code == 0 {
-		t.Fatal("Run(--json --id zzz) exit code = 0, want non-zero")
-	}
-	if stderr.Len() != 0 {
-		t.Fatalf("stderr = %q, want empty", stderr.String())
-	}
-	var doc map[string]any
-	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
-		t.Fatalf("stdout is not JSON: %v\n%s", err, stdout.String())
-	}
-	errObj := doc["error"].(map[string]any)
-	if errObj["code"] != "session_not_found" {
-		t.Fatalf("error code = %#v, want session_not_found", errObj["code"])
-	}
-}
-
-func TestJSONAmbiguousIDReturnsCandidates(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	deps := fakeDeps(t)
-	deps.DiscoverHome = func(home string, limit int) (session.DiscoveryResult, error) {
-		return session.DiscoveryResult{
-			Sessions: []session.SessionFile{
-				{SessionID: "11111111-0000-0000-0000-000000000000", ShortID: "11111111", Project: "one"},
-				{SessionID: "11112222-0000-0000-0000-000000000000", ShortID: "11112222", Project: "two"},
-			},
-		}, nil
-	}
-
-	code := RunWithDeps([]string{"--json", "--id", "1111"}, &stdout, &stderr, deps.Dependencies)
-
-	if code == 0 {
-		t.Fatal("Run ambiguous JSON query exit code = 0, want non-zero")
-	}
-	var doc map[string]any
-	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
-		t.Fatalf("stdout is not JSON: %v\n%s", err, stdout.String())
-	}
-	if doc["error"].(map[string]any)["code"] != "ambiguous_session_id" {
-		t.Fatalf("error = %#v", doc["error"])
-	}
-	if len(doc["sessions"].([]any)) != 2 {
-		t.Fatalf("sessions = %#v, want 2 candidates", doc["sessions"])
-	}
-	candidate := doc["sessions"].([]any)[0].(map[string]any)
-	if _, ok := candidate["cache_window"]; ok {
-		t.Fatalf("ambiguous candidate contains full session fields: %#v", candidate)
-	}
-}
-
-func TestJSONIDResolutionIgnoresListLimit(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	deps := fakeDeps(t)
-	now := time.Date(2026, 6, 3, 12, 0, 0, 0, time.UTC)
-	deps.DiscoverHome = func(home string, limit int) (session.DiscoveryResult, error) {
-		if limit != 0 {
-			t.Fatalf("DiscoverHome limit = %d, want 0 for ID resolution", limit)
-		}
-		return session.DiscoveryResult{
-			Sessions: []session.SessionFile{
-				{SessionID: "newer", ShortID: "newer", Project: "new", Path: "/tmp/newer.jsonl", ModTime: now},
-				{SessionID: "older", ShortID: "older", Project: "old", Path: "/tmp/older.jsonl", ModTime: now.Add(-time.Hour)},
-			},
-		}, nil
-	}
-	deps.ParseFile = func(path string) (session.Session, error) {
-		if path != "/tmp/older.jsonl" {
-			t.Fatalf("ParseFile path = %q, want older session", path)
-		}
-		return session.Session{
-			SessionID:      "older",
-			ShortID:        "older",
-			Project:        "old",
-			JSONLPath:      path,
-			FileModifiedAt: now,
-		}, nil
-	}
-
-	code := RunWithDeps([]string{"--json", "--id", "older", "--n", "1"}, &stdout, &stderr, deps.Dependencies)
-
-	if code != 0 {
-		t.Fatalf("Run exit code = %d, want 0; stderr=%q stdout=%s", code, stderr.String(), stdout.String())
-	}
-}
-
-func TestJSONHomeErrorUsesContractShape(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	deps := fakeDeps(t)
-	deps.HomeDir = func() (string, error) { return "", errors.New("home unavailable") }
-
-	code := RunWithDeps([]string{"--json"}, &stdout, &stderr, deps.Dependencies)
-
-	if code == 0 {
-		t.Fatal("Run exit code = 0, want non-zero")
-	}
-	if stderr.Len() != 0 {
-		t.Fatalf("stderr = %q, want empty", stderr.String())
-	}
-	var doc map[string]any
-	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
-		t.Fatalf("stdout is not JSON: %v\n%s", err, stdout.String())
-	}
-	if doc["error"].(map[string]any)["code"] != "config_error" {
-		t.Fatalf("error = %#v, want config_error", doc["error"])
-	}
-}
-
-func TestJSONInvalidConfigWarningIsVisible(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	home := t.TempDir()
-	configPath := filepath.Join(home, ".config", "cc-watch", "config.json")
-	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	if err := os.WriteFile(configPath, []byte("{bad-json"), 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-	deps := fakeDeps(t)
-	deps.HomeDir = func() (string, error) { return home, nil }
-	deps.ParseFile = func(path string) (session.Session, error) {
-		t.Fatalf("ParseFile called unexpectedly with %q", path)
-		return session.Session{}, nil
-	}
-
-	code := RunWithDeps([]string{"--json"}, &stdout, &stderr, deps.Dependencies)
-
-	if code != 0 {
-		t.Fatalf("Run exit code = %d, want 0; stderr=%q stdout=%s", code, stderr.String(), stdout.String())
-	}
-	var doc map[string]any
-	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
-		t.Fatalf("stdout is not JSON: %v\n%s", err, stdout.String())
-	}
-	warnings := doc["config"].(map[string]any)["warnings"].([]any)
-	if len(warnings) != 1 {
-		t.Fatalf("config warnings = %#v, want one warning", warnings)
 	}
 }
 

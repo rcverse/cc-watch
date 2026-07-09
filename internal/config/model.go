@@ -9,13 +9,11 @@ type KeepAliveConfig struct {
 	TriggerBeforeExpiryMinutes int         `json:"trigger_before_expiry_m"`
 	CountdownSeconds           int         `json:"countdown_s"`
 	Message                    string      `json:"message"`
-	AutoSend                   bool        `json:"auto_send"`
 	Scope                      ScopeConfig `json:"scope"`
 }
 
 type ScopeConfig struct {
-	Mode     string `json:"mode"`
-	MaxSends int    `json:"max_sends"`
+	MaxSends int `json:"max_sends"`
 }
 
 func Default() Config {
@@ -25,10 +23,8 @@ func Default() Config {
 			TriggerBeforeExpiryMinutes: 5,
 			CountdownSeconds:           30,
 			Message:                    `Keep-alive check. Reply "yes" only.`,
-			AutoSend:                   true,
 			Scope: ScopeConfig{
-				Mode:     "max_sends",
-				MaxSends: 1,
+				MaxSends: 5,
 			},
 		},
 	}

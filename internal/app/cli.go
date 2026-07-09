@@ -16,7 +16,6 @@ const (
 	ModeTUI        Mode = "tui"
 	ModeHelp       Mode = "help"
 	ModeVersion    Mode = "version"
-	ModeJSON       Mode = "json"
 	ModeConfig     Mode = "config"
 	ModeStatusline Mode = "statusline"
 )
@@ -27,7 +26,6 @@ type Command struct {
 	Mode           Mode
 	Limit          int
 	ID             string
-	JSON           bool
 	Remind         bool
 	WrappedCommand []string
 	CheckConfig    bool
@@ -80,7 +78,6 @@ func ParseArgs(args []string) (Command, error) {
 	fs.BoolVar(&version, "version", false, "show version")
 	fs.IntVar(&cmd.Limit, "n", cmd.Limit, "number of recent sessions")
 	fs.StringVar(&cmd.ID, "id", "", "session id")
-	fs.BoolVar(&cmd.JSON, "json", false, "machine-readable JSON")
 	fs.BoolVar(&cmd.Remind, "remind", false, "enable reminders")
 
 	if err := fs.Parse(args); err != nil {
@@ -104,15 +101,11 @@ func ParseArgs(args []string) (Command, error) {
 	if cmd.Limit < 1 {
 		return cmd, fmt.Errorf("--n must be positive, got %s", strconv.Itoa(cmd.Limit))
 	}
-	if cmd.JSON {
-		cmd.Mode = ModeJSON
-	}
-
 	return cmd, nil
 }
 
 func WriteHelp(w io.Writer) {
-	fmt.Fprint(w, `Usage: cc-watch [--n N] [--id <partial-id>] [--json] [--remind]
+	fmt.Fprint(w, `Usage: cc-watch [--n N] [--id <partial-id>] [--remind]
        cc-watch config
        cc-watch statusline
        cc-watch statusline -- <command> [args...]
@@ -122,8 +115,7 @@ func WriteHelp(w io.Writer) {
 
 Options:
   --n N              load N recent sessions for the List View
-  --id <partial-id> open or output one session
-  --json            machine-readable JSON, then exit
+  --id <partial-id> open one session
   --remind          start TUI with reminders enabled
   --help, -h        show help
   --version         show version
@@ -139,7 +131,6 @@ Examples:
   cc-watch
   cc-watch --n 10
   cc-watch --id d4b247b7
-  cc-watch --json --id d4b247b7
   cc-watch config
   cc-watch statusline --check
 `)

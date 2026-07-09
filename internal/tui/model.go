@@ -90,7 +90,6 @@ type Options struct {
 	Countdowns         map[string]int
 	ReminderEnabled    map[string]bool
 	ReminderThresholds []int
-	KeepAliveEnabled   map[string]bool
 	KeepAliveConfig    config.KeepAliveConfig
 	KeepAliveManager   *keepalive.Manager
 	KeepAliveStates    map[string]keepalive.SessionState
@@ -118,7 +117,6 @@ type Model struct {
 	reminderEnabled      map[string]bool
 	reminderThresholds   []int
 	reminderFired        map[string]map[int]bool
-	keepAliveEnabled     map[string]bool
 	keepAliveConfig      config.KeepAliveConfig
 	keepAliveManager     *keepalive.Manager
 	refreshGeneration    int
@@ -151,7 +149,6 @@ type Model struct {
 	configInputFresh     bool
 	configFieldErrors    map[string]string
 	configResetConfirm   bool
-	configSaveError      string
 }
 
 type focusItem struct {
@@ -174,7 +171,6 @@ func NewModel(options Options) Model {
 	if len(thresholds) == 0 {
 		thresholds = []int{20, 10}
 	}
-	keepAlives := cloneBoolMap(options.KeepAliveEnabled)
 	keepAliveConfig := normalizeKeepAliveConfig(options.KeepAliveConfig)
 	configDraft := normalizeConfig(options.Config)
 	keepAliveManager := options.KeepAliveManager
@@ -193,11 +189,6 @@ func NewModel(options Options) Model {
 	selectedIndex := selectedIndexFor(sessions, options.SelectedID)
 	for _, state := range options.KeepAliveStates {
 		keepAliveManager.SetState(state)
-	}
-	for _, s := range sessions {
-		if keepAlives[s.SessionID] && s.StatusAt(now).State != session.StatusExpired && keepAliveManager.State(s.SessionID).State == keepalive.StateOff {
-			keepAliveManager.Enable(s, now)
-		}
 	}
 	refreshTiming := options.RefreshTiming
 	if refreshTiming.Debounce <= 0 {
@@ -223,7 +214,6 @@ func NewModel(options Options) Model {
 		reminderEnabled:    reminders,
 		reminderThresholds: thresholds,
 		reminderFired:      map[string]map[int]bool{},
-		keepAliveEnabled:   keepAlives,
 		keepAliveConfig:    keepAliveConfig,
 		keepAliveManager:   keepAliveManager,
 		refreshGeneration:  options.RefreshGeneration,
@@ -326,9 +316,6 @@ func (m Model) ReminderEnabled(sessionID string) bool {
 }
 
 func (m Model) KeepAliveEnabled(sessionID string) bool {
-	if m.keepAliveEnabled[sessionID] {
-		return true
-	}
 	state := m.KeepAliveState(sessionID)
 	return state.State != "" && state.State != keepalive.StateOff
 }
@@ -365,7 +352,7 @@ func defaultRefresh(state RefreshViewState) RefreshViewState {
 
 func normalizeKeepAliveConfig(cfg config.KeepAliveConfig) config.KeepAliveConfig {
 	defaults := config.Default().KeepAlive
-	if cfg.TriggerBeforeExpiryMinutes == 0 && cfg.CountdownSeconds == 0 && cfg.Message == "" && cfg.Scope.Mode == "" && cfg.Scope.MaxSends == 0 {
+	if cfg.TriggerBeforeExpiryMinutes == 0 && cfg.CountdownSeconds == 0 && cfg.Message == "" && cfg.Scope.MaxSends == 0 {
 		return defaults
 	}
 	if cfg.TriggerBeforeExpiryMinutes <= 0 {
@@ -377,9 +364,6 @@ func normalizeKeepAliveConfig(cfg config.KeepAliveConfig) config.KeepAliveConfig
 	if cfg.Message == "" {
 		cfg.Message = defaults.Message
 	}
-	if cfg.Scope.Mode == "" {
-		cfg.Scope.Mode = defaults.Scope.Mode
-	}
 	if cfg.Scope.MaxSends <= 0 {
 		cfg.Scope.MaxSends = defaults.Scope.MaxSends
 	}
@@ -388,7 +372,7 @@ func normalizeKeepAliveConfig(cfg config.KeepAliveConfig) config.KeepAliveConfig
 
 func normalizeConfig(cfg config.Config) config.Config {
 	defaults := config.Default()
-	if len(cfg.ReminderThresholds) == 0 && cfg.KeepAlive.TriggerBeforeExpiryMinutes == 0 && cfg.KeepAlive.CountdownSeconds == 0 && cfg.KeepAlive.Message == "" && cfg.KeepAlive.Scope.Mode == "" && cfg.KeepAlive.Scope.MaxSends == 0 {
+	if len(cfg.ReminderThresholds) == 0 && cfg.KeepAlive.TriggerBeforeExpiryMinutes == 0 && cfg.KeepAlive.CountdownSeconds == 0 && cfg.KeepAlive.Message == "" && cfg.KeepAlive.Scope.MaxSends == 0 {
 		return defaults
 	}
 	if len(cfg.ReminderThresholds) == 0 {

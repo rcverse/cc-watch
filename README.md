@@ -18,7 +18,8 @@ tells you the truth about them.
 - **Reminds you** before a cache window expires, via a local notification.
   It's an alarm. It never sends anything on your behalf.
 - **Keeps a session alive**, if you opt in — a visible, cancellable,
-  bounded workflow that can nudge a session before it goes cold.
+  bounded workflow that can nudge a session before it goes cold, then stop
+  at a send limit.
 
 That's it. Three jobs, done well, in a TUI that opens in milliseconds.
 
@@ -49,7 +50,6 @@ cc-watch --id d4b247b7     # jump straight into one session (partial IDs OK)
 cc-watch --n 10            # load 10 recent sessions instead of the default 25
 cc-watch --remind          # start with Reminder switched on
 cc-watch config            # edit your defaults
-cc-watch --json            # one machine-readable snapshot, then exit
 ```
 
 There's no `--watch` flag, on purpose — the TUI already refreshes itself
@@ -82,13 +82,14 @@ predictable rather than clever:
 
 - Arms only in the final few minutes before a cache expires.
 - Shows a countdown before it does anything — you can send now, cancel, or
-  let it run.
+  let it run automatically.
 - Sends by running `claude -r <session-id> -p "<your message>"` from that
   session's own project directory (`claude --resume` is scoped to it), then
   confirms success by watching that session's own JSONL for new evidence. No
   evidence, no success claimed.
-- Capped at a configured number of sends per session, and turns itself off
-  after a failure instead of retrying forever.
+- Stops at a configured send limit per session. When the limit is reached,
+  the TUI shows that state and waits for you to reset it.
+- Pauses after a failure instead of retrying forever.
 
 Keep the KeepAlive message short — you're trying to hold a cache window
 open, not start a philosophical detour.
@@ -111,8 +112,7 @@ Lives at `~/.config/cc-watch/config.json`. Edit it by hand or run
     "trigger_before_expiry_m": 5,
     "countdown_s": 30,
     "message": "Keep-alive check. Reply \"yes\" only.",
-    "auto_send": true,
-    "scope": { "mode": "max_sends", "max_sends": 1 }
+    "scope": { "max_sends": 5 }
   }
 }
 ```
@@ -121,16 +121,9 @@ Lives at `~/.config/cc-watch/config.json`. Edit it by hand or run
 |---|---|
 | `reminder_thresholds` | Percent-remaining points that trigger a Reminder notification. |
 | `keep_alive.trigger_before_expiry_m` | Minutes before expiry when KeepAlive may arm. |
-| `keep_alive.countdown_s` | Visible countdown before Auto-send fires. |
+| `keep_alive.countdown_s` | Visible countdown before the KeepAlive message sends. |
 | `keep_alive.message` | The message sent through `claude -r ... -p ...`. |
-| `keep_alive.auto_send` | If `false`, KeepAlive only ever prompts you manually. |
-| `keep_alive.scope.max_sends` | Max KeepAlive sends allowed per session. |
-
-## JSON output
-
-`cc-watch --json` prints one snapshot (schema-versioned) and exits — no TUI,
-no notifications, no KeepAlive automation. Point it at a script, a status
-bar, or a dashboard, if you must have one of those.
+| `keep_alive.scope.max_sends` | KeepAlive send limit for one session. |
 
 ## statusline
 
@@ -173,8 +166,9 @@ color.
 
 - Reads `~/.claude/projects/**/*.jsonl`. Never writes to them.
 - Writes only its own config at `~/.config/cc-watch/config.json` and its
-  own rate-limit history at `~/.config/cc-watch/ratelimit.json` (used by
-  `cc-watch statusline`; self-healing, no delete command needed).
+  own logs/state under `~/.config/cc-watch/`: `keepalive.log` for
+  KeepAlive sends and `ratelimit.json` for `cc-watch statusline`
+  (self-healing, no delete command needed).
 - Notifies through macOS `osascript`. Nothing leaves your machine.
 - Only runs `claude` locally, and only as part of a KeepAlive send you
   configured. `cc-watch statusline` may also run one subprocess: your own
@@ -194,12 +188,19 @@ tabs. It runs when you run it, and does nothing when you don't.
 
 ```bash
 go test ./...
+go test -tags demo ./...
 scripts/test-install.sh
 go run ./cmd/cc-watch
+go run -tags demo ./tools/ui-demo
 ```
 
 Use fixture homes for tests. Don't run a real KeepAlive send as part of
 verification — that's the one rule that actually matters here.
+
+`tools/ui-demo` is a build-tagged fixture harness for rare UI states such as
+near-expiry and send-limit flows. It uses the real TUI renderer and state
+machine with fake sessions, fake time, fake notifications, and a fake
+KeepAlive runner. It is not part of the installed command.
 
 ## License
 

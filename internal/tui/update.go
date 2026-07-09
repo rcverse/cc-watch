@@ -112,13 +112,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyNotificationResult(typed)
 		return m, nil
 	case KeepAliveCountdownElapsedMsg:
-		if !m.keepAliveAsyncCurrent(typed.SessionID, typed.InstanceToken, typed.Generation, typed.SelectedID) {
+		if !m.keepAliveAsyncCurrent(typed.SessionID, typed.InstanceToken, typed.SelectedID) {
 			m.lastAction = ErrKeepAliveStaleMessage.Error()
 			return m, nil
 		}
 		return m.withKeepAliveActions(m.keepAliveManager.CountdownElapsed(typed.SessionID, typed.InstanceToken, typed.Now))
 	case KeepAliveRunnerResultMsg:
-		if !m.keepAliveAsyncCurrent(typed.SessionID, typed.InstanceToken, typed.Generation, typed.SelectedID) {
+		if !m.keepAliveAsyncCurrent(typed.SessionID, typed.InstanceToken, typed.SelectedID) {
 			m.lastAction = ErrKeepAliveStaleMessage.Error()
 			return m, nil
 		}
@@ -128,7 +128,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.keepAliveLifecycleNotification(typed.SessionID, state)
 	case KeepAliveConfirmationResultMsg:
-		if !m.keepAliveAsyncCurrent(typed.SessionID, typed.InstanceToken, typed.Generation, typed.SelectedID) {
+		if !m.keepAliveAsyncCurrent(typed.SessionID, typed.InstanceToken, typed.SelectedID) {
 			m.lastAction = ErrKeepAliveStaleMessage.Error()
 			return m, nil
 		}
@@ -142,10 +142,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.keepAliveManager.MarkSuccess(typed.SessionID, typed.InstanceToken)
 		state := m.KeepAliveState(typed.SessionID)
-		if state.State == keepalive.StateSuccess {
-			m.lastAction = "keepalive_confirmed"
+		m.lastAction = "keepalive_confirmed"
+		m.setNotice("✓ KeepAlive sent and confirmed", RoleSuccess, 3*time.Second)
+		commands := []tea.Cmd{
+			m.keepAliveSuccessNotification(typed.SessionID),
 		}
-		return m, m.keepAliveLifecycleNotification(typed.SessionID, state)
+		if state.State == keepalive.StateScopeComplete {
+			commands = append(commands, m.keepAliveLifecycleNotification(typed.SessionID, state))
+		}
+		return m, tea.Batch(commands...)
 	case ManualRefreshMsg:
 		m.refresh.NotificationDegraded = ""
 		if m.deps.ResetNotificationSuppression != nil {
@@ -342,7 +347,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		return m.activateFocused()
 	case " ":
-		if m.FocusedAction() == "reminder" || m.FocusedAction() == "keepalive" || m.FocusedAction() == "keepalive_autosend" || m.FocusedAction() == "config_autosend" {
+		if m.FocusedAction() == "reminder" || m.FocusedAction() == "keepalive" {
 			return m.activateFocused()
 		}
 		return m, nil
@@ -435,11 +440,6 @@ func (m *Model) applyKeepAliveActions(actions []keepalive.Action, commands *[]te
 		switch action.Kind {
 		case keepalive.ActionCountdownStarted:
 			m.countdowns[action.SessionID] = action.CountdownSeconds
-		case keepalive.ActionManualPromptShown:
-			m.lastAction = "keepalive_manual_prompt"
-			if cmd := m.keepAliveLifecycleNotification(action.SessionID, m.KeepAliveState(action.SessionID)); cmd != nil {
-				*commands = append(*commands, cmd)
-			}
 		case keepalive.ActionStartRunner:
 			m.lastAction = "keepalive_runner_ready"
 			*commands = append(*commands, m.keepAliveRunnerCommand(action))
@@ -473,10 +473,6 @@ func (m Model) keepAliveLifecycleNotification(sessionID string, state keepalive.
 
 func keepAliveNotifyEvent(sessionID string, state keepalive.SessionState) (notify.Event, bool) {
 	switch state.State {
-	case keepalive.StateManualReady:
-		return notify.Event{Kind: notify.EventKeepAliveManualPromptShown, SessionID: sessionID}, true
-	case keepalive.StateSuccess:
-		return notify.Event{Kind: notify.EventKeepAliveSuccess, SessionID: sessionID}, true
 	case keepalive.StateErrorNoClaude, keepalive.StateErrorSubprocess, keepalive.StateErrorTimeout:
 		return notify.Event{Kind: notify.EventKeepAliveFailure, SessionID: sessionID, Reason: state.LastFailure, RateLimited: state.RateLimited}, true
 	case keepalive.StateScopeComplete:
@@ -486,33 +482,16 @@ func keepAliveNotifyEvent(sessionID string, state keepalive.SessionState) (notif
 	}
 }
 
-func (m *Model) toggleKeepAliveAutoSendForSelected() tea.Cmd {
-	selected := m.selectedSession()
-	if selected == nil {
+func (m Model) keepAliveSuccessNotification(sessionID string) tea.Cmd {
+	if m.deps.NotifyEvent == nil {
 		return nil
 	}
-	if reason := m.keepAliveUnavailableReason(*selected); reason != "" {
-		m.disableKeepAlive(selected.SessionID)
-		m.lastAction = "keepalive_unavailable_expired"
-		m.setNotice("KeepAlive N/A "+reason, RoleMuted, 3*time.Second)
-		return nil
+	event := notify.Event{Kind: notify.EventKeepAliveSuccess, SessionID: sessionID}
+	if selected, found := findSessionByID(m.sessions, sessionID); found {
+		event.ShortID = selected.ShortID
+		event.Project = selected.Project
 	}
-	state := m.KeepAliveState(selected.SessionID)
-	if state.State == keepalive.StateSending || state.State == keepalive.StateConfirming || isKeepAliveFailure(state.State) {
-		m.lastAction = "keepalive_autosend_disabled"
-		return nil
-	}
-	next := !state.AutoSend
-	m.keepAliveManager.SetAutoSend(selected.SessionID, next)
-	m.lastAction = "toggle_keepalive_autosend"
-	if next && m.deps.CheckClaudeAvailable != nil {
-		if err := m.deps.CheckClaudeAvailable(); err != nil {
-			m.keepAliveManager.MarkNoClaude(selected.SessionID, state.InstanceToken, err.Error())
-			m.refresh.ClaudeUnavailableMessage = err.Error()
-			return m.keepAliveLifecycleNotification(selected.SessionID, m.KeepAliveState(selected.SessionID))
-		}
-	}
-	return nil
+	return m.notificationCommand(event)
 }
 
 func (m Model) sendKeepAliveNow() (tea.Model, tea.Cmd) {
@@ -541,7 +520,7 @@ func (m *Model) cancelKeepAlive() {
 		return
 	}
 	state := m.KeepAliveState(selected.SessionID)
-	if state.State == keepalive.StateMonitoringIdle || state.State == keepalive.StateCancelledInstance {
+	if state.State == keepalive.StateMonitoringIdle {
 		m.disableKeepAlive(selected.SessionID)
 	} else {
 		m.keepAliveManager.Cancel(selected.SessionID, state.InstanceToken)
@@ -567,7 +546,6 @@ func (m *Model) disableKeepAlive(sessionID string) {
 	if m.keepAliveManager != nil {
 		m.keepAliveManager.Disable(sessionID)
 	}
-	m.keepAliveEnabled[sessionID] = false
 	delete(m.countdowns, sessionID)
 }
 
@@ -585,10 +563,7 @@ func isKeepAliveFailure(state keepalive.State) bool {
 	return state == keepalive.StateErrorNoClaude || state == keepalive.StateErrorSubprocess || state == keepalive.StateErrorTimeout
 }
 
-func (m Model) keepAliveAsyncCurrent(sessionID string, token int64, generation int, selectedID string) bool {
-	if generation != m.refreshGeneration {
-		return false
-	}
+func (m Model) keepAliveAsyncCurrent(sessionID string, token int64, selectedID string) bool {
 	if selectedID != "" && selectedID != m.SelectedSessionID() {
 		return false
 	}
@@ -602,7 +577,6 @@ func (m Model) keepAliveRunnerCommand(action keepalive.Action) tea.Cmd {
 		return nil
 	}
 	runner := m.deps.KeepAliveRunner
-	generation := m.refreshGeneration
 	selectedID := m.SelectedSessionID()
 	action.Dir = selected.Cwd
 	target := keepalive.NewConfirmationTarget(selected.JSONLPath, time.Time{})
@@ -622,7 +596,6 @@ func (m Model) keepAliveRunnerCommand(action keepalive.Action) tea.Cmd {
 			Reason:             keepAliveFailureReason(result),
 			Action:             action,
 			Execution:          execution,
-			Generation:         generation,
 			SelectedID:         selectedID,
 			ConfirmationTarget: target,
 		}
@@ -631,7 +604,6 @@ func (m Model) keepAliveRunnerCommand(action keepalive.Action) tea.Cmd {
 
 func (m Model) keepAliveConfirmationCommand(msg KeepAliveRunnerResultMsg) tea.Cmd {
 	confirm := m.deps.ConfirmKeepAlive
-	generation := msg.Generation
 	selectedID := msg.SelectedID
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), keepalive.ConfirmationTimeout)
@@ -644,7 +616,7 @@ func (m Model) keepAliveConfirmationCommand(msg KeepAliveRunnerResultMsg) tea.Cm
 			result, err = keepalive.WaitForConfirmation(ctx, msg.ConfirmationTarget.Check)
 		}
 		keepalive.LogConfirm(msg.SessionID, msg.InstanceToken, msg.ConfirmationTarget, result, err)
-		return KeepAliveConfirmationResultMsg{SessionID: msg.SessionID, InstanceToken: msg.InstanceToken, ConfirmedAt: result.ConfirmedAt, Err: err, Generation: generation, SelectedID: selectedID}
+		return KeepAliveConfirmationResultMsg{SessionID: msg.SessionID, InstanceToken: msg.InstanceToken, ConfirmedAt: result.ConfirmedAt, Err: err, SelectedID: selectedID}
 	}
 }
 

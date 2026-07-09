@@ -453,15 +453,10 @@ func (m Model) workspaceControlActions(s session.Session) []workspaceControlActi
 				workspaceControlAction{id: "keepalive_send_now", label: "Send now", detail: "send KeepAlive message now"},
 				workspaceControlAction{id: "keepalive_cancel", label: "Dismiss", detail: "cancel this countdown"},
 			)
-		case keepalive.StateManualReady:
-			actions = append(actions,
-				workspaceControlAction{id: "keepalive_send_now", label: "Send now", detail: "send KeepAlive message now"},
-				workspaceControlAction{id: "keepalive_cancel", label: "Dismiss", detail: "close this prompt"},
-			)
-		case keepalive.StateSending, keepalive.StateConfirming:
-			actions = append(actions, workspaceControlAction{id: "keepalive_stop_waiting", label: "Stop waiting", detail: "cancel confirmation wait"})
-		case keepalive.StateSuccess, keepalive.StateErrorNoClaude, keepalive.StateErrorSubprocess, keepalive.StateErrorTimeout, keepalive.StateScopeComplete:
-			actions = append(actions, workspaceControlAction{id: "keepalive_acknowledge", label: "Acknowledge", detail: "clear KeepAlive status"})
+		case keepalive.StateSending:
+			actions = append(actions, workspaceControlAction{id: "keepalive_stop_waiting", label: "Stop waiting", detail: "ignore current send result"})
+		case keepalive.StateConfirming:
+			actions = append(actions, workspaceControlAction{id: "keepalive_stop_waiting", label: "Stop check", detail: "stop watching JSONL confirmation"})
 		}
 	}
 
@@ -478,18 +473,18 @@ func (m Model) workspaceControlActions(s session.Session) []workspaceControlActi
 	if reason := m.keepAliveUnavailableReason(s); reason != "" {
 		actions = append(actions,
 			workspaceControlAction{id: "keepalive", label: "KeepAlive", value: DefaultStyles().Render(RoleDisabled, "N/A"), detail: reason},
-			workspaceControlAction{id: "keepalive_autosend", label: "Auto-send", value: DefaultStyles().Render(RoleDisabled, "N/A"), detail: reason},
 		)
 	} else if state.State == keepalive.StateOff || state.State == "" {
 		actions = append(actions,
-			workspaceControlAction{id: "keepalive", label: "KeepAlive", value: offText(), detail: fmt.Sprintf("%dm before expiry · %s", m.keepAliveConfig.TriggerBeforeExpiryMinutes, scopeLabel(m.keepAliveConfig.Scope.MaxSends))},
-			workspaceControlAction{id: "keepalive_autosend", label: "Auto-send", value: onOffText(state.AutoSend, true), detail: autoSendWorkspaceDetail(state.AutoSend)},
+			workspaceControlAction{id: "keepalive", label: "KeepAlive", value: offText(), detail: fmt.Sprintf("%dm before expiry · %s", m.keepAliveConfig.TriggerBeforeExpiryMinutes, sendsLabel(m.keepAliveConfig.Scope.MaxSends))},
 		)
 	} else {
 		actions = append(actions,
-			workspaceControlAction{id: "keepalive", label: "KeepAlive", value: keepAliveControlState(state), detail: keepAliveControlDetail(state)},
-			workspaceControlAction{id: "keepalive_autosend", label: "Auto-send", value: onOffText(state.AutoSend, true), detail: autoSendWorkspaceDetailForState(state)},
+			workspaceControlAction{id: "keepalive", label: "KeepAlive", value: keepAliveControlState(state), detail: m.keepAliveControlDetail(s, state)},
 		)
+		if state.State == keepalive.StateScopeComplete || (isKeepAliveFailure(state.State) && state.ScopeUsed > 0) {
+			actions = append(actions, workspaceControlAction{id: "keepalive_reset_limit", label: "Reset limit", detail: fmt.Sprintf("allow %d more automatic sends", maxSends(state))})
+		}
 	}
 
 	if !m.compactOperationalWorkspace() && !m.sessionInfoExpanded {
@@ -547,16 +542,16 @@ func (m Model) workspaceFooter() string {
 			return cueLine("↑↓ choose  ↵ act  s send now  x cancel  b/⎋ back  q quit")
 		}
 		return cueLine("↑↓ choose action  ↵ act  s send now  x cancel instance  b/⎋ back  q quit")
-	case keepalive.StateManualReady:
-		if m.width <= 90 {
-			return cueLine("↑↓ choose  ↵ act  s send now  x dismiss  b/⎋ back  q quit")
-		}
-		return cueLine("↑↓ choose action  ↵ act  s send now  x dismiss  b/⎋ back  q quit")
-	case keepalive.StateConfirming, keepalive.StateSending:
+	case keepalive.StateSending:
 		if m.width <= 90 {
 			return cueLine("↑↓ choose  ↵ act  x stop  b/⎋ back  q quit")
 		}
 		return cueLine("↑↓ choose action  ↵ act  x stop waiting  b/⎋ back  q quit")
+	case keepalive.StateConfirming:
+		if m.width <= 90 {
+			return cueLine("↑↓ choose  ↵ act  x stop  b/⎋ back  q quit")
+		}
+		return cueLine("↑↓ choose action  ↵ act  x stop check  b/⎋ back  q quit")
 	default:
 		if m.width <= 90 {
 			return cueLine("↑↓ focus  ↵ act  r remind  k KeepAlive  v details  u update  q quit")
@@ -608,7 +603,7 @@ func (m Model) defaultFocusIndex() int {
 		return 0
 	}
 	switch m.activeKeepAliveState().State {
-	case keepalive.StateCountdown, keepalive.StateManualReady:
+	case keepalive.StateCountdown:
 		return indexOfAction(actions, "keepalive_send_now")
 	case keepalive.StateSending, keepalive.StateConfirming:
 		return indexOfAction(actions, "keepalive_stop_waiting")
@@ -663,7 +658,7 @@ func thresholdSummary(thresholds []int) string {
 	return strings.Join(values, ", ")
 }
 
-func scopeLabel(maxSends int) string {
+func sendsLabel(maxSends int) string {
 	if maxSends == 1 {
 		return "1 send"
 	}
@@ -675,20 +670,6 @@ func maxSends(state keepalive.SessionState) int {
 		return 1
 	}
 	return state.MaxSends
-}
-
-func onOffPlain(enabled bool) string {
-	if enabled {
-		return "on"
-	}
-	return "off"
-}
-
-func successEvidence(state keepalive.SessionState) string {
-	if state.LastResult != "" {
-		return state.LastResult
-	}
-	return "Cache refreshed"
 }
 
 func emptyDash(value string) string {

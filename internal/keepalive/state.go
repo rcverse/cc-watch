@@ -49,12 +49,12 @@ func (m *Manager) CountdownElapsed(sessionID string, token int64, now time.Time)
 	if state.State != StateCountdown || state.InstanceToken != token {
 		return nil
 	}
-	if !state.AutoSend {
-		return m.enterManualReady(state, false)
-	}
 	if !state.LatestSafeSendAt.IsZero() && now.After(state.LatestSafeSendAt) {
-		state.AutoSend = false
-		return m.enterManualReady(state, true)
+		state.State = StatePaused
+		state.SafetyDisabled = true
+		state.LastFailure = "send window passed"
+		m.states[sessionID] = state
+		return nil
 	}
 	return m.beginSend(state)
 }
@@ -64,7 +64,7 @@ func (m *Manager) SendNow(sessionID string, token int64) []Action {
 	if state.InstanceToken != token {
 		return nil
 	}
-	if state.State != StateCountdown && state.State != StateManualReady {
+	if state.State != StateCountdown {
 		return nil
 	}
 	return m.beginSend(state)
@@ -76,8 +76,8 @@ func (m *Manager) Cancel(sessionID string, token int64) {
 		return
 	}
 	switch state.State {
-	case StateCountdown, StateManualReady, StateSending, StateConfirming:
-		state.State = StateCancelledInstance
+	case StateCountdown, StateSending, StateConfirming:
+		state.State = StateMonitoringIdle
 		state.InstanceToken = m.nextToken()
 		state.TriggerArmed = false
 		m.states[sessionID] = state
@@ -114,29 +114,24 @@ func (m *Manager) MarkSuccess(sessionID string, token int64) {
 	if state.State != StateConfirming || state.InstanceToken != token {
 		return
 	}
-	state.State = StateSuccess
-	state.LastResult = "success"
+	state.LastResult = "Sent and confirmed"
+	if state.scopeExhausted() {
+		state.State = StateScopeComplete
+	} else {
+		state.State = StateMonitoringIdle
+		state.TriggerArmed = false
+	}
 	m.states[sessionID] = state
 }
 
-func (m *Manager) Acknowledge(sessionID string) {
+func (m *Manager) ResetLimit(sessionID string) {
 	state := m.State(sessionID)
-	switch state.State {
-	case StateSuccess:
-		if state.scopeExhausted() {
-			state.State = StateScopeComplete
-		} else {
-			state.State = StateMonitoringIdle
-			state.InstanceToken = m.nextToken()
-			state.TriggerArmed = false
-		}
-	case StateErrorNoClaude, StateErrorSubprocess, StateErrorTimeout:
-		if state.scopeExhausted() {
-			state.State = StateScopeComplete
-		}
-	case StateScopeComplete:
-		state.State = StateOff
-	}
+	state.ScopeUsed = 0
+	state.State = StateMonitoringIdle
+	state.TriggerArmed = true
+	state.LastFailure = ""
+	state.RateLimited = false
+	state.InstanceToken = m.nextToken()
 	m.states[sessionID] = state
 }
 
@@ -163,9 +158,10 @@ func (m *Manager) evaluate(s session.Session, now time.Time) []Action {
 	state.InstanceToken = m.nextToken()
 	state.TriggerArmed = false
 	state.LatestSafeSendAt = latestSafeSendAt(s)
-	if state.AutoSend && timing.AutoSendAllowed {
+	if timing.SendAllowed {
 		state.State = StateCountdown
 		state.SafetyDisabled = false
+		state.LastFailure = ""
 		m.states[s.SessionID] = state
 		return []Action{{
 			Kind:             ActionCountdownStarted,
@@ -176,8 +172,11 @@ func (m *Manager) evaluate(s session.Session, now time.Time) []Action {
 		}}
 	}
 
-	state.SafetyDisabled = state.AutoSend && !timing.AutoSendAllowed
-	return m.enterManualReady(state, state.SafetyDisabled)
+	state.State = StatePaused
+	state.SafetyDisabled = true
+	state.LastFailure = "countdown does not fit the safe send window"
+	m.states[s.SessionID] = state
+	return nil
 }
 
 func (m *Manager) beginSend(state SessionState) []Action {
@@ -209,35 +208,15 @@ func (m *Manager) markFailure(sessionID string, token int64, failedState State, 
 			return
 		}
 	case StateErrorNoClaude, StateErrorSubprocess:
-		if state.State != StateSending && state.State != StateConfirming && state.State != StateCountdown && state.State != StateManualReady {
+		if state.State != StateSending && state.State != StateConfirming && state.State != StateCountdown {
 			return
 		}
 	}
 	state.State = failedState
-	state.AutoSend = false
 	state.TriggerArmed = false
 	state.LastFailure = reason
 	state.RateLimited = limited
 	m.states[sessionID] = state
-}
-
-func (m *Manager) SetAutoSend(sessionID string, enabled bool) {
-	state := m.State(sessionID)
-	state.AutoSend = enabled
-	m.states[sessionID] = state
-}
-
-func (m *Manager) enterManualReady(state SessionState, safetyDisabled bool) []Action {
-	state.State = StateManualReady
-	state.SafetyDisabled = safetyDisabled
-	state.TriggerArmed = false
-	m.states[state.SessionID] = state
-	return []Action{{
-		Kind:          ActionManualPromptShown,
-		SessionID:     state.SessionID,
-		InstanceToken: state.InstanceToken,
-		Message:       m.cfg.Message,
-	}}
 }
 
 func latestSafeSendAt(s session.Session) time.Time {

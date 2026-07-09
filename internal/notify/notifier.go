@@ -10,11 +10,10 @@ import (
 type EventKind string
 
 const (
-	EventReminderThresholdCrossed   EventKind = "reminder_threshold_crossed"
-	EventKeepAliveManualPromptShown EventKind = "keepalive_manual_prompt_shown"
-	EventKeepAliveSuccess           EventKind = "keepalive_success"
-	EventKeepAliveFailure           EventKind = "keepalive_failure"
-	EventKeepAliveScopeComplete     EventKind = "keepalive_scope_complete"
+	EventReminderThresholdCrossed EventKind = "reminder_threshold_crossed"
+	EventKeepAliveSuccess         EventKind = "keepalive_success"
+	EventKeepAliveFailure         EventKind = "keepalive_failure"
+	EventKeepAliveScopeComplete   EventKind = "keepalive_scope_complete"
 )
 
 type Event struct {
@@ -163,12 +162,6 @@ func FormatEvent(event Event) Notification {
 			Subtitle: subtitle,
 			Body:     fmt.Sprintf("%d%% cache remaining. No message sent — reminder only.", event.ThresholdPercent),
 		}
-	case EventKeepAliveManualPromptShown:
-		return Notification{
-			Title:    "cc-watch · KeepAlive",
-			Subtitle: subtitle,
-			Body:     "Cache is about to expire. Auto-send is off — open cc-watch to send or dismiss.",
-		}
 	case EventKeepAliveSuccess:
 		return Notification{
 			Title:    "cc-watch · KeepAlive",
@@ -176,13 +169,13 @@ func FormatEvent(event Event) Notification {
 			Body:     "Keep-alive sent and confirmed. Cache window extended.",
 		}
 	case EventKeepAliveFailure:
-		body := "Claude account is rate-limited — can't send. Auto-send is off until you re-enable it."
+		body := "Claude account is rate-limited — automatic sends paused until you reset or re-enable KeepAlive."
 		if !event.RateLimited {
 			reason := event.Reason
 			if reason == "" {
 				reason = "result not confirmed"
 			}
-			body = "Keep-alive send failed: " + truncateForNotification(reason, 80) + ". Auto-send is off until you re-enable it."
+			body = "Keep-alive send failed: " + truncateForNotification(reason, 80) + ". Automatic sends paused until you reset or re-enable KeepAlive."
 		}
 		return Notification{
 			Title:    "cc-watch · KeepAlive",

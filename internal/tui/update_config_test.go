@@ -125,20 +125,16 @@ func TestConfigEditorFocusEditToggleSaveAndCancel(t *testing.T) {
 		t.Fatalf("threshold edit not reflected:\n%s", model.View())
 	}
 
-	model = moveConfigFocusTo(t, model, "config_autosend")
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeySpace})
-	model = updated.(Model)
-	if strings.Contains(model.View(), "Auto-send:             [x] enabled") {
-		t.Fatalf("space did not toggle auto-send off:\n%s", model.View())
-	}
-
 	updated, _ = model.Update(keyRunes("s"))
 	model = updated.(Model)
 	if saves != 1 {
 		t.Fatalf("saves = %d, want 1", saves)
 	}
-	if saved.ReminderThresholds[0] != 30 || saved.ReminderThresholds[1] != 15 || saved.KeepAlive.AutoSend {
+	if saved.ReminderThresholds[0] != 30 || saved.ReminderThresholds[1] != 15 {
 		t.Fatalf("saved config = %#v", saved)
+	}
+	if !strings.Contains(model.View(), "✓ Saved") {
+		t.Fatalf("save success missing notice:\n%s", model.View())
 	}
 	if model.LastAction() != "save_config" {
 		t.Fatalf("last action = %q, want save_config", model.LastAction())
@@ -187,7 +183,7 @@ func TestConfigEditorInvalidConfigCannotSave(t *testing.T) {
 	if model.LastAction() != "save_config_invalid" {
 		t.Fatalf("last action = %q, want save_config_invalid", model.LastAction())
 	}
-	if !strings.Contains(model.View(), "Cannot save.") {
+	if !strings.Contains(model.View(), "✕ Cannot save") || !strings.Contains(model.View(), "✕ Validation failed:") {
 		t.Fatalf("invalid config view missing summary:\n%s", model.View())
 	}
 }

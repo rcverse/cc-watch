@@ -9,27 +9,24 @@ import (
 type State string
 
 const (
-	StateOff               State = "off"
-	StateMonitoringIdle    State = "monitoring_idle"
-	StateCountdown         State = "countdown"
-	StateManualReady       State = "manual_ready"
-	StateSending           State = "sending"
-	StateConfirming        State = "confirming"
-	StateSuccess           State = "success"
-	StateErrorNoClaude     State = "error_no_claude"
-	StateErrorSubprocess   State = "error_subprocess"
-	StateErrorTimeout      State = "error_timeout"
-	StateCancelledInstance State = "cancelled_instance"
-	StateScopeComplete     State = "scope_complete"
+	StateOff             State = "off"
+	StateMonitoringIdle  State = "monitoring_idle"
+	StateCountdown       State = "countdown"
+	StatePaused          State = "paused"
+	StateSending         State = "sending"
+	StateConfirming      State = "confirming"
+	StateErrorNoClaude   State = "error_no_claude"
+	StateErrorSubprocess State = "error_subprocess"
+	StateErrorTimeout    State = "error_timeout"
+	StateScopeComplete   State = "scope_complete"
 )
 
 type ActionKind string
 
 const (
-	ActionCountdownStarted  ActionKind = "countdown_started"
-	ActionManualPromptShown ActionKind = "manual_prompt_shown"
-	ActionStartRunner       ActionKind = "start_runner"
-	ActionScopeComplete     ActionKind = "scope_complete"
+	ActionCountdownStarted ActionKind = "countdown_started"
+	ActionStartRunner      ActionKind = "start_runner"
+	ActionScopeComplete    ActionKind = "scope_complete"
 )
 
 type Action struct {
@@ -44,7 +41,6 @@ type Action struct {
 type SessionState struct {
 	SessionID        string
 	State            State
-	AutoSend         bool
 	ScopeUsed        int
 	MaxSends         int
 	InstanceToken    int64
@@ -75,7 +71,6 @@ func (m *Manager) State(sessionID string) SessionState {
 		return SessionState{
 			SessionID:    sessionID,
 			State:        StateOff,
-			AutoSend:     m.cfg.AutoSend,
 			MaxSends:     m.cfg.Scope.MaxSends,
 			TriggerArmed: true,
 		}
@@ -104,7 +99,6 @@ func (m *Manager) nextToken() int64 {
 func (m *Manager) initialState(sessionID string) SessionState {
 	state := m.State(sessionID)
 	if state.State == StateOff && state.InstanceToken == 0 {
-		state.AutoSend = m.cfg.AutoSend
 		state.MaxSends = m.cfg.Scope.MaxSends
 		state.TriggerArmed = true
 	}

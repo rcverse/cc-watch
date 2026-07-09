@@ -208,9 +208,6 @@ func TestExpiredListRowsSpaceStatusTimeAndDisableAutomationChips(t *testing.T) {
 		Width:           120,
 		Sessions:        []session.Session{expired},
 		ReminderEnabled: map[string]bool{expired.SessionID: true},
-		KeepAliveEnabled: map[string]bool{
-			expired.SessionID: true,
-		},
 	}).View()
 	plain := stripANSI(view)
 
@@ -391,7 +388,7 @@ func TestWorkspaceAndConfigUseAdaptiveTerminalLayout(t *testing.T) {
 	workspaceView := workspace.View()
 	assertMaxLineWidth(t, workspaceView, 80)
 	assertMaxLines(t, workspaceView, 24)
-	for _, want := range []string{"Claude Code Watch / workspace-api / workspace", "Cache Status", "Session Info", "Messages", "Tokens", "Controls", "› Reminder", "KeepAlive", "Auto-send", "ON", "off", "█", "░"} {
+	for _, want := range []string{"Claude Code Watch / workspace-api / workspace", "Cache Status", "Session Info", "Messages", "Tokens", "Controls", "› Reminder", "KeepAlive", "off", "█", "░"} {
 		if !strings.Contains(workspaceView, want) {
 			t.Fatalf("workspace view missing %q:\n%s", want, workspaceView)
 		}
@@ -409,12 +406,12 @@ func TestWorkspaceAndConfigUseAdaptiveTerminalLayout(t *testing.T) {
 
 	configView := NewModel(Options{StartMode: StartConfig, Config: config.Default()}).View()
 	assertMaxLineWidth(t, configView, 80)
-	for _, want := range []string{"Claude Code Watch / config", "Settings", "Preview", "Validation", "Actions", "› Reminder thresholds", "KeepAlive trigger", "Auto-send", "ON"} {
+	for _, want := range []string{"Claude Code Watch / config", "Settings", "Preview", "Status", "Actions", "› Reminder thresholds", "KeepAlive trigger", "Max sends"} {
 		if !strings.Contains(configView, want) {
 			t.Fatalf("config view missing %q:\n%s", want, configView)
 		}
 	}
-	for _, notWant := range []string{"Warning: Auto-send default may send a Claude message after countdown.", "╭─ Reminder", "╭─ KeepAlive automation", "What will happen", "KA "} {
+	for _, notWant := range []string{"╭─ Reminder", "╭─ KeepAlive automation", "What will happen", "KA "} {
 		if strings.Contains(configView, notWant) {
 			t.Fatalf("config view contains deprecated visual grammar %q:\n%s", notWant, configView)
 		}
@@ -469,7 +466,6 @@ func TestKeepAliveCountdownPlacesTimeAfterProgressBar(t *testing.T) {
 	state := keepalive.SessionState{
 		SessionID:     "workspace-id",
 		State:         keepalive.StateCountdown,
-		AutoSend:      true,
 		ScopeUsed:     0,
 		MaxSends:      3,
 		InstanceToken: 7,
@@ -488,12 +484,12 @@ func TestKeepAliveCountdownPlacesTimeAfterProgressBar(t *testing.T) {
 	}).View()
 	plain := stripANSI(view)
 
-	for _, want := range []string{"Countdown", "█", "20s remaining", "Scope        0 / 3 sends"} {
+	for _, want := range []string{"Countdown", "█", "20s remaining", "Sends        0 / 3 used"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("countdown view missing %q:\n%s", want, view)
 		}
 	}
-	assertOrder(t, plain, "Countdown    █", "20s remaining", "Scope        0 / 3 sends")
+	assertOrder(t, plain, "Countdown    █", "20s remaining", "Sends        0 / 3 used")
 }
 
 func TestConfigEditingUsesSeparatePromptPanel(t *testing.T) {
@@ -631,10 +627,10 @@ func TestListViewResponsivePriorityFields(t *testing.T) {
 	wideSession.DurationSeconds = &duration
 	wideSession.Warnings = []session.ParseWarning{{Message: "bad timestamp"}}
 	wide := NewModel(Options{
-		Now:              now,
-		Width:            140,
-		Sessions:         []session.Session{wideSession},
-		KeepAliveEnabled: map[string]bool{"wide-id": true},
+		Now:             now,
+		Width:           140,
+		Sessions:        []session.Session{wideSession},
+		KeepAliveStates: map[string]keepalive.SessionState{"wide-id": {SessionID: "wide-id", State: keepalive.StateMonitoringIdle, MaxSends: 5}},
 	}).View()
 	for _, want := range []string{"wide-id", "wide-project", "5-min cache", "40%", "last  last wide message", "! 1 parse warning(s)", "KeepAlive ON"} {
 		if !strings.Contains(wide, want) {
@@ -758,7 +754,7 @@ func TestListFooterOnlyAdvertisesPagingWhenAnotherPageExists(t *testing.T) {
 	}
 }
 
-func TestConfigEditorRendersFieldsSummaryWarningsAndValidation(t *testing.T) {
+func TestConfigEditorRendersFieldsSummaryWarningsAndStatus(t *testing.T) {
 	cfg := config.Default()
 	cfg.KeepAlive.CountdownSeconds = 120
 	model := NewModel(Options{
@@ -772,20 +768,21 @@ func TestConfigEditorRendersFieldsSummaryWarningsAndValidation(t *testing.T) {
 		"Reminder thresholds",
 		"20, 10%",
 		"KeepAlive trigger",
+		"start before cache expiry",
 		"5m",
 		"Countdown",
+		"wait before sending",
 		"120s",
 		"Message",
+		"text sent to Claude Code",
 		"Keep-alive check. Reply \"yes\" only.",
-		"Auto-send",
-		"ON",
-		"send after countdown",
 		"Max sends",
+		"stop after this many automatic sends",
 		"Preview",
 		"1h cache",
 		"5m cache",
-		"Validation",
-		"✗ Cannot save.",
+		"Status",
+		"✕ Validation failed:",
 		"countdown may not fit the 5m cache trigger window",
 		"↑↓ move  ↵ edit  space toggle  s save  d reset  ⎋ cancel",
 	} {
@@ -793,18 +790,8 @@ func TestConfigEditorRendersFieldsSummaryWarningsAndValidation(t *testing.T) {
 			t.Fatalf("config view missing %q:\n%s", want, view)
 		}
 	}
-}
-
-func TestConfigEditorRendersAutosendWarning(t *testing.T) {
-	cfg := config.Default()
-	model := NewModel(Options{StartMode: StartConfig, Config: cfg})
-	view := model.View()
-
-	if !strings.Contains(view, "Auto-send is ON") || !strings.Contains(view, "Claude message after countdown") {
-		t.Fatalf("config view missing relocated auto-send warning:\n%s", view)
-	}
-	if strings.Contains(view, "Warning: Auto-send default may send a Claude message after countdown.") {
-		t.Fatalf("config view still renders old inline auto-send warning:\n%s", view)
+	if strings.Contains(view, "╭─ Validation") {
+		t.Fatalf("config view contains removed copy:\n%s", view)
 	}
 }
 
@@ -857,8 +844,8 @@ func TestListViewRequiredStates(t *testing.T) {
 					NotificationDegraded:     "osascript failed",
 					ClaudeUnavailableMessage: "claude not found",
 				},
-				Sessions:         []session.Session{listViewSession("armed-id", "armed", now, now.Add(-1*time.Minute), session.CacheWindow{Label: "1h", TTLSeconds: 3600, Known: true}, "", "")},
-				KeepAliveEnabled: map[string]bool{"armed-id": true},
+				Sessions:        []session.Session{listViewSession("armed-id", "armed", now, now.Add(-1*time.Minute), session.CacheWindow{Label: "1h", TTLSeconds: 3600, Known: true}, "", "")},
+				KeepAliveStates: map[string]keepalive.SessionState{"armed-id": {SessionID: "armed-id", State: keepalive.StateMonitoringIdle, MaxSends: 5}},
 			},
 			want: []string{"watcher partial", "permission denied", "notifications degraded: osascript failed", "claude unavailable: claude not found"},
 		},
@@ -913,7 +900,7 @@ func TestNotificationDeliveryFailureIsVisibleAsDegradedStateAndStatus(t *testing
 func TestNotificationDeliverySuccessRecordsStatusWithoutDegradedBanner(t *testing.T) {
 	model := NewModel(Options{})
 	updated, _ := model.Update(NotificationResultMsg{
-		Event: notify.Event{Kind: notify.EventKeepAliveManualPromptShown},
+		Event: notify.Event{Kind: notify.EventKeepAliveSuccess},
 		Result: notify.Result{
 			Delivered: true,
 			Message:   "delivered",
@@ -925,7 +912,7 @@ func TestNotificationDeliverySuccessRecordsStatusWithoutDegradedBanner(t *testin
 	if strings.Contains(view, "Notify degraded") {
 		t.Fatalf("success view contains degraded banner:\n%s", view)
 	}
-	for _, notWant := range []string{"notification delivered:", "Auto-send is off — open cc-watch to send or dismiss."} {
+	for _, notWant := range []string{"notification delivered:", "Automatic send paused"} {
 		if strings.Contains(view, notWant) {
 			t.Fatalf("success notification leaked into TUI banner %q:\n%s", notWant, view)
 		}
@@ -956,10 +943,7 @@ func TestWorkspaceRendersCanonicalInfoAndControlsSeparately(t *testing.T) {
 		"off",
 		"notify at 20%, 10%",
 		"KeepAlive",
-		"5m before expiry · 1 send",
-		"Auto-send",
-		"ON",
-		"send after countdown",
+		"5m before expiry · 5 sends",
 		"Back",
 		"session list",
 	} {
@@ -980,8 +964,7 @@ func TestWorkspaceRendersCanonicalInfoAndControlsSeparately(t *testing.T) {
 	styles := DefaultStyles()
 	for _, want := range []string{
 		styles.Render(RoleMuted, "notify at 20%, 10%"),
-		styles.Render(RoleMuted, "5m before expiry · 1 send"),
-		styles.Render(RoleMuted, "send after countdown"),
+		styles.Render(RoleMuted, "5m before expiry · 5 sends"),
 		styles.Render(RoleMuted, "session list"),
 	} {
 		if !strings.Contains(view, want) {
@@ -1006,12 +989,12 @@ func TestExpiredWorkspaceUsesNeutralUnavailableNA(t *testing.T) {
 	}).View()
 	plain := stripANSI(view)
 
-	for _, want := range []string{"× EXPIRED", "Reminder", "KeepAlive", "Auto-send", "N/A  after expiry"} {
+	for _, want := range []string{"× EXPIRED", "Reminder", "KeepAlive", "N/A  after expiry"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expired workspace missing %q:\n%s", want, view)
 		}
 	}
-	for _, notWant := range []string{"unavailable", "Auto-send   ON", "disabled while KeepAlive is N/A", "\x1b[38;5;214mN/A", "\x1b[38;5;202mN/A"} {
+	for _, notWant := range []string{"unavailable", "disabled while KeepAlive is N/A", "\x1b[38;5;214mN/A", "\x1b[38;5;202mN/A"} {
 		if strings.Contains(view, notWant) {
 			t.Fatalf("expired workspace still uses old unavailable/orange grammar %q:\n%s", notWant, view)
 		}
@@ -1323,7 +1306,6 @@ func TestSessionInfoDetailsWithoutGapsShowsEmptySentenceAndKeepsControlFocus(t *
 func TestWorkspaceKeepAliveCardStatesRenderSafetyContract(t *testing.T) {
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 	cfg := config.Default().KeepAlive
-	cfg.AutoSend = true
 
 	for _, tc := range []struct {
 		name  string
@@ -1331,44 +1313,39 @@ func TestWorkspaceKeepAliveCardStatesRenderSafetyContract(t *testing.T) {
 		want  []string
 	}{
 		{
-			name:  "watching auto-send on",
-			state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateMonitoringIdle, AutoSend: true, MaxSends: 1},
-			want:  []string{"KeepAlive · watching", "Next", "Message at", "countdown starts", "Msg Preview", "Scope", "0 / 1 sends · auto-send on"},
-		},
-		{
-			name:  "watching auto-send off",
-			state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateMonitoringIdle, AutoSend: false, MaxSends: 1},
-			want:  []string{"KeepAlive · watching", "Next", "Manual prompt at", "auto-send off", "Msg Preview", "Scope", "0 / 1 sends · auto-send off"},
+			name:  "armed",
+			state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateMonitoringIdle, MaxSends: 1},
+			want:  []string{"KeepAlive · ✓ Armed", "Next", "Message will be sent at", "Message", "Sends", "0 / 1 used"},
 		},
 		{
 			name:  "countdown",
-			state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateCountdown, AutoSend: true, ScopeUsed: 0, MaxSends: 1, InstanceToken: 7},
-			want:  []string{"KeepAlive · countdown", "Next", "Send now or cancel before countdown ends", "Msg Preview", "Scope", "24s remaining"},
+			state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateCountdown, ScopeUsed: 0, MaxSends: 1, InstanceToken: 7},
+			want:  []string{"KeepAlive · ✓ Armed", "Next", "Sending in 24s", "Message", "Sends", "24s remaining"},
 		},
 		{
-			name:  "manual prompt",
-			state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateManualReady, AutoSend: false, MaxSends: 1, InstanceToken: 8},
-			want:  []string{"KeepAlive · manual prompt", "Next", "Send now or dismiss", "Msg Preview", "Scope", "auto-send off"},
+			name:  "safety paused",
+			state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StatePaused, MaxSends: 1, InstanceToken: 8},
+			want:  []string{"KeepAlive · ! Paused", "Next", "Automatic send paused", "Last", "Cache is too close to expiry", "Message", "Sends"},
 		},
 		{
 			name:  "confirming",
-			state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateConfirming, AutoSend: true, ScopeUsed: 1, MaxSends: 1, InstanceToken: 9},
-			want:  []string{"KeepAlive · confirming", "Next", "Watching this session JSONL", "Msg Preview", "Scope", "awaiting confirmation"},
+			state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateConfirming, ScopeUsed: 1, MaxSends: 1, InstanceToken: 9},
+			want:  []string{"KeepAlive · ✓ Armed", "Next", "Checking for confirmation", "Message", "Sends", "1 / 1 used"},
 		},
 		{
-			name:  "success",
-			state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateSuccess, AutoSend: true, ScopeUsed: 1, MaxSends: 1, InstanceToken: 10, LastResult: "confirmed at 12:00:30"},
-			want:  []string{"KeepAlive · done", "Next", "Monitoring complete", "Msg Preview", "Scope", "confirmed at 12:00:30"},
+			name:  "armed with last success",
+			state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateMonitoringIdle, ScopeUsed: 1, MaxSends: 2, InstanceToken: 10, LastResult: "confirmed at 12:00:30"},
+			want:  []string{"KeepAlive · ✓ Armed", "Next", "Message will be sent at", "Last", "confirmed at 12:00:30", "Message", "Sends"},
 		},
 		{
 			name:  "failure",
-			state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateErrorNoClaude, AutoSend: false, ScopeUsed: 1, MaxSends: 1, InstanceToken: 11, LastFailure: "claude command not found"},
-			want:  []string{"KeepAlive · failed", "Next", "Use manual fallback", "Msg Preview", "Scope", "failed: claude command not found", "Fallback", "claude -r workspace-id -p"},
+			state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateErrorNoClaude, ScopeUsed: 1, MaxSends: 1, InstanceToken: 11, LastFailure: "claude command not found"},
+			want:  []string{"KeepAlive · ✕ Failed", "Next", "Fix the issue", "Last", "claude command not found", "Message", "Sends", "Fallback", "claude -r workspace-id -p"},
 		},
 		{
-			name:  "scope complete",
-			state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateScopeComplete, AutoSend: false, ScopeUsed: 1, MaxSends: 1, InstanceToken: 12},
-			want:  []string{"KeepAlive · scope complete", "Next", "Turn KeepAlive off", "Msg Preview", "Scope", "no more automatic sends"},
+			name:  "limit reached",
+			state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateScopeComplete, ScopeUsed: 1, MaxSends: 1, InstanceToken: 12},
+			want:  []string{"KeepAlive · ! Limit reached", "Next", "Automatic sends paused", "Message", "Sends", "1 / 1 used"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1409,11 +1386,11 @@ func TestWorkspaceKeepAliveNextTimeUsesLocalDisplayZone(t *testing.T) {
 		SelectedID: "workspace-id",
 		Sessions:   []session.Session{workspaceSession(now)},
 		KeepAliveStates: map[string]keepalive.SessionState{
-			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateMonitoringIdle, AutoSend: true, MaxSends: 1},
+			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateMonitoringIdle, MaxSends: 1},
 		},
 	})
 
-	if view := model.View(); !strings.Contains(view, "Message at 20:01:30") {
+	if view := model.View(); !strings.Contains(view, "Message will be sent at 20:01:30") {
 		t.Fatalf("KeepAlive next time did not use local display zone:\n%s", view)
 	}
 }
@@ -1426,17 +1403,17 @@ func TestWorkspaceKeepAliveCardIsAdditiveAndControlsOwnFocus(t *testing.T) {
 		SelectedID: "workspace-id",
 		Sessions:   []session.Session{workspaceSession(now)},
 		KeepAliveStates: map[string]keepalive.SessionState{
-			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateManualReady, AutoSend: false, MaxSends: 1, InstanceToken: 8},
+			"workspace-id": {SessionID: "workspace-id", State: keepalive.StatePaused, MaxSends: 1, InstanceToken: 8},
 		},
 	})
 
 	view := model.View()
-	for _, want := range []string{"Cache Status", "Session Info", "Controls", "KeepAlive · manual prompt", "Next", "Msg Preview", "Scope", "› Send now", "Dismiss"} {
+	for _, want := range []string{"Cache Status", "Session Info", "Controls", "KeepAlive · ! Paused", "Next", "Message", "Sends", "Reminder", "KeepAlive"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("additive KeepAlive card missing %q:\n%s", want, view)
 		}
 	}
-	assertOrder(t, view, "Session Info", "KeepAlive · manual prompt", "Controls")
+	assertOrder(t, view, "Session Info", "KeepAlive · ! Paused", "Controls")
 	for _, notWant := range []string{"State    ", "Evidence ", "Actions", "Cancel watching"} {
 		if strings.Contains(view, notWant) {
 			t.Fatalf("additive KeepAlive card contains stale row %q:\n%s", notWant, view)
@@ -1449,9 +1426,14 @@ func TestWorkspaceKeepAliveCardIsAdditiveAndControlsOwnFocus(t *testing.T) {
 		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyDown})
 		model = updated.(Model)
 	}
-	for _, want := range []string{"keepalive_send_now", "keepalive_cancel", "reminder", "keepalive", "keepalive_autosend", "back"} {
+	for _, want := range []string{"reminder", "keepalive", "back"} {
 		if !seen[want] {
 			t.Fatalf("KeepAlive focus did not reach %q; saw %#v", want, seen)
+		}
+	}
+	for _, hidden := range []string{"keepalive_send_now", "keepalive_cancel"} {
+		if seen[hidden] {
+			t.Fatalf("paused KeepAlive focus reached hidden action %q; saw %#v", hidden, seen)
 		}
 	}
 	for _, hidden := range []string{"copy_id", "evidence", "refresh", "help", "quit"} {
@@ -1477,8 +1459,8 @@ func TestListRowsUseDomainSemanticRoles(t *testing.T) {
 			TTLSeconds: 3600,
 			Known:      true,
 		}, "first semantic message", "last semantic message")},
-		KeepAliveEnabled: map[string]bool{"semantic-id": true},
-		ReminderEnabled:  map[string]bool{"semantic-id": true},
+		KeepAliveStates: map[string]keepalive.SessionState{"semantic-id": {SessionID: "semantic-id", State: keepalive.StateMonitoringIdle, MaxSends: 5}},
+		ReminderEnabled: map[string]bool{"semantic-id": true},
 	})
 
 	view := model.View()
@@ -1489,7 +1471,7 @@ func TestListRowsUseDomainSemanticRoles(t *testing.T) {
 	}
 }
 
-func TestWorkspaceKeepAliveManualReadyFitsEightyByTwentyFour(t *testing.T) {
+func TestWorkspaceKeepAlivePausedFitsEightyByTwentyFour(t *testing.T) {
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 	view := NewModel(Options{
 		Now:        now,
@@ -1498,13 +1480,13 @@ func TestWorkspaceKeepAliveManualReadyFitsEightyByTwentyFour(t *testing.T) {
 		SelectedID: "workspace-id",
 		Sessions:   []session.Session{workspaceSession(now)},
 		KeepAliveStates: map[string]keepalive.SessionState{
-			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateManualReady, AutoSend: false, MaxSends: 1, InstanceToken: 8},
+			"workspace-id": {SessionID: "workspace-id", State: keepalive.StatePaused, MaxSends: 1, InstanceToken: 8},
 		},
 	}).View()
 
 	assertMaxLineWidth(t, view, 80)
 	assertMaxLines(t, view, 24)
-	for _, want := range []string{"Claude Code Watch / workspace-api / workspace", "KeepAlive · manual prompt", "ready", "Send now", "Dismiss"} {
+	for _, want := range []string{"Claude Code Watch / workspace-api / workspace", "KeepAlive · ! Paused", "Automatic send paused"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("manual-ready workspace missing %q:\n%s", want, view)
 		}
@@ -1523,13 +1505,13 @@ func TestWorkspaceWrapsLongMessagesAndUsesSectionedKeepAliveCard(t *testing.T) {
 		SelectedID: "workspace-id",
 		Sessions:   []session.Session{longSession},
 		KeepAliveStates: map[string]keepalive.SessionState{
-			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateManualReady, AutoSend: false, MaxSends: 1, InstanceToken: 8, SafetyDisabled: true},
+			"workspace-id": {SessionID: "workspace-id", State: keepalive.StatePaused, MaxSends: 1, InstanceToken: 8, SafetyDisabled: true},
 		},
 	}).View()
 
 	assertMaxLineWidth(t, view, 80)
 	assertMaxLines(t, view, 24)
-	for _, want := range []string{"Session Info", "Controls", "KeepAlive · manual prompt", "Reason", "› Send now"} {
+	for _, want := range []string{"Session Info", "Controls", "KeepAlive · ! Paused", "Automatic send paused"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("workspace missing visual separator %q:\n%s", want, view)
 		}
@@ -1554,12 +1536,12 @@ func TestWorkspaceShowsClaudeUnavailableBeforeCountdownCanSend(t *testing.T) {
 		Sessions:   []session.Session{workspaceSession(now)},
 		Refresh:    RefreshViewState{ClaudeUnavailableMessage: "claude command not found"},
 		KeepAliveStates: map[string]keepalive.SessionState{
-			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateErrorNoClaude, AutoSend: false, LastFailure: "claude command not found", MaxSends: 1},
+			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateErrorNoClaude, LastFailure: "claude command not found", MaxSends: 1},
 		},
 	})
 
 	view := model.View()
-	for _, want := range []string{"claude unavailable: claude command not found", "KeepAlive · failed", "failed: claude command not found", "Fallback"} {
+	for _, want := range []string{"claude unavailable: claude command not found", "KeepAlive · ✕ Failed", "claude command not found", "Fallback"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("workspace unavailable view missing %q:\n%s", want, view)
 		}

@@ -65,7 +65,6 @@ type KeepAliveCountdownElapsedMsg struct {
 	SessionID     string
 	InstanceToken int64
 	Now           time.Time
-	Generation    int
 	SelectedID    string
 }
 
@@ -77,7 +76,6 @@ type KeepAliveRunnerResultMsg struct {
 	Reason             string
 	Action             keepalive.Action
 	Execution          keepalive.RunnerExecution
-	Generation         int
 	SelectedID         string
 	ConfirmationTarget keepalive.ConfirmationTarget
 }
@@ -87,7 +85,6 @@ type KeepAliveConfirmationResultMsg struct {
 	InstanceToken int64
 	ConfirmedAt   time.Time
 	Err           error
-	Generation    int
 	SelectedID    string
 }
 

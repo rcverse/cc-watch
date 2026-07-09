@@ -624,7 +624,7 @@ func TestWorkspaceManualRefreshUpdatesOnlySelectedSessionWhenSnapshotReturnsList
 	}
 }
 
-func TestWorkspaceIgnoresKeepAliveAsyncAfterRefreshGenerationOrSelectionChanges(t *testing.T) {
+func TestWorkspaceIgnoresKeepAliveAsyncAfterSelectionChanges(t *testing.T) {
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 	model := NewModel(Options{
 		Now:        now,
@@ -634,32 +634,42 @@ func TestWorkspaceIgnoresKeepAliveAsyncAfterRefreshGenerationOrSelectionChanges(
 			listViewSession("other-id", "other", now, now, session.CacheWindow{Label: "1h", TTLSeconds: 3600, Known: true}, "", ""),
 		},
 		KeepAliveStates: map[string]keepalive.SessionState{
-			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateConfirming, AutoSend: true, InstanceToken: 11, MaxSends: 1},
-		},
-	})
-
-	updated, _ := model.Update(KeepAliveConfirmationResultMsg{SessionID: "workspace-id", InstanceToken: 11, ConfirmedAt: now, Generation: 1, SelectedID: "workspace-id"})
-	model = updated.(Model)
-	if got := model.KeepAliveState("workspace-id").State; got != keepalive.StateConfirming {
-		t.Fatalf("stale generation changed state to %q, want confirming", got)
-	}
-
-	model = NewModel(Options{
-		Now:        now,
-		SelectedID: "workspace-id",
-		Sessions: []session.Session{
-			workspaceSession(now),
-			listViewSession("other-id", "other", now, now, session.CacheWindow{Label: "1h", TTLSeconds: 3600, Known: true}, "", ""),
-		},
-		KeepAliveStates: map[string]keepalive.SessionState{
-			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateConfirming, AutoSend: true, InstanceToken: 12, MaxSends: 1},
+			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateConfirming, InstanceToken: 12, MaxSends: 1},
 		},
 	})
 	model.selectedIndex = 1
 	model.selectedID = "other-id"
-	updated, _ = model.Update(KeepAliveConfirmationResultMsg{SessionID: "workspace-id", InstanceToken: 12, ConfirmedAt: now, SelectedID: "workspace-id"})
+	updated, _ := model.Update(KeepAliveConfirmationResultMsg{SessionID: "workspace-id", InstanceToken: 12, ConfirmedAt: now, SelectedID: "workspace-id"})
 	model = updated.(Model)
 	if got := model.KeepAliveState("workspace-id").State; got != keepalive.StateConfirming {
 		t.Fatalf("stale selected session changed state to %q, want confirming", got)
+	}
+}
+
+func TestWorkspaceKeepAliveConfirmationSurvivesRefreshGenerationChange(t *testing.T) {
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	model := NewModel(Options{
+		Now:               now,
+		SelectedID:        "workspace-id",
+		RefreshGeneration: 1,
+		Sessions:          []session.Session{workspaceSession(now)},
+		KeepAliveStates: map[string]keepalive.SessionState{
+			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateConfirming, ScopeUsed: 1, InstanceToken: 11, MaxSends: 1},
+		},
+	})
+
+	updated, _ := model.Update(RefreshResultMsg{
+		Generation: 2,
+		Sessions:   []session.Session{workspaceSession(now.Add(time.Minute))},
+	})
+	model = updated.(Model)
+	updated, _ = model.Update(KeepAliveConfirmationResultMsg{SessionID: "workspace-id", InstanceToken: 11, ConfirmedAt: now.Add(time.Minute), SelectedID: "workspace-id"})
+	model = updated.(Model)
+
+	if got := model.KeepAliveState("workspace-id").State; got != keepalive.StateScopeComplete {
+		t.Fatalf("confirmation after refresh generation change = %q, want limit reached", got)
+	}
+	if !strings.Contains(model.View(), "KeepAlive · ! Limit reached") || !strings.Contains(model.View(), "✓ KeepAlive sent and confirmed") {
+		t.Fatalf("workspace view did not update after confirmation:\n%s", model.View())
 	}
 }

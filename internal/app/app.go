@@ -1,7 +1,6 @@
 package app
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,7 +9,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/richardchen/cc-watch/internal/config"
-	"github.com/richardchen/cc-watch/internal/jsonout"
 	"github.com/richardchen/cc-watch/internal/keepalive"
 	"github.com/richardchen/cc-watch/internal/notify"
 	"github.com/richardchen/cc-watch/internal/refresh"
@@ -48,7 +46,7 @@ func DefaultDependencies() Dependencies {
 	}
 }
 
-// RunWithDeps dispatches CLI modes, including JSON as a non-interactive snapshot path.
+// RunWithDeps dispatches CLI modes.
 func RunWithDeps(args []string, stdout io.Writer, stderr io.Writer, deps Dependencies) int {
 	cmd, err := ParseArgs(args)
 	if err != nil {
@@ -63,8 +61,6 @@ func RunWithDeps(args []string, stdout io.Writer, stderr io.Writer, deps Depende
 	case ModeVersion:
 		fmt.Fprintf(stdout, "cc-watch %s\n", Version)
 		return 0
-	case ModeJSON:
-		return runJSON(cmd, stdout, stderr, deps)
 	case ModeStatusline:
 		deps = fillDependencies(deps)
 		return runStatusline(cmd, deps, deps.Stdin, stdout, stderr)
@@ -251,39 +247,6 @@ func tuiDependencies(cmd Command, deps Dependencies, home string) tui.Dependenci
 	}
 }
 
-func runJSON(cmd Command, stdout io.Writer, _ io.Writer, deps Dependencies) int {
-	deps = fillDependencies(deps)
-	now := deps.Now()
-	home, err := deps.HomeDir()
-	if err != nil {
-		return writeJSONError(stdout, now, cmd, nil, "config_error", err.Error(), cmd.ID)
-	}
-	result, err := snapshot.Build(snapshot.Request{
-		Home:   home,
-		Now:    now,
-		Limit:  cmd.Limit,
-		ID:     cmd.ID,
-		Remind: cmd.Remind,
-	}, snapshot.Loaders{
-		LoadConfig:   config.Load,
-		DiscoverHome: deps.DiscoverHome,
-		ParseFile:    deps.ParseFile,
-	})
-	if err != nil {
-		var buildErr *snapshot.BuildError
-		if errors.As(err, &buildErr) {
-			return writeJSONError(stdout, now, cmd, nil, buildErr.Code, buildErr.Error(), cmd.ID)
-		}
-		return writeJSONError(stdout, now, cmd, nil, "parse_error", err.Error(), cmd.ID)
-	}
-	state := jsonStateFromSnapshot(result)
-	exitCode := 0
-	if result.Error != nil {
-		exitCode = 1
-	}
-	return writeJSON(stdout, state, exitCode)
-}
-
 func fillDependencies(deps Dependencies) Dependencies {
 	defaults := DefaultDependencies()
 	if deps.HomeDir == nil {
@@ -308,95 +271,4 @@ func fillDependencies(deps Dependencies) Dependencies {
 		deps.RunStatuslineCommand = defaults.RunStatuslineCommand
 	}
 	return deps
-}
-
-func writeJSONError(stdout io.Writer, now time.Time, cmd Command, candidates []session.Session, code, message, query string) int {
-	return writeJSON(stdout, jsonout.State{
-		GeneratedAt: now,
-		Query:       jsonout.Query{ID: cmd.ID, Limit: cmd.Limit},
-		Sessions:    candidates,
-		Error: &jsonout.Error{
-			Code:    code,
-			Message: message,
-			Query:   query,
-		},
-	}, 1)
-}
-
-func configWarningMessages(warnings []config.Warning) []string {
-	messages := make([]string, 0, len(warnings))
-	for _, warning := range warnings {
-		messages = append(messages, fmt.Sprintf("%s: %s", warning.Code, warning.Message))
-	}
-	return messages
-}
-
-func jsonStateFromSnapshot(result snapshot.Result) jsonout.State {
-	sessions := result.Sessions
-	if result.Error != nil {
-		sessions = result.Candidates
-	}
-	return jsonout.State{
-		GeneratedAt:    result.GeneratedAt,
-		Query:          jsonout.Query{ID: result.QueryID, Limit: result.QueryLimit},
-		ConfigWarnings: configWarningMessages(result.ConfigWarnings),
-		Sessions:       sessions,
-		Selected:       result.Selected,
-		Reminder:       jsonReminderStates(result.Reminder),
-		KeepAlive:      jsonKeepAliveStates(result.KeepAlive),
-		Error:          jsonErrorFromSnapshot(result.Error),
-	}
-}
-
-func jsonErrorFromSnapshot(err *snapshot.Error) *jsonout.Error {
-	if err == nil {
-		return nil
-	}
-	return &jsonout.Error{
-		Code:    err.Code,
-		Message: err.Message,
-		Query:   err.Query,
-	}
-}
-
-func jsonReminderStates(states map[string]snapshot.ReminderState) map[string]jsonout.ReminderState {
-	result := make(map[string]jsonout.ReminderState, len(states))
-	for id, state := range states {
-		enabled := state.Enabled
-		result[id] = jsonout.ReminderState{
-			Available:  true,
-			Enabled:    &enabled,
-			Thresholds: append([]int(nil), state.Thresholds...),
-		}
-	}
-	return result
-}
-
-func jsonKeepAliveStates(states map[string]snapshot.KeepAliveState) map[string]jsonout.KeepAliveState {
-	result := make(map[string]jsonout.KeepAliveState, len(states))
-	for id, state := range states {
-		enabled := state.Enabled
-		autoSend := state.AutoSend
-		result[id] = jsonout.KeepAliveState{
-			Available: true,
-			Enabled:   &enabled,
-			AutoSend:  &autoSend,
-			State:     state.State,
-			Scope: &jsonout.KeepAliveScope{
-				Mode:     state.Mode,
-				MaxSends: state.MaxSends,
-			},
-		}
-	}
-	return result
-}
-
-func writeJSON(stdout io.Writer, state jsonout.State, exitCode int) int {
-	data, err := jsonout.Marshal(state)
-	if err != nil {
-		fmt.Fprintln(stdout, `{"schema_version":1,"error":{"code":"config_error","message":"failed to encode json","query":""}}`)
-		return 1
-	}
-	fmt.Fprintln(stdout, string(data))
-	return exitCode
 }

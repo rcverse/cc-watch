@@ -24,8 +24,8 @@ func TestTimingDefaultsUseTTLSpecificTriggerWindows(t *testing.T) {
 	if oneHour.EffectiveCountdownSeconds != 30 {
 		t.Fatalf("1h countdown = %d, want 30", oneHour.EffectiveCountdownSeconds)
 	}
-	if !oneHour.AutoSendAllowed {
-		t.Fatalf("1h AutoSendAllowed = false, want true: %#v", oneHour)
+	if !oneHour.SendAllowed {
+		t.Fatalf("1h SendAllowed = false, want true: %#v", oneHour)
 	}
 
 	fiveMinute := EvaluateTiming(sessionWithTTL(now, session.Tier5Minute, 300, true), now, cfg)
@@ -35,8 +35,8 @@ func TestTimingDefaultsUseTTLSpecificTriggerWindows(t *testing.T) {
 	if fiveMinute.EffectiveCountdownSeconds != 30 {
 		t.Fatalf("5m countdown = %d, want 30", fiveMinute.EffectiveCountdownSeconds)
 	}
-	if !fiveMinute.AutoSendAllowed {
-		t.Fatalf("5m AutoSendAllowed = false, want true: %#v", fiveMinute)
+	if !fiveMinute.SendAllowed {
+		t.Fatalf("5m SendAllowed = false, want true: %#v", fiveMinute)
 	}
 }
 
@@ -70,12 +70,12 @@ func TestTimingClampsCountdownToPreserveSafetyMargin(t *testing.T) {
 	if result.SafetyClamped == false {
 		t.Fatalf("SafetyClamped = false, want true")
 	}
-	if !result.AutoSendAllowed {
-		t.Fatalf("AutoSendAllowed = false, want true after clamp: %#v", result)
+	if !result.SendAllowed {
+		t.Fatalf("SendAllowed = false, want true after clamp: %#v", result)
 	}
 }
 
-func TestTimingDisablesAutoSendWhenSafetyMarginCannotBePreserved(t *testing.T) {
+func TestTimingPausesSendWhenSafetyMarginCannotBePreserved(t *testing.T) {
 	cfg := config.Default().KeepAlive
 	cfg.TriggerBeforeExpiryMinutes = 1
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
@@ -95,16 +95,17 @@ func TestTimingDisablesAutoSendWhenSafetyMarginCannotBePreserved(t *testing.T) {
 	if result.EffectiveTriggerSeconds != 20 {
 		t.Fatalf("trigger = %d, want current remaining 20", result.EffectiveTriggerSeconds)
 	}
-	if result.AutoSendAllowed {
-		t.Fatalf("AutoSendAllowed = true, want false: %#v", result)
+	if result.SendAllowed {
+		t.Fatalf("SendAllowed = true, want false: %#v", result)
 	}
 	if result.EffectiveCountdownSeconds != 0 {
-		t.Fatalf("countdown = %d, want 0 when auto-send disabled", result.EffectiveCountdownSeconds)
+		t.Fatalf("countdown = %d, want 0 when send is paused", result.EffectiveCountdownSeconds)
 	}
 }
 
 func TestStateMachineTransitionsThroughRequiredStates(t *testing.T) {
 	cfg := config.Default().KeepAlive
+	cfg.Scope.MaxSends = 1
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 	s := activeSession("stateful", now, time.Hour, 10*time.Minute)
 	manager := NewManager(cfg)
@@ -143,10 +144,6 @@ func TestStateMachineTransitionsThroughRequiredStates(t *testing.T) {
 		t.Fatalf("state = %q, want %q", got, StateConfirming)
 	}
 	manager.MarkSuccess("stateful", sendToken)
-	if got := manager.State("stateful").State; got != StateSuccess {
-		t.Fatalf("state = %q, want %q", got, StateSuccess)
-	}
-	manager.Acknowledge("stateful")
 	if got := manager.State("stateful").State; got != StateScopeComplete {
 		t.Fatalf("state = %q, want %q", got, StateScopeComplete)
 	}
@@ -156,7 +153,7 @@ func TestStateMachineTransitionsThroughRequiredStates(t *testing.T) {
 	}
 }
 
-func TestStateMachineImmediateManualAndFailureStates(t *testing.T) {
+func TestStateMachineImmediatePausedAndFailureStates(t *testing.T) {
 	cfg := config.Default().KeepAlive
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 	inside := activeSession("inside", now, time.Hour, 5*time.Minute)
@@ -167,18 +164,15 @@ func TestStateMachineImmediateManualAndFailureStates(t *testing.T) {
 		t.Fatalf("enable inside trigger actions = %#v, want countdown", actions)
 	}
 
-	cfg.AutoSend = false
-	manual := NewManager(cfg)
-	actions = manual.Enable(activeSession("manual", now, time.Hour, 5*time.Minute), now)
-	if len(actions) != 1 || actions[0].Kind != ActionManualPromptShown {
-		t.Fatalf("manual enable actions = %#v, want manual prompt", actions)
+	pausedCfg := cfg
+	pausedCfg.TriggerBeforeExpiryMinutes = 1
+	paused := NewManager(pausedCfg)
+	actions = paused.Enable(activeSession("paused", now, 5*time.Minute, 20*time.Second), now)
+	if len(actions) != 0 {
+		t.Fatalf("unsafe enable actions = %#v, want no runner/countdown", actions)
 	}
-	if got := manual.State("manual").State; got != StateManualReady {
-		t.Fatalf("manual state = %q, want %q", got, StateManualReady)
-	}
-	manual.Dismiss("manual", actions[0].InstanceToken)
-	if got := manual.State("manual").State; got != StateCancelledInstance {
-		t.Fatalf("dismiss state = %q, want %q", got, StateCancelledInstance)
+	if state := paused.State("paused"); state.State != StatePaused || !state.SafetyDisabled {
+		t.Fatalf("unsafe state = %#v, want paused with safety disabled", state)
 	}
 
 	for _, tc := range []struct {
@@ -203,9 +197,6 @@ func TestStateMachineImmediateManualAndFailureStates(t *testing.T) {
 			tc.fail(m, tc.name, send[0].InstanceToken)
 			if got := m.State(tc.name).State; got != tc.want {
 				t.Fatalf("state = %q, want %q", got, tc.want)
-			}
-			if m.State(tc.name).AutoSend {
-				t.Fatalf("AutoSend stayed enabled after hard failure: %#v", m.State(tc.name))
 			}
 		})
 	}
@@ -283,8 +274,8 @@ func TestStateMachineIgnoresStaleTokenEventsAfterCancellationAndRefresh(t *testi
 	if actions := manager.CountdownElapsed("stale", start.InstanceToken, now.Add(30*time.Second)); len(actions) != 0 {
 		t.Fatalf("stale countdown actions after cancel = %#v, want none", actions)
 	}
-	if got := manager.State("stale").State; got != StateCancelledInstance {
-		t.Fatalf("state after stale countdown = %q, want cancelled", got)
+	if got := manager.State("stale").State; got != StateMonitoringIdle {
+		t.Fatalf("state after stale countdown = %q, want monitoring idle", got)
 	}
 
 	manager.Refresh(activeSession("stale", now.Add(time.Minute), time.Hour, 50*time.Minute), now.Add(time.Minute))
@@ -299,8 +290,8 @@ func TestStateMachineIgnoresStaleTokenEventsAfterCancellationAndRefresh(t *testi
 	manager.MarkSendStarted("stale", send[0].InstanceToken)
 	manager.Cancel("stale", send[0].InstanceToken)
 	manager.MarkSuccess("stale", send[0].InstanceToken)
-	if got := manager.State("stale").State; got != StateCancelledInstance {
-		t.Fatalf("stale confirmation changed state to %q, want cancelled", got)
+	if got := manager.State("stale").State; got != StateMonitoringIdle {
+		t.Fatalf("stale confirmation changed state to %q, want monitoring idle", got)
 	}
 }
 
@@ -314,7 +305,6 @@ func TestStateMachineDoesNotRearmWithinSameTriggerWindowWhenScopeRemains(t *test
 	send := manager.SendNow("rearm", start.InstanceToken)[0]
 	manager.MarkSendStarted("rearm", send.InstanceToken)
 	manager.MarkSuccess("rearm", send.InstanceToken)
-	manager.Acknowledge("rearm")
 	if got := manager.State("rearm").State; got != StateMonitoringIdle {
 		t.Fatalf("state = %q, want monitoring idle while waiting for edge reset", got)
 	}
@@ -339,36 +329,25 @@ func TestStateMachineDoesNotRearmWithinSameTriggerWindowWhenScopeRemains(t *test
 	}
 }
 
-func TestCountdownElapsedDoesNotSendWhenAutoSendTurnsOffOrSafetyDeadlineIsMissed(t *testing.T) {
+func TestCountdownElapsedDoesNotSendWhenSafetyDeadlineIsMissed(t *testing.T) {
 	cfg := config.Default().KeepAlive
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 
-	autoOff := NewManager(cfg)
-	start := autoOff.Enable(activeSession("auto-off", now, time.Hour, 5*time.Minute), now)[0]
-	autoOff.SetAutoSend("auto-off", false)
-	if actions := autoOff.CountdownElapsed("auto-off", start.InstanceToken, now.Add(30*time.Second)); len(actions) != 1 || actions[0].Kind != ActionManualPromptShown {
-		t.Fatalf("auto-off countdown actions = %#v, want manual prompt and no runner", actions)
-	}
-	state := autoOff.State("auto-off")
-	if state.State != StateManualReady || state.ScopeUsed != 0 {
-		t.Fatalf("auto-off state = %#v, want manual_ready without scope use", state)
-	}
-
 	// A 5m cache with 60s remaining expires at now+60; the hard send deadline
 	// sits 10s before that (now+50). A countdown that only elapses past the
-	// deadline -- e.g. after the machine slept -- bails to manual.
+	// deadline -- e.g. after the machine slept -- pauses without sending.
 	delayed := NewManager(cfg)
-	start = delayed.Enable(activeSession("delayed", now, 5*time.Minute, time.Minute), now)[0]
-	if actions := delayed.CountdownElapsed("delayed", start.InstanceToken, now.Add(51*time.Second)); len(actions) != 1 || actions[0].Kind != ActionManualPromptShown {
-		t.Fatalf("delayed countdown actions = %#v, want manual prompt and no runner", actions)
+	start := delayed.Enable(activeSession("delayed", now, 5*time.Minute, time.Minute), now)[0]
+	if actions := delayed.CountdownElapsed("delayed", start.InstanceToken, now.Add(51*time.Second)); len(actions) != 0 {
+		t.Fatalf("delayed countdown actions = %#v, want no runner", actions)
 	}
-	state = delayed.State("delayed")
-	if state.State != StateManualReady || state.ScopeUsed != 0 || !state.SafetyDisabled {
-		t.Fatalf("delayed state = %#v, want safety-disabled manual_ready without scope use", state)
+	state := delayed.State("delayed")
+	if state.State != StatePaused || state.ScopeUsed != 0 || !state.SafetyDisabled {
+		t.Fatalf("delayed state = %#v, want safety-disabled paused without scope use", state)
 	}
 }
 
-func TestAutoSendFiresForShortCacheDespiteCountdownDrift(t *testing.T) {
+func TestAutomaticSendFiresForShortCacheDespiteCountdownDrift(t *testing.T) {
 	cfg := config.Default().KeepAlive
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 	m := NewManager(cfg)
@@ -376,7 +355,7 @@ func TestAutoSendFiresForShortCacheDespiteCountdownDrift(t *testing.T) {
 	// A 5-minute cache entering its trigger window with 60s remaining: the
 	// countdown is 30s and the naive safety deadline sits exactly 30s out, so
 	// the tick-counted countdown (which always takes >=30 real seconds) elapses
-	// a beat late and must still auto-send, not silently bail to manual.
+	// a beat late and must still send, not silently pause.
 	actions := m.Enable(activeSession("short", now, 5*time.Minute, 60*time.Second), now)
 	if len(actions) != 1 || actions[0].Kind != ActionCountdownStarted {
 		t.Fatalf("Enable actions = %#v, want a countdown", actions)
@@ -386,50 +365,29 @@ func TestAutoSendFiresForShortCacheDespiteCountdownDrift(t *testing.T) {
 	elapse := now.Add(time.Duration(cfg.CountdownSeconds+2) * time.Second)
 	got := m.CountdownElapsed("short", token, elapse)
 	if len(got) != 1 || got[0].Kind != ActionStartRunner {
-		t.Fatalf("countdown elapsed actions = %#v, want auto-send (start_runner)", got)
+		t.Fatalf("countdown elapsed actions = %#v, want start_runner", got)
 	}
 }
 
-func TestFailureAcknowledgeMovesExhaustedScopeToScopeComplete(t *testing.T) {
-	cfg := config.Default().KeepAlive
-	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
-	manager := NewManager(cfg)
-
-	start := manager.Enable(activeSession("fail-done", now, time.Hour, 5*time.Minute), now)[0]
-	send := manager.SendNow("fail-done", start.InstanceToken)[0]
-	manager.MarkSubprocessFailure("fail-done", send.InstanceToken, "exit status 1", false)
-	if got := manager.State("fail-done").State; got != StateErrorSubprocess {
-		t.Fatalf("state = %q, want subprocess error before acknowledge", got)
-	}
-	manager.Acknowledge("fail-done")
-	if got := manager.State("fail-done").State; got != StateScopeComplete {
-		t.Fatalf("state = %q, want scope complete after exhausted failure acknowledge", got)
-	}
-}
-
-func TestReEnableAfterScopeExhaustedEmitsScopeCompleteAction(t *testing.T) {
+func TestResetLimitRearmsExhaustedKeepAlive(t *testing.T) {
 	cfg := config.Default().KeepAlive
 	cfg.Scope.MaxSends = 1
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 	manager := NewManager(cfg)
 
-	s := activeSession("re-enable", now, time.Hour, 5*time.Minute)
+	s := activeSession("reset-limit", now, time.Hour, 5*time.Minute)
 	start := manager.Enable(s, now)[0]
-	send := manager.SendNow("re-enable", start.InstanceToken)[0]
-	manager.MarkSendStarted("re-enable", send.InstanceToken)
-	manager.MarkSuccess("re-enable", send.InstanceToken)
-	manager.Acknowledge("re-enable")
-	if got := manager.State("re-enable").State; got != StateScopeComplete {
-		t.Fatalf("state = %q, want scope complete before disable", got)
+	send := manager.SendNow("reset-limit", start.InstanceToken)[0]
+	manager.MarkSendStarted("reset-limit", send.InstanceToken)
+	manager.MarkSuccess("reset-limit", send.InstanceToken)
+	if got := manager.State("reset-limit").State; got != StateScopeComplete {
+		t.Fatalf("state = %q, want scope complete before reset", got)
 	}
 
-	manager.Disable("re-enable")
-	actions := manager.Enable(s, now)
-	if len(actions) != 1 || actions[0].Kind != ActionScopeComplete {
-		t.Fatalf("re-enable after exhausted scope actions = %#v, want single ActionScopeComplete", actions)
-	}
-	if got := manager.State("re-enable").State; got != StateScopeComplete {
-		t.Fatalf("state = %q, want scope complete after re-enable", got)
+	manager.ResetLimit("reset-limit")
+	state := manager.State("reset-limit")
+	if state.State != StateMonitoringIdle || state.ScopeUsed != 0 {
+		t.Fatalf("after reset = %#v, want armed with zero sends", state)
 	}
 }
 
@@ -444,8 +402,8 @@ func TestRunnerAvailabilityFailuresAreVisibleAndBounded(t *testing.T) {
 		t.Fatal("CheckAvailability returned nil, want unavailable error")
 	}
 	state := armed.State("armed")
-	if state.State != StateErrorNoClaude || state.ScopeUsed != 0 || state.AutoSend {
-		t.Fatalf("armed unavailable state = %#v, want no-claude without consuming scope and auto-send stopped", state)
+	if state.State != StateErrorNoClaude || state.ScopeUsed != 0 {
+		t.Fatalf("armed unavailable state = %#v, want no-claude without consuming scope", state)
 	}
 
 	beforeSend := NewManager(cfg)
@@ -457,12 +415,12 @@ func TestRunnerAvailabilityFailuresAreVisibleAndBounded(t *testing.T) {
 	if result.Err == nil {
 		t.Fatal("Run returned nil error, want unavailable error")
 	}
-	if state.State != StateErrorNoClaude || state.ScopeUsed != 1 || state.AutoSend {
-		t.Fatalf("send-time unavailable state = %#v, want no-claude with one attempted scope and auto-send stopped", state)
+	if state.State != StateErrorNoClaude || state.ScopeUsed != 1 {
+		t.Fatalf("send-time unavailable state = %#v, want no-claude with one attempted scope", state)
 	}
 }
 
-func TestRunnerSubprocessFailuresAndLimitErrorsStopAutoSend(t *testing.T) {
+func TestRunnerSubprocessFailuresAndLimitErrorsStopInstance(t *testing.T) {
 	cfg := config.Default().KeepAlive
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 
@@ -485,8 +443,8 @@ func TestRunnerSubprocessFailuresAndLimitErrorsStopAutoSend(t *testing.T) {
 			if result.Err == nil {
 				t.Fatal("Run returned nil error, want subprocess failure")
 			}
-			if state.State != StateErrorSubprocess || state.AutoSend {
-				t.Fatalf("state = %#v, want subprocess failure with auto-send stopped", state)
+			if state.State != StateErrorSubprocess {
+				t.Fatalf("state = %#v, want subprocess failure", state)
 			}
 			if !strings.Contains(state.LastFailure, tc.want) {
 				t.Fatalf("LastFailure = %q, want %q", state.LastFailure, tc.want)

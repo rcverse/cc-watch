@@ -50,7 +50,7 @@ func TestRepeatedIdenticalFailureIsSuppressedUntilDistinctEventOrManualRefresh(t
 		t.Fatalf("notifier calls = %d, want 1 after suppressed duplicate", failing.calls)
 	}
 
-	distinct := manager.Notify(Event{Kind: EventKeepAliveManualPromptShown, SessionID: "one"})
+	distinct := manager.Notify(Event{Kind: EventKeepAliveSuccess, SessionID: "one"})
 	if distinct.Suppressed {
 		t.Fatalf("distinct event failure was suppressed: %#v", distinct)
 	}
@@ -62,7 +62,7 @@ func TestRepeatedIdenticalFailureIsSuppressedUntilDistinctEventOrManualRefresh(t
 	}
 
 	manager.ResetSuppression()
-	afterReset := manager.Notify(Event{Kind: EventKeepAliveManualPromptShown, SessionID: "one"})
+	afterReset := manager.Notify(Event{Kind: EventKeepAliveSuccess, SessionID: "one"})
 	if afterReset.Suppressed {
 		t.Fatalf("failure after manual reset was suppressed: %#v", afterReset)
 	}
@@ -79,7 +79,7 @@ func TestSuccessfulDistinctEventResetsFailureSuppression(t *testing.T) {
 	}}
 	manager := NewManager(notifier)
 	failedEvent := Event{Kind: EventReminderThresholdCrossed, SessionID: "one", ThresholdPercent: 20}
-	distinctEvent := Event{Kind: EventKeepAliveManualPromptShown, SessionID: "one"}
+	distinctEvent := Event{Kind: EventKeepAliveSuccess, SessionID: "one"}
 
 	first := manager.Notify(failedEvent)
 	second := manager.Notify(distinctEvent)
@@ -105,11 +105,6 @@ func TestEventWordingSeparatesReminderAlarmFromKeepAliveAutomation(t *testing.T)
 			want:  []string{"cc-watch · Reminder", "abc12345 · demo", "20%", "No message sent"},
 		},
 		{
-			name:  "manual prompt",
-			event: Event{Kind: EventKeepAliveManualPromptShown, ShortID: "abc12345", Project: "demo"},
-			want:  []string{"cc-watch · KeepAlive", "abc12345 · demo", "Auto-send is off"},
-		},
-		{
 			name:  "success",
 			event: Event{Kind: EventKeepAliveSuccess, ShortID: "abc12345", Project: "demo"},
 			want:  []string{"cc-watch · KeepAlive", "abc12345 · demo", "sent and confirmed"},
@@ -117,12 +112,12 @@ func TestEventWordingSeparatesReminderAlarmFromKeepAliveAutomation(t *testing.T)
 		{
 			name:  "failure generic",
 			event: Event{Kind: EventKeepAliveFailure, Reason: "confirmation timed out", ShortID: "abc12345", Project: "demo"},
-			want:  []string{"cc-watch · KeepAlive", "abc12345 · demo", "send failed", "confirmation timed out", "Auto-send is off"},
+			want:  []string{"cc-watch · KeepAlive", "abc12345 · demo", "send failed", "confirmation timed out", "Automatic sends paused"},
 		},
 		{
 			name:  "failure rate limited",
 			event: Event{Kind: EventKeepAliveFailure, Reason: "rate limit exceeded", RateLimited: true, ShortID: "abc12345", Project: "demo"},
-			want:  []string{"cc-watch · KeepAlive", "abc12345 · demo", "rate-limited", "Auto-send is off"},
+			want:  []string{"cc-watch · KeepAlive", "abc12345 · demo", "rate-limited", "automatic sends paused"},
 		},
 		{
 			name:  "scope complete",

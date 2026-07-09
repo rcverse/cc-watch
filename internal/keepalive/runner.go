@@ -84,7 +84,7 @@ func (r SubprocessRunner) Send(ctx context.Context, req RunRequest) RunResult {
 	// Only a failed send can be a rate limit. A successful send exits 0 with
 	// claude's own reply on stdout, which may legitimately contain words like
 	// "usage" or "limit" -- scanning it unconditionally would misread a success
-	// as a limit and disable Auto-send.
+	// as a limit and stop this KeepAlive instance.
 	failed := err != nil || exitCode != 0
 	result := RunResult{
 		StartedAt: startedAt,
@@ -112,7 +112,6 @@ func (m *Manager) CheckAvailability(sessionID string, runner ClaudeRunner) error
 	}
 	if err := runner.Available(); err != nil {
 		state.State = StateErrorNoClaude
-		state.AutoSend = false
 		state.LastFailure = err.Error()
 		state.InstanceToken = m.nextToken()
 		m.states[sessionID] = state

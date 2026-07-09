@@ -345,20 +345,17 @@ func keepAliveChip(m Model, s session.Session) string {
 	switch state {
 	case keepalive.StateCountdown:
 		return styles.Render(RoleKeepAlive, "KeepAlive") + " " + styles.Render(RoleWarning, "countdown")
-	case keepalive.StateManualReady:
-		return styles.Render(RoleKeepAlive, "KeepAlive") + " " + styles.Render(RoleWarning, "ready")
+	case keepalive.StatePaused:
+		return styles.Render(RoleKeepAlive, "KeepAlive") + " " + styles.Render(RoleWarning, "paused")
 	case keepalive.StateSending:
 		return styles.Render(RoleKeepAlive, "KeepAlive") + " " + styles.Render(RoleWarning, "sending")
 	case keepalive.StateConfirming:
 		return styles.Render(RoleKeepAlive, "KeepAlive") + " " + styles.Render(RoleWarning, "confirming")
 	case keepalive.StateErrorNoClaude, keepalive.StateErrorSubprocess, keepalive.StateErrorTimeout:
 		return styles.Render(RoleKeepAlive, "KeepAlive") + " " + styles.Render(RoleDanger, "failed")
-	case keepalive.StateMonitoringIdle, keepalive.StateSuccess, keepalive.StateScopeComplete:
+	case keepalive.StateMonitoringIdle, keepalive.StateScopeComplete:
 		return styles.Render(RoleKeepAlive, "KeepAlive") + " " + styles.Render(RoleSuccess, "ON")
 	default:
-		if m.keepAliveEnabled[s.SessionID] {
-			return styles.Render(RoleKeepAlive, "KeepAlive") + " " + styles.Render(RoleSuccess, "ON")
-		}
 		return styles.Render(RoleKeepAlive, "KeepAlive") + " " + styles.Render(RoleMuted, "off")
 	}
 }
@@ -526,18 +523,16 @@ func (m *Model) toggleKeepAliveForSelected() tea.Cmd {
 	state := m.KeepAliveState(selected.SessionID)
 	if state.State != keepalive.StateOff && state.State != "" {
 		m.keepAliveManager.Disable(selected.SessionID)
-		m.keepAliveEnabled[selected.SessionID] = false
 		m.setNotice("KeepAlive cancelled", RoleInfo, 3*time.Second)
 		m.restoreFocusAction(currentAction)
 		return nil
 	}
 	actions := m.keepAliveManager.Enable(*selected, m.now)
-	m.keepAliveEnabled[selected.SessionID] = true
 	m.restoreFocusAction(currentAction)
 	// CheckAvailability can overwrite the state actions above were computed
 	// from, so treat the two as mutually exclusive rather than notifying
 	// for both.
-	if m.deps.CheckClaudeAvailable != nil && m.KeepAliveState(selected.SessionID).AutoSend {
+	if m.deps.CheckClaudeAvailable != nil {
 		if err := m.deps.CheckClaudeAvailable(); err != nil {
 			m.keepAliveManager.CheckAvailability(selected.SessionID, availabilityChecker{err: err})
 			m.refresh.ClaudeUnavailableMessage = err.Error()
@@ -557,8 +552,8 @@ func (m Model) shouldShowClaudeUnavailable() bool {
 			return true
 		}
 	}
-	for _, enabled := range m.keepAliveEnabled {
-		if enabled {
+	for _, s := range m.sessions {
+		if m.KeepAliveEnabled(s.SessionID) {
 			return true
 		}
 	}

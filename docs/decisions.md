@@ -2,8 +2,8 @@
 
 Durable technical decisions and invariants for cc-watch. Distilled from the
 original v1-to-v2 migration ADRs and PRD; the phase-by-phase build history
-was dropped once v2 shipped and installed. If you're changing behavior in
-one of these areas, read the relevant section first.
+was dropped once v2 became the installed local command. If you're changing
+behavior in one of these areas, read the relevant section first.
 
 ## Module & distribution
 
@@ -12,17 +12,9 @@ one of these areas, read the relevant section first.
   path. No Homebrew tap, GitHub Releases, or goreleaser without explicit
   approval first.
 - macOS only. No Linux/Windows target unless separately approved.
-
-## JSON output contract (`--json`)
-
-- The top-level object is versioned: `schema_version: 1`. Field additions
-  are fine; changing the meaning of an existing field requires a version
-  bump.
-- Error codes are a closed set: `projects_dir_missing`, `no_sessions_found`,
-  `session_not_found`, `ambiguous_session_id`, `parse_error`,
-  `config_error`.
-- Never emit ANSI escape sequences in JSON output.
-- See `internal/jsonout/json.go` for the current field-level shape.
+- cc-watch is unreleased and local-first. Removed internal surfaces do not
+  need compatibility shims by default. Delete stale flags, config knobs,
+  tests, and docs unless the user explicitly asks for a migration path.
 
 ## KeepAlive subprocess safety
 
@@ -38,16 +30,15 @@ one of these areas, read the relevant section first.
   `rate limit`, `usage limit`, `quota`, or `too many requests`
   (case-insensitive) → `claude_limit`; missing executable →
   `claude_unavailable`; any other non-zero result → `subprocess_failed`.
-  Any of these disables Auto-send for that session until the user
+  Any of these pauses that KeepAlive instance until the user resets or
   re-enables it.
-- Scope counts a send at initiation, not at confirmation, so a failed
-  confirmation can't trigger a retry loop.
+- The send limit counts a send at initiation, not at confirmation, so a
+  failed confirmation can't trigger a retry loop.
 - **The send runs from the session's own project directory** (`cmd.Dir` =
   the `cwd` parsed from the transcript). `claude --resume` lookup is scoped to
   the current directory, so running from anywhere else fails with "No
   conversation found with session ID". An unparsed cwd falls back to
-  inheriting cc-watch's own cwd. The manual-fallback command shown in the TUI
-  is `cd <dir> && claude -r ...` for the same reason.
+  inheriting cc-watch's own cwd.
 - **Every send/confirm is appended to `~/.config/cc-watch/keepalive.log`**
   (slog JSONL: cwd, exit, classification, truncated stdout/stderr, confirm
   outcome). It's the only durable record — in-memory state is overwritten on
@@ -64,20 +55,19 @@ effective_countdown_s = min(countdown_s, effective_trigger_s - 30)   # 30s count
 latest_safe_send_at   = last_message_at + ttl_seconds - 10           # 10s hard-stop margin
 ```
 
-If the countdown-sizing margin can't be preserved, Auto-send is disabled for
-that instance and the UI falls back to a manual prompt. With defaults, a
-1-hour cache triggers at 5 minutes remaining; a 5-minute cache triggers at 1
-minute remaining.
+If the countdown-sizing margin can't be preserved, the KeepAlive instance is
+paused rather than sending too close to expiry. With defaults, a 1-hour cache
+triggers at 5 minutes remaining; a 5-minute cache triggers at 1 minute
+remaining.
 
 The countdown is sized to finish ~30s before expiry, but the hard send
 deadline (`latest_safe_send_at`) uses a **smaller** 10s margin on purpose. The
 countdown is tick-counted, so it always elapses a beat after its nominal
 duration; if the deadline used the same 30s margin it would coincide with the
-countdown's own end and any drift would silently bail Auto-send to a manual
-prompt — which made Auto-send effectively never fire for 5-minute and
-unknown-tier caches (their countdown ends right at the 30s mark). The 10s
-hard-stop absorbs normal drift while still refusing to auto-send within
-seconds of expiry.
+countdown's own end and any drift would silently pause sending — which made
+KeepAlive effectively never fire for 5-minute and unknown-tier caches (their
+countdown ends right at the 30s mark). The 10s hard-stop absorbs normal drift
+while still refusing to send within seconds of expiry.
 
 ## Refresh architecture
 
@@ -89,6 +79,17 @@ seconds of expiry.
   result can't overwrite a newer parse result, delete, or rename.
 - Watcher failures are a degraded state, not a crash — safety refresh keeps
   working even if fsnotify setup partially fails.
+
+## UI demo harness
+
+- Rare TUI states are exercised through `tools/ui-demo`, gated behind the
+  `demo` build tag. The harness may expose fake time travel and fixtures, but
+  it must render through the real TUI model.
+- Demo fixtures must never touch `~/.claude`, send real notifications, write
+  config, or spawn `claude`. The fixture layer is allowed to fake inputs only;
+  production rendering and state transitions stay load-bearing.
+- `go test ./...` should remain free of demo-only code. Use
+  `go test -tags demo ./...` when validating demo routes.
 
 ## statusline subprocess safety and rate-limit estimate
 
@@ -151,8 +152,8 @@ seconds of expiry.
 ## Non-goals (still true, don't add unprompted)
 
 No native macOS app, no background daemon, no public watch mode, no
-unbounded/hidden KeepAlive loop, no direct Anthropic API calls, no
-mouse-first interaction requirement.
+machine-readable JSON mode, no unbounded/hidden KeepAlive loop, no direct
+Anthropic API calls, no mouse-first interaction requirement.
 
 ## Historical note
 
