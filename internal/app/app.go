@@ -201,7 +201,7 @@ func tuiDependencies(cmd Command, deps Dependencies, home string) tui.Dependenci
 		keepalive.LogDir = filepath.Join(home, ".config", "cc-watch")
 	}
 	return tui.Dependencies{
-		RefreshSnapshot: func(_ refresh.Source, _ int, selected *session.Session) tui.RefreshSnapshot {
+		RefreshSnapshot: func(selected *session.Session) tui.RefreshSnapshot {
 			if selected != nil {
 				parsed, err := deps.ParseFile(selected.JSONLPath)
 				if err != nil {

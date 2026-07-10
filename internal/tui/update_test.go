@@ -10,7 +10,6 @@ import (
 	"github.com/richardchen/cc-watch/internal/config"
 	"github.com/richardchen/cc-watch/internal/keepalive"
 	"github.com/richardchen/cc-watch/internal/notify"
-	"github.com/richardchen/cc-watch/internal/refresh"
 	"github.com/richardchen/cc-watch/internal/session"
 )
 
@@ -21,7 +20,7 @@ func TestDisplayTickRecomputesTimeOnly(t *testing.T) {
 	model := NewModel(Options{
 		Now: now,
 		Dependencies: Dependencies{
-			RefreshSnapshot: func(source refresh.Source, generation int, selected *session.Session) RefreshSnapshot {
+			RefreshSnapshot: func(selected *session.Session) RefreshSnapshot {
 				refreshCalls++
 				return RefreshSnapshot{}
 			},
@@ -392,7 +391,7 @@ func TestListDirectKeysToggleAndActivate(t *testing.T) {
 		Now:      now,
 		Sessions: listViewSessions(now),
 		Dependencies: Dependencies{
-			RefreshSnapshot: func(source refresh.Source, generation int, selected *session.Session) RefreshSnapshot {
+			RefreshSnapshot: func(selected *session.Session) RefreshSnapshot {
 				return RefreshSnapshot{Sessions: listViewSessions(now.Add(time.Minute))}
 			},
 		},
@@ -614,7 +613,7 @@ func TestWorkspaceActionFeedbackForUpdateAndCancelWatching(t *testing.T) {
 		SelectedID: "workspace-id",
 		Sessions:   []session.Session{workspaceSession(now)},
 		Dependencies: Dependencies{
-			RefreshSnapshot: func(source refresh.Source, generation int, selected *session.Session) RefreshSnapshot {
+			RefreshSnapshot: func(selected *session.Session) RefreshSnapshot {
 				if selected == nil {
 					t.Fatalf("selected refresh input = nil")
 				}

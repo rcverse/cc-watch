@@ -21,6 +21,6 @@ func LiveRefreshCommand(watcher Watcher) tea.Cmd {
 		if result.Err != nil {
 			return RefreshWatcherDegradedMsg{State: result.State}
 		}
-		return RefreshWatcherEventsMsg{Events: result.Events, State: result.State}
+		return RefreshWatcherChangedMsg{State: result.State}
 	}
 }

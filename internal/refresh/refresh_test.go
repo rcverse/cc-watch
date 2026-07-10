@@ -67,10 +67,12 @@ func TestWatcherSetupFailureAndPartialFailureProduceDegradedState(t *testing.T) 
 	}
 }
 
-func TestWatcherNormalizesEventsAndAddsCreatedDirectories(t *testing.T) {
+func TestWatcherAddsCreatedDirectories(t *testing.T) {
 	projectsDir := "/tmp/home/.claude/projects"
+	events := make(chan RawEvent, 1)
 	fs := &fakeWatchFS{
-		dirs: []string{projectsDir},
+		dirs:   []string{projectsDir},
+		events: events,
 		isDir: map[string]bool{
 			projectsDir + "/-tmp-new": true,
 		},
@@ -80,24 +82,14 @@ func TestWatcherNormalizesEventsAndAddsCreatedDirectories(t *testing.T) {
 		t.Fatalf("NewWatcher returned error: %v", err)
 	}
 
-	events := []RawEvent{
-		{Path: projectsDir + "/-tmp-new", Op: OpCreate},
-		{Path: projectsDir + "/-tmp-new/session.jsonl", Op: OpWrite},
-		{Path: projectsDir + "/-tmp-new/session.jsonl", Op: OpRename},
-		{Path: projectsDir + "/-tmp-new/session.jsonl", Op: OpDelete},
-	}
-	normalized := watcher.Normalize(events)
+	events <- RawEvent{Path: projectsDir + "/-tmp-new", Op: OpCreate}
+	result := watcher.Next()
 
 	if !watcher.Watched(projectsDir + "/-tmp-new") {
 		t.Fatalf("created directory was not watched: %#v", watcher.WatchedPaths())
 	}
-	if len(normalized) != 4 {
-		t.Fatalf("len(normalized) = %d, want 4", len(normalized))
-	}
-	for i, want := range []EventKind{EventCreated, EventWritten, EventRenamed, EventDeleted} {
-		if normalized[i].Kind != want {
-			t.Fatalf("event %d kind = %q, want %q", i, normalized[i].Kind, want)
-		}
+	if !result.Changed {
+		t.Fatal("Changed = false, want true")
 	}
 }
 
@@ -118,11 +110,8 @@ func TestWatcherNextReturnsDomainResultWithoutTeaDependency(t *testing.T) {
 	events <- RawEvent{Path: projectsDir + "/session.jsonl", Op: OpWrite}
 
 	result := watcher.Next()
-	if len(result.Events) != 1 {
-		t.Fatalf("len(result.Events) = %d, want 1: %#v", len(result.Events), result)
-	}
-	if result.Events[0].Kind != EventWritten {
-		t.Fatalf("event kind = %q, want %q", result.Events[0].Kind, EventWritten)
+	if !result.Changed {
+		t.Fatalf("Changed = false, want true: %#v", result)
 	}
 	if result.State.Status != StatusOK {
 		t.Fatalf("state = %#v, want ok", result.State)
@@ -132,8 +121,10 @@ func TestWatcherNextReturnsDomainResultWithoutTeaDependency(t *testing.T) {
 func TestNewDirectoryWatchFailureDegradesWithoutStoppingSafetyRefresh(t *testing.T) {
 	projectsDir := "/tmp/home/.claude/projects"
 	newDir := projectsDir + "/-tmp-new"
+	events := make(chan RawEvent, 1)
 	fs := &fakeWatchFS{
 		dirs:      []string{projectsDir},
+		events:    events,
 		isDir:     map[string]bool{newDir: true},
 		watchErrs: map[string]error{newDir: errors.New("permission denied")},
 	}
@@ -142,7 +133,8 @@ func TestNewDirectoryWatchFailureDegradesWithoutStoppingSafetyRefresh(t *testing
 		t.Fatalf("NewWatcher returned error: %v", err)
 	}
 
-	_ = watcher.Normalize([]RawEvent{{Path: newDir, Op: OpCreate}})
+	events <- RawEvent{Path: newDir, Op: OpCreate}
+	_ = watcher.Next()
 	state := watcher.State()
 	if state.Status != StatusPartial {
 		t.Fatalf("status = %q, want partial after new dir failure", state.Status)
@@ -293,43 +285,30 @@ func assertClosedErrorChannel(t *testing.T, ch <-chan error) {
 }
 
 func TestCoordinatorDebounceSafetyManualAndGenerationOrdering(t *testing.T) {
-	coordinator := NewCoordinator(Options{
-		Debounce:       200 * time.Millisecond,
-		SafetyInterval: time.Minute,
-		InitialNow:     time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC),
-	})
+	coordinator := NewCoordinator(0)
 
-	first := coordinator.OnWatcherEvents([]NormalizedEvent{{Kind: EventWritten, Path: "/tmp/a.jsonl"}})
-	second := coordinator.OnWatcherEvents([]NormalizedEvent{{Kind: EventWritten, Path: "/tmp/b.jsonl"}})
-	if first.ShouldRefresh || second.ShouldRefresh {
-		t.Fatalf("debounced watcher events refreshed immediately: first=%#v second=%#v", first, second)
-	}
-	if coordinator.PendingDebounceCount() != 1 {
-		t.Fatalf("pending debounce count = %d, want coalesced 1", coordinator.PendingDebounceCount())
-	}
-	if first.DebounceToken == second.DebounceToken {
-		t.Fatalf("debounce token did not advance: first=%d second=%d", first.DebounceToken, second.DebounceToken)
+	first := coordinator.OnWatcherEvent()
+	second := coordinator.OnWatcherEvent()
+	if first == second {
+		t.Fatalf("debounce token did not advance: first=%d second=%d", first, second)
 	}
 
-	stale := coordinator.OnDebounceElapsed(time.Date(2026, 6, 4, 12, 0, 1, 0, time.UTC), first.DebounceToken)
+	stale := coordinator.OnDebounceElapsed(first)
 	if stale.ShouldRefresh {
 		t.Fatalf("stale debounce decision = %#v, want no refresh", stale)
 	}
 
-	debounced := coordinator.OnDebounceElapsed(time.Date(2026, 6, 4, 12, 0, 1, 0, time.UTC), second.DebounceToken)
-	if !debounced.ShouldRefresh || debounced.Source != SourceFsnotify || debounced.Generation != 1 {
-		t.Fatalf("debounced decision = %#v, want fsnotify generation 1", debounced)
+	debounced := coordinator.OnDebounceElapsed(second)
+	if !debounced.ShouldRefresh || debounced.Generation != 1 {
+		t.Fatalf("debounced decision = %#v, want generation 1", debounced)
 	}
-	safety := coordinator.OnSafetyTick(time.Date(2026, 6, 4, 12, 1, 0, 0, time.UTC))
-	if !safety.ShouldRefresh || safety.Source != SourceSafety || safety.Generation != 2 {
-		t.Fatalf("safety decision = %#v, want safety generation 2", safety)
+	safety := coordinator.Refresh()
+	if !safety.ShouldRefresh || safety.Generation != 2 {
+		t.Fatalf("safety decision = %#v, want generation 2", safety)
 	}
-	manual := coordinator.OnManualRefresh()
-	if !manual.ShouldRefresh || manual.Source != SourceManual || manual.Generation != 3 {
-		t.Fatalf("manual decision = %#v, want manual generation 3", manual)
-	}
-	if !manual.BypassedDebounce {
-		t.Fatalf("manual BypassedDebounce = false, want true")
+	manual := coordinator.Refresh()
+	if !manual.ShouldRefresh || manual.Generation != 3 {
+		t.Fatalf("manual decision = %#v, want generation 3", manual)
 	}
 }
 
@@ -349,8 +328,8 @@ func TestWatcherNextReturnsEventAndErrorResults(t *testing.T) {
 
 	events <- RawEvent{Path: projectsDir + "/session.jsonl", Op: OpWrite}
 	result := watcher.Next()
-	if len(result.Events) != 1 || result.Events[0].Kind != EventWritten {
-		t.Fatalf("events = %#v, want written event", result.Events)
+	if !result.Changed {
+		t.Fatalf("Changed = false, want true")
 	}
 
 	errs <- errors.New("watcher closed")

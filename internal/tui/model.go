@@ -48,7 +48,7 @@ type RefreshViewState struct {
 }
 
 type Dependencies struct {
-	RefreshSnapshot              func(source refresh.Source, generation int, selected *session.Session) RefreshSnapshot
+	RefreshSnapshot              func(selected *session.Session) RefreshSnapshot
 	CheckClaudeAvailable         func() error
 	KeepAliveRunner              keepalive.ClaudeRunner
 	ConfirmKeepAlive             func(context.Context, keepalive.ConfirmationTarget) (keepalive.ConfirmationResult, error)
@@ -135,8 +135,6 @@ type Model struct {
 	ambiguousID          string
 	notice               Notice
 	refresh              RefreshViewState
-	lastRefreshSource    refresh.Source
-	lastBypassedDebounce bool
 	detailsOffset        int
 	sessionInfoExpanded  bool
 	gapSortNewest        bool
@@ -199,12 +197,7 @@ func NewModel(options Options) Model {
 	if refreshTiming.SafetyInterval <= 0 {
 		refreshTiming.SafetyInterval = 30 * time.Second
 	}
-	refreshCoordinator := refresh.NewCoordinator(refresh.Options{
-		Debounce:          refreshTiming.Debounce,
-		SafetyInterval:    refreshTiming.SafetyInterval,
-		InitialNow:        now,
-		InitialGeneration: options.RefreshGeneration,
-	})
+	refreshCoordinator := refresh.NewCoordinator(options.RefreshGeneration)
 	deps := options.Dependencies
 	if deps.InspectStatusline == nil {
 		deps.InspectStatusline = func() (statusline.Status, error) {

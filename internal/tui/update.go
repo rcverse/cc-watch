@@ -40,17 +40,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(commands...)
 	case RefreshTickMsg:
 		m.now = typed.Now
-		decision := m.refreshCoordinator.OnSafetyTick(typed.Now)
-		updated, cmd := m.scheduleRefreshDecision(decision)
+		updated, cmd := m.scheduleRefresh()
 		m = updated.(Model)
 		if m.startRefreshTicker {
 			return m, tea.Batch(cmd, refreshTickCommand(m.refreshTiming.SafetyInterval))
 		}
 		return m, cmd
-	case RefreshWatcherEventsMsg:
+	case RefreshWatcherChangedMsg:
 		m.refresh.Watcher = typed.State
-		decision := m.refreshCoordinator.OnWatcherEvents(typed.Events)
-		m.refreshDebounceToken = decision.DebounceToken
+		m.refreshDebounceToken = m.refreshCoordinator.OnWatcherEvent()
 		if m.liveRefresh != nil {
 			return m, tea.Batch(refreshDebounceCommand(m.refreshTiming.Debounce, m.refreshDebounceToken), m.liveRefresh)
 		}
@@ -65,7 +63,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh.Watcher = typed.State
 		return m, nil
 	case RefreshDebounceElapsedMsg:
-		decision := m.refreshCoordinator.OnDebounceElapsed(typed.Now, typed.Token)
+		decision := m.refreshCoordinator.OnDebounceElapsed(typed.Token)
 		return m.scheduleRefreshDecision(decision)
 	case RefreshResultMsg:
 		if typed.Generation < m.refreshGeneration {
@@ -154,8 +152,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.setNotice("updating sessions", RoleInfo, 3*time.Second)
 		}
-		decision := m.refreshCoordinator.OnManualRefresh()
-		return m.scheduleRefreshDecision(decision)
+		return m.scheduleRefresh()
 	case tea.KeyMsg:
 		return m.updateKey(typed)
 	case tea.WindowSizeMsg:
@@ -214,10 +211,8 @@ func (m *Model) applyNotificationResult(msg NotificationResultMsg) {
 	}
 }
 
-func (m Model) scheduleRefresh(source refresh.Source, bypassedDebounce bool) (tea.Model, tea.Cmd) {
-	decision := m.refreshCoordinator.NextRefresh(source)
-	decision.BypassedDebounce = bypassedDebounce
-	return m.scheduleRefreshDecision(decision)
+func (m Model) scheduleRefresh() (tea.Model, tea.Cmd) {
+	return m.scheduleRefreshDecision(m.refreshCoordinator.Refresh())
 }
 
 func (m Model) scheduleRefreshDecision(decision refresh.Decision) (tea.Model, tea.Cmd) {
@@ -225,12 +220,10 @@ func (m Model) scheduleRefreshDecision(decision refresh.Decision) (tea.Model, te
 		return m, nil
 	}
 	m.refreshGeneration = decision.Generation
-	m.lastRefreshSource = decision.Source
-	m.lastBypassedDebounce = decision.BypassedDebounce
-	return m.refreshCommand(decision.Source, decision.Generation)
+	return m.refreshCommand(decision.Generation)
 }
 
-func (m Model) refreshCommand(source refresh.Source, generation int) (tea.Model, tea.Cmd) {
+func (m Model) refreshCommand(generation int) (tea.Model, tea.Cmd) {
 	refreshSnapshot := m.deps.RefreshSnapshot
 	selected := m.selectedSession()
 	if refreshSnapshot == nil {
@@ -242,7 +235,7 @@ func (m Model) refreshCommand(source refresh.Source, generation int) (tea.Model,
 		selectedForRefresh = &copied
 	}
 	return m, func() tea.Msg {
-		snapshot := refreshSnapshot(source, generation, selectedForRefresh)
+		snapshot := refreshSnapshot(selectedForRefresh)
 		return RefreshResultMsg{
 			Generation:   generation,
 			Sessions:     snapshot.Sessions,

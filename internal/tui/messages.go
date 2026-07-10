@@ -18,9 +18,8 @@ type RefreshTickMsg struct {
 	Now time.Time
 }
 
-type RefreshWatcherEventsMsg struct {
-	Events []refresh.NormalizedEvent
-	State  refresh.State
+type RefreshWatcherChangedMsg struct {
+	State refresh.State
 }
 
 type RefreshWatcherDegradedMsg struct {

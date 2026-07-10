@@ -477,7 +477,7 @@ func TestWorkspaceManualRefreshParsesSelectedJSONLPathOnly(t *testing.T) {
 	}
 	parseCalls = nil
 	selected := options.Sessions[0]
-	snapshot := options.Dependencies.RefreshSnapshot(refresh.SourceManual, 2, &selected)
+	snapshot := options.Dependencies.RefreshSnapshot(&selected)
 	if len(parseCalls) != 1 || parseCalls[0] != "/tmp/selected.jsonl" {
 		t.Fatalf("refresh parse calls = %#v, want selected path only", parseCalls)
 	}
@@ -518,7 +518,7 @@ func TestWorkspaceManualRefreshParseFailurePreservesSelectedRefreshScope(t *test
 	}
 	selected := options.Sessions[0]
 	parseErr = true
-	snapshot := options.Dependencies.RefreshSnapshot(refresh.SourceManual, 2, &selected)
+	snapshot := options.Dependencies.RefreshSnapshot(&selected)
 	if !snapshot.SelectedOnly || snapshot.SelectedID != selected.SessionID {
 		t.Fatalf("snapshot selected flags = %#v, want selected scope preserved", snapshot)
 	}

@@ -17,19 +17,15 @@ func TestWatcherEventsDebounceBeforeRefreshSnapshot(t *testing.T) {
 	model := NewModel(Options{
 		Now: now,
 		Dependencies: Dependencies{
-			RefreshSnapshot: func(source refresh.Source, generation int, selected *session.Session) RefreshSnapshot {
+			RefreshSnapshot: func(selected *session.Session) RefreshSnapshot {
 				calls++
-				if source != refresh.SourceFsnotify {
-					t.Fatalf("source = %q, want fsnotify", source)
-				}
 				return RefreshSnapshot{Sessions: []session.Session{{SessionID: "after-event", ShortID: "after"}}}
 			},
 		},
 	})
 
-	updated, cmd := model.Update(RefreshWatcherEventsMsg{
-		Events: []refresh.NormalizedEvent{{Kind: refresh.EventWritten, Path: "/tmp/session.jsonl"}},
-		State:  refresh.State{Status: refresh.StatusOK, SafetyRefreshActive: true},
+	updated, cmd := model.Update(RefreshWatcherChangedMsg{
+		State: refresh.State{Status: refresh.StatusOK, SafetyRefreshActive: true},
 	})
 	model = updated.(Model)
 	if calls != 0 {
@@ -54,9 +50,6 @@ func TestWatcherEventsDebounceBeforeRefreshSnapshot(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("calls = %d, want 1", calls)
 	}
-	if model.lastRefreshSource != refresh.SourceFsnotify {
-		t.Fatalf("last refresh source = %q, want fsnotify", model.lastRefreshSource)
-	}
 }
 
 func TestStaleWatcherDebounceElapsedDoesNotRefresh(t *testing.T) {
@@ -65,23 +58,21 @@ func TestStaleWatcherDebounceElapsedDoesNotRefresh(t *testing.T) {
 	model := NewModel(Options{
 		Now: now,
 		Dependencies: Dependencies{
-			RefreshSnapshot: func(source refresh.Source, generation int, selected *session.Session) RefreshSnapshot {
+			RefreshSnapshot: func(selected *session.Session) RefreshSnapshot {
 				calls++
 				return RefreshSnapshot{Sessions: []session.Session{{SessionID: "after-event", ShortID: "after"}}}
 			},
 		},
 	})
 
-	updated, _ := model.Update(RefreshWatcherEventsMsg{
-		Events: []refresh.NormalizedEvent{{Kind: refresh.EventWritten, Path: "/tmp/one.jsonl"}},
-		State:  refresh.State{Status: refresh.StatusOK, SafetyRefreshActive: true},
+	updated, _ := model.Update(RefreshWatcherChangedMsg{
+		State: refresh.State{Status: refresh.StatusOK, SafetyRefreshActive: true},
 	})
 	model = updated.(Model)
 	firstToken := model.refreshDebounceToken
 
-	updated, _ = model.Update(RefreshWatcherEventsMsg{
-		Events: []refresh.NormalizedEvent{{Kind: refresh.EventWritten, Path: "/tmp/two.jsonl"}},
-		State:  refresh.State{Status: refresh.StatusOK, SafetyRefreshActive: true},
+	updated, _ = model.Update(RefreshWatcherChangedMsg{
+		State: refresh.State{Status: refresh.StatusOK, SafetyRefreshActive: true},
 	})
 	model = updated.(Model)
 	secondToken := model.refreshDebounceToken
@@ -129,13 +120,7 @@ func TestSafetyRefreshProducesFreshGenerationCommand(t *testing.T) {
 	model := NewModel(Options{
 		RefreshGeneration: 4,
 		Dependencies: Dependencies{
-			RefreshSnapshot: func(source refresh.Source, generation int, selected *session.Session) RefreshSnapshot {
-				if source != refresh.SourceSafety {
-					t.Fatalf("source = %q, want safety", source)
-				}
-				if generation != 5 {
-					t.Fatalf("generation = %d, want 5", generation)
-				}
+			RefreshSnapshot: func(selected *session.Session) RefreshSnapshot {
 				return RefreshSnapshot{Sessions: []session.Session{{SessionID: "safety", ShortID: "safety"}}}
 			},
 		},
@@ -247,17 +232,11 @@ func TestRefreshResultUpdatesEmptyState(t *testing.T) {
 	}
 }
 
-func TestManualRefreshBypassesDebounceWithFreshGeneration(t *testing.T) {
+func TestManualRefreshUsesFreshGeneration(t *testing.T) {
 	model := NewModel(Options{
 		RefreshGeneration: 2,
 		Dependencies: Dependencies{
-			RefreshSnapshot: func(source refresh.Source, generation int, selected *session.Session) RefreshSnapshot {
-				if source != refresh.SourceManual {
-					t.Fatalf("source = %q, want manual", source)
-				}
-				if generation != 3 {
-					t.Fatalf("generation = %d, want 3", generation)
-				}
+			RefreshSnapshot: func(selected *session.Session) RefreshSnapshot {
 				return RefreshSnapshot{Sessions: []session.Session{{SessionID: "manual", ShortID: "manual"}}}
 			},
 		},
@@ -280,12 +259,6 @@ func TestManualRefreshBypassesDebounceWithFreshGeneration(t *testing.T) {
 	}
 	if model.refreshGeneration != 3 {
 		t.Fatalf("generation = %d, want 3", model.refreshGeneration)
-	}
-	if model.lastRefreshSource != refresh.SourceManual {
-		t.Fatalf("source = %q, want manual", model.lastRefreshSource)
-	}
-	if !model.lastBypassedDebounce {
-		t.Fatal("manual refresh did not bypass debounce")
 	}
 }
 
@@ -315,11 +288,8 @@ func TestRefreshTickReparsesListAndWorkspaceSessions(t *testing.T) {
 		Now:      now,
 		Sessions: []session.Session{workspaceSession(now)},
 		Dependencies: Dependencies{
-			RefreshSnapshot: func(source refresh.Source, generation int, selected *session.Session) RefreshSnapshot {
+			RefreshSnapshot: func(selected *session.Session) RefreshSnapshot {
 				listCalls++
-				if source != refresh.SourceSafety {
-					t.Fatalf("list refresh source = %q, want safety", source)
-				}
 				return RefreshSnapshot{Sessions: []session.Session{workspaceSession(now.Add(time.Minute))}, HasRefresh: true}
 			},
 		},
@@ -332,8 +302,8 @@ func TestRefreshTickReparsesListAndWorkspaceSessions(t *testing.T) {
 	if msg := cmd(); msg.(RefreshResultMsg).Generation != list.refreshGeneration {
 		t.Fatalf("refresh result generation did not match model generation")
 	}
-	if listCalls != 1 || list.lastRefreshSource != refresh.SourceSafety {
-		t.Fatalf("list refresh calls=%d source=%q", listCalls, list.lastRefreshSource)
+	if listCalls != 1 {
+		t.Fatalf("list refresh calls=%d, want 1", listCalls)
 	}
 
 	selectedCalls := 0
@@ -342,10 +312,10 @@ func TestRefreshTickReparsesListAndWorkspaceSessions(t *testing.T) {
 		SelectedID: "workspace-id",
 		Sessions:   []session.Session{workspaceSession(now)},
 		Dependencies: Dependencies{
-			RefreshSnapshot: func(source refresh.Source, generation int, selected *session.Session) RefreshSnapshot {
+			RefreshSnapshot: func(selected *session.Session) RefreshSnapshot {
 				selectedCalls++
-				if selected == nil || source != refresh.SourceSafety || selected.SessionID != "workspace-id" {
-					t.Fatalf("workspace refresh source=%q selected=%#v", source, selected)
+				if selected == nil || selected.SessionID != "workspace-id" {
+					t.Fatalf("workspace refresh selected=%#v", selected)
 				}
 				return RefreshSnapshot{
 					Sessions:     []session.Session{workspaceSession(now.Add(time.Minute))},
@@ -365,8 +335,8 @@ func TestRefreshTickReparsesListAndWorkspaceSessions(t *testing.T) {
 	if !result.SelectedOnly || result.SelectedID != "workspace-id" {
 		t.Fatalf("workspace refresh result selectedOnly=%v selectedID=%q", result.SelectedOnly, result.SelectedID)
 	}
-	if selectedCalls != 1 || workspace.lastRefreshSource != refresh.SourceSafety {
-		t.Fatalf("workspace refresh calls=%d source=%q", selectedCalls, workspace.lastRefreshSource)
+	if selectedCalls != 1 {
+		t.Fatalf("workspace refresh calls=%d, want 1", selectedCalls)
 	}
 }
 
@@ -380,7 +350,7 @@ func TestRefreshSnapshotAppliesSelectedSessionSnapshot(t *testing.T) {
 		Sessions:   []session.Session{initial},
 		SelectedID: initial.SessionID,
 		Dependencies: Dependencies{
-			RefreshSnapshot: func(source refresh.Source, generation int, selected *session.Session) RefreshSnapshot {
+			RefreshSnapshot: func(selected *session.Session) RefreshSnapshot {
 				if selected == nil || selected.SessionID != initial.SessionID {
 					t.Fatalf("selected snapshot input = %#v", selected)
 				}
@@ -418,7 +388,7 @@ func TestDisplayTickDoesNotRefreshData(t *testing.T) {
 		Now:      now,
 		Sessions: []session.Session{workspaceSession(now)},
 		Dependencies: Dependencies{
-			RefreshSnapshot: func(source refresh.Source, generation int, selected *session.Session) RefreshSnapshot {
+			RefreshSnapshot: func(selected *session.Session) RefreshSnapshot {
 				refreshCalls++
 				return RefreshSnapshot{Sessions: []session.Session{workspaceSession(now.Add(time.Minute))}, HasRefresh: true}
 			},
@@ -426,8 +396,8 @@ func TestDisplayTickDoesNotRefreshData(t *testing.T) {
 	})
 	updated, cmd := model.Update(DisplayTickMsg{Now: now.Add(time.Second)})
 	model = updated.(Model)
-	if refreshCalls != 0 || model.lastRefreshSource != "" {
-		t.Fatalf("display tick refreshed data: calls=%d source=%q", refreshCalls, model.lastRefreshSource)
+	if refreshCalls != 0 {
+		t.Fatalf("display tick refreshed data: calls=%d", refreshCalls)
 	}
 	if cmd != nil {
 		if _, ok := cmd().(RefreshResultMsg); ok {
@@ -463,10 +433,7 @@ func TestWorkspaceManualRefreshIsFocusableAndUsesSelectedIDSnapshot(t *testing.T
 		SelectedID: "workspace-id",
 		Sessions:   []session.Session{workspaceSession(now)},
 		Dependencies: Dependencies{
-			RefreshSnapshot: func(source refresh.Source, generation int, selected *session.Session) RefreshSnapshot {
-				if source != refresh.SourceManual {
-					t.Fatalf("source = %q, want manual", source)
-				}
+			RefreshSnapshot: func(selected *session.Session) RefreshSnapshot {
 				return RefreshSnapshot{
 					Sessions:   []session.Session{workspaceSession(now.Add(time.Minute))},
 					Refresh:    RefreshViewState{ProjectsDir: "/tmp/home/.claude/projects"},
@@ -489,9 +456,6 @@ func TestWorkspaceManualRefreshIsFocusableAndUsesSelectedIDSnapshot(t *testing.T
 	if len(result.Sessions) != 1 || result.Sessions[0].SessionID != "workspace-id" {
 		t.Fatalf("manual workspace refresh result = %#v, want only selected session", result.Sessions)
 	}
-	if !model.lastBypassedDebounce {
-		t.Fatal("manual refresh did not bypass debounce")
-	}
 }
 
 func TestWorkspaceManualRefreshPrefersSelectedPathSnapshot(t *testing.T) {
@@ -503,7 +467,7 @@ func TestWorkspaceManualRefreshPrefersSelectedPathSnapshot(t *testing.T) {
 		SelectedID: "workspace-id",
 		Sessions:   []session.Session{workspaceSession(now)},
 		Dependencies: Dependencies{
-			RefreshSnapshot: func(source refresh.Source, generation int, selected *session.Session) RefreshSnapshot {
+			RefreshSnapshot: func(selected *session.Session) RefreshSnapshot {
 				if selected != nil {
 					selectedCalls++
 					if selected.SessionID != "workspace-id" {
@@ -546,7 +510,7 @@ func TestWorkspaceManualRefreshUpdatesOnlySelectedSessionWhenSnapshotReturnsList
 			listViewSession("other-id", "other", now, now, session.CacheWindow{Label: "1h", TTLSeconds: 3600, Known: true}, "", ""),
 		},
 		Dependencies: Dependencies{
-			RefreshSnapshot: func(source refresh.Source, generation int, selected *session.Session) RefreshSnapshot {
+			RefreshSnapshot: func(selected *session.Session) RefreshSnapshot {
 				if selected == nil || selected.SessionID != "workspace-id" {
 					t.Fatalf("selected refresh input = %#v", selected)
 				}

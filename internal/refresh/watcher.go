@@ -48,25 +48,11 @@ type RawEvent struct {
 	Op   Op
 }
 
-type EventKind string
-
-const (
-	EventCreated EventKind = "created"
-	EventWritten EventKind = "written"
-	EventRenamed EventKind = "renamed"
-	EventDeleted EventKind = "deleted"
-)
-
-type NormalizedEvent struct {
-	Kind EventKind
-	Path string
-}
-
 type WatcherResult struct {
-	Events []NormalizedEvent
-	State  State
-	Err    error
-	Closed bool
+	Changed bool
+	State   State
+	Err     error
+	Closed  bool
 }
 
 var ErrWatcherClosed = errors.New("refresh watcher closed")
@@ -91,20 +77,6 @@ func NewWatcher(projectsDir string, fs WatchFS) (*Watcher, error) {
 		}
 	}
 	return watcher, nil
-}
-
-func (w *Watcher) Normalize(events []RawEvent) []NormalizedEvent {
-	normalized := make([]NormalizedEvent, 0, len(events))
-	for _, event := range events {
-		if event.Op == OpCreate && w.fs.IsDir(event.Path) {
-			_ = w.addWatch(event.Path)
-		}
-		normalized = append(normalized, NormalizedEvent{
-			Kind: normalizeKind(event.Op),
-			Path: event.Path,
-		})
-	}
-	return normalized
 }
 
 func (w *Watcher) Watched(path string) bool {
@@ -134,10 +106,10 @@ func (w *Watcher) Next() WatcherResult {
 			w.MarkRuntimeError(ErrWatcherClosed)
 			return WatcherResult{State: w.State(), Err: ErrWatcherClosed, Closed: true}
 		}
-		return WatcherResult{
-			Events: w.Normalize([]RawEvent{event}),
-			State:  w.State(),
+		if event.Op == OpCreate && w.fs.IsDir(event.Path) {
+			_ = w.addWatch(event.Path)
 		}
+		return WatcherResult{Changed: true, State: w.State()}
 	case err, ok := <-w.fs.Errors():
 		if !ok {
 			w.MarkRuntimeError(ErrWatcherClosed)
@@ -163,19 +135,4 @@ func (w *Watcher) addWatch(path string) error {
 	}
 	w.watched[path] = true
 	return nil
-}
-
-func normalizeKind(op Op) EventKind {
-	switch op {
-	case OpCreate:
-		return EventCreated
-	case OpWrite:
-		return EventWritten
-	case OpRename:
-		return EventRenamed
-	case OpDelete:
-		return EventDeleted
-	default:
-		return EventWritten
-	}
 }
