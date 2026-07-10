@@ -95,7 +95,7 @@ scripts/test-install.sh # exercises install.sh against a temp HOME, safe to run
   migration path; prefer deleting old flags, config knobs, tests, and docs.
 - `cc-watch` (the Go binary) is the live installed command
   (`$HOME/.local/bin/cc-watch`, switched over from v1 on 2026-07-02).
-  `cc_watch.py` / `archive/v1/` are historical only.
+  The Python implementation under `archive/v1/` is historical only.
 
 ## Where to look for "why"
 

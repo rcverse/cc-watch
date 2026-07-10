@@ -142,26 +142,6 @@ func TestSaveWritesOnlyValidConfig(t *testing.T) {
 	}
 }
 
-func TestResetRestoresDefaults(t *testing.T) {
-	home := t.TempDir()
-	custom := Default()
-	custom.ReminderThresholds = []int{40, 20}
-	if err := Save(home, custom); err != nil {
-		t.Fatalf("Save custom config: %v", err)
-	}
-
-	if err := Reset(home); err != nil {
-		t.Fatalf("Reset returned error: %v", err)
-	}
-	loaded, err := Load(home)
-	if err != nil {
-		t.Fatalf("Load after reset returned error: %v", err)
-	}
-	if !reflect.DeepEqual(loaded.Config, Default()) {
-		t.Fatalf("Config = %#v, want defaults after reset", loaded.Config)
-	}
-}
-
 func TestValidateRejectsUnsafeValuesAndSummarizesAffectedAutosend(t *testing.T) {
 	cfg := Default()
 	cfg.ReminderThresholds = []int{10, 20}

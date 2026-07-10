@@ -9,7 +9,7 @@ TEST_HOME="$TMP_DIR/home"
 BUILD_DIR="$TMP_DIR/build"
 mkdir -p "$TEST_HOME" "$BUILD_DIR"
 mkdir -p "$TEST_HOME/.local/bin"
-ln -s "$ROOT/cc_watch.py" "$TEST_HOME/.local/bin/cc-watch"
+ln -s "$ROOT/archive/v1/cc_watch.py" "$TEST_HOME/.local/bin/cc-watch"
 
 HOME="$TEST_HOME" CC_WATCH_BUILD_DIR="$BUILD_DIR" bash "$ROOT/install.sh" --yes
 
@@ -35,7 +35,7 @@ esac
 
 HELP_OUTPUT="$("$TARGET" --help)"
 case "$HELP_OUTPUT" in
-  *"Usage: cc-watch"* )
+  *"Usage:"*"cc-watch config"* )
     ;;
   *)
     echo "installed binary help smoke failed" >&2
@@ -43,21 +43,6 @@ case "$HELP_OUTPUT" in
     exit 1
     ;;
 esac
-
-V1_HELP="$("$ROOT/cc_watch.py" --help)"
-case "$V1_HELP" in
-  *"Inspect Claude Code prompt cache TTL"*) ;;
-  *)
-    echo "root v1 cc_watch.py no longer behaves like the v1 script" >&2
-    echo "$V1_HELP" >&2
-    exit 1
-    ;;
-esac
-
-if [ ! -x "$ROOT/cc_watch.py" ]; then
-  echo "root v1 cc_watch.py is no longer executable" >&2
-  exit 1
-fi
 
 "$ROOT/archive/v1/cc_watch.py" --help >/dev/null
 

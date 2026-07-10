@@ -74,7 +74,3 @@ func Save(home string, cfg Config) error {
 	data = append(data, '\n')
 	return os.WriteFile(path, data, 0o644)
 }
-
-func Reset(home string) error {
-	return Save(home, Default())
-}
