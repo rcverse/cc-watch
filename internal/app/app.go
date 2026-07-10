@@ -14,6 +14,7 @@ import (
 	"github.com/richardchen/cc-watch/internal/refresh"
 	"github.com/richardchen/cc-watch/internal/session"
 	"github.com/richardchen/cc-watch/internal/snapshot"
+	"github.com/richardchen/cc-watch/internal/statusline"
 	"github.com/richardchen/cc-watch/internal/tui"
 )
 
@@ -60,6 +61,9 @@ func RunWithDeps(args []string, stdout io.Writer, stderr io.Writer, deps Depende
 		return 0
 	case ModeVersion:
 		fmt.Fprintf(stdout, "cc-watch %s\n", Version)
+		return 0
+	case ModeStatuslineHelp:
+		WriteStatuslineHelp(stdout)
 		return 0
 	case ModeStatusline:
 		deps = fillDependencies(deps)
@@ -130,11 +134,10 @@ func buildTUIOptions(cmd Command, deps Dependencies) (tui.Options, error) {
 	}
 
 	result, err := snapshot.Build(snapshot.Request{
-		Home:   home,
-		Now:    now,
-		Limit:  cmd.Limit,
-		ID:     cmd.ID,
-		Remind: cmd.Remind,
+		Home:  home,
+		Now:   now,
+		Limit: cmd.Limit,
+		ID:    cmd.ID,
 	}, snapshot.Loaders{
 		LoadConfig:   config.Load,
 		DiscoverHome: deps.DiscoverHome,
@@ -216,11 +219,10 @@ func tuiDependencies(cmd Command, deps Dependencies, home string) tui.Dependenci
 				}
 			}
 			result, err := snapshot.Build(snapshot.Request{
-				Home:   home,
-				Now:    deps.Now(),
-				Limit:  cmd.Limit,
-				ID:     cmd.ID,
-				Remind: cmd.Remind,
+				Home:  home,
+				Now:   deps.Now(),
+				Limit: cmd.Limit,
+				ID:    cmd.ID,
 			}, snapshot.Loaders{
 				LoadConfig:   config.Load,
 				DiscoverHome: deps.DiscoverHome,
@@ -241,6 +243,15 @@ func tuiDependencies(cmd Command, deps Dependencies, home string) tui.Dependenci
 				return err
 			}
 			return config.Save(home, next)
+		},
+		InspectStatusline: func() (statusline.Status, error) {
+			return statusline.Inspect(home)
+		},
+		InstallStatusline: func() error {
+			return statusline.Install(home)
+		},
+		UninstallStatusline: func() error {
+			return statusline.Uninstall(home)
 		},
 		NotifyEvent:                  notifyEvent,
 		ResetNotificationSuppression: resetNotificationSuppression,

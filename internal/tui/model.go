@@ -11,6 +11,7 @@ import (
 	"github.com/richardchen/cc-watch/internal/notify"
 	"github.com/richardchen/cc-watch/internal/refresh"
 	"github.com/richardchen/cc-watch/internal/session"
+	"github.com/richardchen/cc-watch/internal/statusline"
 )
 
 type Route string
@@ -52,6 +53,9 @@ type Dependencies struct {
 	KeepAliveRunner              keepalive.ClaudeRunner
 	ConfirmKeepAlive             func(context.Context, keepalive.ConfirmationTarget) (keepalive.ConfirmationResult, error)
 	SaveConfig                   func(config.Config) error
+	InspectStatusline            func() (statusline.Status, error)
+	InstallStatusline            func() error
+	UninstallStatusline          func() error
 	NotifyEvent                  func(event notify.Event) notify.Result
 	ResetNotificationSuppression func()
 }
@@ -203,11 +207,17 @@ func NewModel(options Options) Model {
 		InitialNow:        now,
 		InitialGeneration: options.RefreshGeneration,
 	})
+	deps := options.Dependencies
+	if deps.InspectStatusline == nil {
+		deps.InspectStatusline = func() (statusline.Status, error) {
+			return statusline.Status{State: statusline.StateNotInstalled}, nil
+		}
+	}
 	model := Model{
 		width:              width,
 		height:             height,
 		now:                now,
-		deps:               options.Dependencies,
+		deps:               deps,
 		route:              routeFromOptions(options),
 		sessions:           sessions,
 		countdowns:         countdowns,

@@ -25,7 +25,7 @@ func TestHelpExitsSuccessfully(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Run(--help) exit code = %d, want 0", code)
 	}
-	if !strings.Contains(stdout.String(), "Usage: cc-watch") {
+	if !strings.Contains(stdout.String(), "Usage:") || !strings.Contains(stdout.String(), "cc-watch [--n N] [--id <partial-id>]") {
 		t.Fatalf("help output missing usage:\n%s", stdout.String())
 	}
 	for _, notWant := range []string{"--watch", "Unsupported:"} {
@@ -33,9 +33,30 @@ func TestHelpExitsSuccessfully(t *testing.T) {
 			t.Fatalf("help output still advertises retired flag %q:\n%s", notWant, stdout.String())
 		}
 	}
-	for _, want := range []string{"Examples:", "cc-watch --id d4b247b7"} {
+	if strings.Contains(stdout.String(), "--remind") {
+		t.Fatalf("help output still advertises obsolete --remind:\n%s", stdout.String())
+	}
+	for _, want := range []string{"TUI:", "Statusline:", "Safety:", "Examples:", "cc-watch --id d4b247b7", "See: cc-watch statusline --help"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("help output missing %q:\n%s", want, stdout.String())
+		}
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestStatuslineHelpExitsSuccessfully(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	code := Run([]string{"statusline", "--help"}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run(statusline --help) exit code = %d, want 0", code)
+	}
+	for _, want := range []string{"Usage:", "cc-watch statusline --check", "writes nothing", "KeepAlive at risk"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("statusline help missing %q:\n%s", want, stdout.String())
 		}
 	}
 	if stderr.Len() != 0 {
@@ -75,6 +96,22 @@ func TestRetiredWatchFlagIsUnknown(t *testing.T) {
 	}
 	if strings.Contains(stderr.String(), "not part of cc-watch v2") {
 		t.Fatalf("stderr still treats watch as known retired mode:\n%s", stderr.String())
+	}
+}
+
+func TestRetiredRemindFlagIsUnknown(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	code := Run([]string{"--remind"}, &stdout, &stderr)
+
+	if code == 0 {
+		t.Fatal("Run(--remind) exit code = 0, want non-zero")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "flag provided but not defined: -remind") {
+		t.Fatalf("stderr missing unknown-flag error:\n%s", stderr.String())
 	}
 }
 
@@ -135,11 +172,6 @@ func TestTUIDispatchForwardsPublicCLICommands(t *testing.T) {
 			name: "--id partial",
 			args: []string{"--id", "11111111"},
 			want: Command{Mode: ModeTUI, Limit: 25, ID: "11111111"},
-		},
-		{
-			name: "--remind",
-			args: []string{"--remind"},
-			want: Command{Mode: ModeTUI, Limit: 25, Remind: true},
 		},
 		{
 			name: "config",
@@ -329,37 +361,6 @@ func TestTUIStartupWithIDSelectsMatchingSession(t *testing.T) {
 	}
 }
 
-func TestTUIStartupWithRemindEnablesLoadedSessionRemindersOnly(t *testing.T) {
-	now := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
-	deps := fakeDeps(t)
-	deps.Now = func() time.Time { return now }
-	deps.DiscoverHome = func(home string, limit int) (session.DiscoveryResult, error) {
-		return session.DiscoveryResult{
-			Sessions: []session.SessionFile{
-				{SessionID: "reminded-id", ShortID: "reminded", Project: "tmp", Path: "/tmp/reminded.jsonl", ModTime: now},
-			},
-		}, nil
-	}
-	deps.ParseFile = func(path string) (session.Session, error) {
-		return session.Session{
-			SessionID:      "reminded-id",
-			ShortID:        "reminded",
-			Project:        "tmp",
-			JSONLPath:      path,
-			FileModifiedAt: now,
-		}, nil
-	}
-
-	options, err := buildTUIOptions(Command{Mode: ModeTUI, Limit: 5, Remind: true}, deps.Dependencies)
-	if err != nil {
-		t.Fatalf("buildTUIOptions returned error: %v", err)
-	}
-
-	if !options.ReminderEnabled["reminded-id"] {
-		t.Fatalf("reminder map = %#v, want loaded session enabled", options.ReminderEnabled)
-	}
-}
-
 func TestTUISelectedDispatchPreservesID(t *testing.T) {
 	deps := testDepsWithTwoSessions(t)
 	var tuiCommand Command
@@ -437,26 +438,6 @@ func TestTUIAmbiguousIDMapsToAmbiguousRouteCandidates(t *testing.T) {
 	}
 	if len(model.Sessions()) != 2 {
 		t.Fatalf("candidate sessions = %d, want 2", len(model.Sessions()))
-	}
-}
-
-func TestTUIAmbiguousIDWithRemindEnablesCandidateReminders(t *testing.T) {
-	deps := fakeDeps(t)
-	deps.DiscoverHome = func(home string, limit int) (session.DiscoveryResult, error) {
-		return session.DiscoveryResult{Sessions: []session.SessionFile{
-			{SessionID: "11111111-0000-0000-0000-000000000000", ShortID: "11111111", Project: "one"},
-			{SessionID: "11112222-0000-0000-0000-000000000000", ShortID: "11112222", Project: "two"},
-		}}, nil
-	}
-
-	options, err := buildTUIOptions(Command{Mode: ModeTUI, Limit: 5, ID: "1111", Remind: true}, deps.Dependencies)
-	if err != nil {
-		t.Fatalf("buildTUIOptions returned error: %v", err)
-	}
-	for _, s := range options.Sessions {
-		if !options.ReminderEnabled[s.SessionID] {
-			t.Fatalf("reminder for candidate %q = false, want true; map=%#v", s.SessionID, options.ReminderEnabled)
-		}
 	}
 }
 
@@ -742,7 +723,7 @@ func TestConfigEditorStartupDoesNotDiscoverOrParseSessions(t *testing.T) {
 }
 
 func TestParseListFlags(t *testing.T) {
-	cmd, err := ParseArgs([]string{"--n", "7", "--id", "abc", "--remind"})
+	cmd, err := ParseArgs([]string{"--n", "7", "--id", "abc"})
 	if err != nil {
 		t.Fatalf("ParseArgs returned error: %v", err)
 	}
@@ -755,9 +736,6 @@ func TestParseListFlags(t *testing.T) {
 	}
 	if cmd.ID != "abc" {
 		t.Fatalf("ID = %q, want abc", cmd.ID)
-	}
-	if !cmd.Remind {
-		t.Fatal("Remind = false, want true")
 	}
 }
 
@@ -777,6 +755,11 @@ func TestParseStatuslineArgsGrammar(t *testing.T) {
 			name: "check",
 			args: []string{"statusline", "--check"},
 			want: Command{Mode: ModeStatusline, Limit: DefaultLimit, CheckConfig: true},
+		},
+		{
+			name: "help",
+			args: []string{"statusline", "--help"},
+			want: Command{Mode: ModeStatuslineHelp, Limit: DefaultLimit},
 		},
 		{
 			name: "wrapped command",

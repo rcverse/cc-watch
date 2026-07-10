@@ -19,21 +19,14 @@ type Reading struct {
 // HistoryPoint is one persisted reading, kept to compute momentum across
 // turns.
 type HistoryPoint struct {
-	CapturedAt time.Time
-	UsedPct    float64
-	ResetsAt   time.Time
-}
-
-// TierInfo is the cached cache-tier TTL for one session's transcript, so a
-// per-turn hook invocation doesn't have to re-scan the whole transcript.
-type TierInfo struct {
-	TTLSeconds int
-	Known      bool
+	UsedPct  float64
+	ResetsAt time.Time
 }
 
 type State struct {
-	History   []HistoryPoint
-	TierCache map[string]TierInfo
+	History         []HistoryPoint
+	SevenDayHistory []HistoryPoint
+	TierCache       map[string]int
 }
 
 func StatePath(home string) string {
@@ -57,7 +50,7 @@ func Load(home string) (State, error) {
 		return freshState(), nil
 	}
 	if state.TierCache == nil {
-		state.TierCache = map[string]TierInfo{}
+		state.TierCache = map[string]int{}
 	}
 	return state, nil
 }
@@ -76,23 +69,32 @@ func Save(home string, state State) error {
 }
 
 func freshState() State {
-	return State{TierCache: map[string]TierInfo{}}
+	return State{TierCache: map[string]int{}}
 }
 
 // AddReading appends a new reading to the rolling history, keeping only the
 // most recent maxHistory points. A reset-window rollover (resets_at differs
 // from the last stored reading) clears prior history first -- momentum
 // across a reset boundary is meaningless.
-func (s *State) AddReading(capturedAt time.Time, reading Reading) {
-	if len(s.History) > 0 && !s.History[len(s.History)-1].ResetsAt.Equal(reading.ResetsAt) {
-		s.History = nil
+func (s *State) AddReading(reading Reading) {
+	addReading(&s.History, reading)
+}
+
+func (s *State) AddSevenDayReading(reading Reading) {
+	addReading(&s.SevenDayHistory, reading)
+}
+
+func addReading(history *[]HistoryPoint, reading Reading) {
+	points := *history
+	if len(points) > 0 && !points[len(points)-1].ResetsAt.Equal(reading.ResetsAt) {
+		points = nil
 	}
-	s.History = append(s.History, HistoryPoint{
-		CapturedAt: capturedAt,
-		UsedPct:    reading.UsedPct,
-		ResetsAt:   reading.ResetsAt,
+	points = append(points, HistoryPoint{
+		UsedPct:  reading.UsedPct,
+		ResetsAt: reading.ResetsAt,
 	})
-	if len(s.History) > maxHistory {
-		s.History = s.History[len(s.History)-maxHistory:]
+	if len(points) > maxHistory {
+		points = points[len(points)-maxHistory:]
 	}
+	*history = points
 }

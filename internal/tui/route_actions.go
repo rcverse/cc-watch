@@ -76,6 +76,8 @@ func (m Model) activateConfigAction(action string) (tea.Model, tea.Cmd) {
 	case "config_reminder_thresholds", "config_trigger", "config_countdown", "config_message", "config_max_sends":
 		m.startConfigEdit(action)
 		return m, nil
+	case "config_statusline_action":
+		return m.activateStatuslineConfigAction()
 	case "config_save":
 		return m.saveConfig()
 	case "config_reset":

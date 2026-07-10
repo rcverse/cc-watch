@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/richardchen/cc-watch/internal/config"
+	"github.com/richardchen/cc-watch/internal/statusline"
 )
 
 var configFocusActions = []string{
@@ -16,6 +17,7 @@ var configFocusActions = []string{
 	"config_countdown",
 	"config_message",
 	"config_max_sends",
+	"config_statusline_action",
 	"config_save",
 	"config_reset",
 	"config_cancel",
@@ -53,6 +55,16 @@ func (m Model) configView() string {
 		fmt.Fprintf(&settings, "    %s\n", styles.Render(RoleDanger, "Error: "+message))
 	}
 	b.WriteString(m.renderConfigPanel("Settings", settings.String()))
+
+	var statuslinePanel strings.Builder
+	state, detail, action := m.statuslineConfigCopy()
+	fmt.Fprintf(&statuslinePanel, "  %-20s %s\n", "State", state)
+	if detail != "" {
+		fmt.Fprintf(&statuslinePanel, "  %-20s %s\n", "", styles.Render(RoleMuted, detail))
+	}
+	fmt.Fprintf(&statuslinePanel, "%s\n", m.configRow("config_statusline_action", "Action", "", action))
+	b.WriteString(m.renderConfigPanel("Statusline", statuslinePanel.String()))
+
 	if m.configEditing {
 		var edit strings.Builder
 		fmt.Fprintf(&edit, "%s %s\n", styles.Render(RoleInfo, configFieldLabel(m.configEditingField)), styles.Render(RoleMuted, "is active"))
@@ -111,6 +123,53 @@ func (m Model) configRow(action string, label string, value string, detail strin
 func (m Model) renderConfigPanel(title string, body string) string {
 	width := m.configPanelBodyWidth()
 	return RenderPanelWidth(DefaultStyles().Render(RoleIdentity, title), truncateBodyLines(body, width), width)
+}
+
+func (m Model) statuslineConfigCopy() (state string, detail string, action string) {
+	status, err := m.deps.InspectStatusline()
+	if err != nil {
+		return "Needs manual review", "Run cc-watch statusline --check", "Show instructions"
+	}
+	switch status.State {
+	case statusline.StateInstalled:
+		return "Installed in Claude Code", "shows 5h/7d usage and KeepAlive risk", "Uninstall from Claude Code"
+	case statusline.StateExisting:
+		if status.Command != "" {
+			return "Existing Claude statusline found", "existing command: " + status.Command, "Install in Claude Code"
+		}
+		return "Existing Claude statusline found", "installing keeps it and adds cc-watch", "Install in Claude Code"
+	case statusline.StateManualReview:
+		return "Needs manual review", "Run cc-watch statusline --check", "Show instructions"
+	default:
+		return "Not installed", "Claude Code is not showing cc-watch usage", "Install in Claude Code"
+	}
+}
+
+func (m Model) activateStatuslineConfigAction() (tea.Model, tea.Cmd) {
+	status, err := m.deps.InspectStatusline()
+	if err != nil || status.State == statusline.StateManualReview {
+		m.lastAction = "statusline_manual_review"
+		m.setNotice("Run cc-watch statusline --check for manual instructions", RoleWarning, 5*time.Second)
+		return m, nil
+	}
+	if status.State == statusline.StateInstalled {
+		if err := m.deps.UninstallStatusline(); err != nil {
+			m.lastAction = "statusline_uninstall_failed"
+			m.setNotice("✕ Could not uninstall statusline", RoleDanger, 3*time.Second)
+			return m, nil
+		}
+		m.lastAction = "uninstall_statusline"
+		m.setNotice("✓ Statusline uninstalled from Claude Code", RoleSuccess, 3*time.Second)
+		return m, nil
+	}
+	if err := m.deps.InstallStatusline(); err != nil {
+		m.lastAction = "statusline_install_failed"
+		m.setNotice("✕ Could not install statusline", RoleDanger, 3*time.Second)
+		return m, nil
+	}
+	m.lastAction = "install_statusline"
+	m.setNotice("✓ Statusline installed in Claude Code", RoleSuccess, 3*time.Second)
+	return m, nil
 }
 
 func (m Model) configPanelBodyWidth() int {

@@ -45,8 +45,8 @@ func TestSaveThenLoadRoundTrips(t *testing.T) {
 	home := t.TempDir()
 	resetsAt := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
 	state := freshState()
-	state.AddReading(resetsAt.Add(-time.Hour), Reading{UsedPct: 10, ResetsAt: resetsAt})
-	state.TierCache["/tmp/session.jsonl"] = TierInfo{TTLSeconds: 3600}
+	state.AddReading(Reading{UsedPct: 10, ResetsAt: resetsAt})
+	state.TierCache["/tmp/session.jsonl"] = 3600
 
 	if err := Save(home, state); err != nil {
 		t.Fatalf("Save returned error: %v", err)
@@ -58,7 +58,7 @@ func TestSaveThenLoadRoundTrips(t *testing.T) {
 	if len(loaded.History) != 1 || loaded.History[0].UsedPct != 10 {
 		t.Fatalf("History = %#v, want one reading with UsedPct 10", loaded.History)
 	}
-	if loaded.TierCache["/tmp/session.jsonl"].TTLSeconds != 3600 {
+	if loaded.TierCache["/tmp/session.jsonl"] != 3600 {
 		t.Fatalf("TierCache = %#v, want TTLSeconds 3600", loaded.TierCache)
 	}
 }
@@ -66,9 +66,8 @@ func TestSaveThenLoadRoundTrips(t *testing.T) {
 func TestAddReadingKeepsOnlyMostRecentHistory(t *testing.T) {
 	resetsAt := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
 	state := freshState()
-	base := resetsAt.Add(-time.Hour)
 	for i := 0; i < 6; i++ {
-		state.AddReading(base.Add(time.Duration(i)*time.Minute), Reading{
+		state.AddReading(Reading{
 			UsedPct:  float64(i * 10),
 			ResetsAt: resetsAt,
 		})
@@ -86,10 +85,10 @@ func TestAddReadingClearsHistoryOnRollover(t *testing.T) {
 	firstReset := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
 	secondReset := firstReset.Add(5 * time.Hour)
 	state := freshState()
-	state.AddReading(firstReset.Add(-time.Hour), Reading{UsedPct: 90, ResetsAt: firstReset})
-	state.AddReading(firstReset.Add(-30*time.Minute), Reading{UsedPct: 95, ResetsAt: firstReset})
+	state.AddReading(Reading{UsedPct: 90, ResetsAt: firstReset})
+	state.AddReading(Reading{UsedPct: 95, ResetsAt: firstReset})
 
-	state.AddReading(firstReset.Add(time.Minute), Reading{UsedPct: 5, ResetsAt: secondReset})
+	state.AddReading(Reading{UsedPct: 5, ResetsAt: secondReset})
 
 	if len(state.History) != 1 {
 		t.Fatalf("len(History) = %d, want 1 (rollover should clear prior history)", len(state.History))

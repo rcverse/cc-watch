@@ -1,12 +1,14 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/richardchen/cc-watch/internal/config"
+	"github.com/richardchen/cc-watch/internal/statusline"
 )
 
 func TestConfigFocusCycleOnlyVisitsVisibleRows(t *testing.T) {
@@ -30,6 +32,115 @@ func TestConfigFocusCycleOnlyVisitsVisibleRows(t *testing.T) {
 		if !seen[want] {
 			t.Fatalf("config focus did not reach visible action %q; saw %#v", want, seen)
 		}
+	}
+}
+
+func TestConfigEditorShowsStatuslineInstallState(t *testing.T) {
+	model := NewModel(Options{StartMode: StartConfig, Config: config.Default()})
+	view := model.View()
+
+	for _, want := range []string{"Statusline", "State", "Not installed", "Install in Claude Code"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("config view missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestConfigEditorCanInstallStatusline(t *testing.T) {
+	status := statusline.Status{State: statusline.StateNotInstalled}
+	installs := 0
+	model := NewModel(Options{
+		StartMode: StartConfig,
+		Config:    config.Default(),
+		Dependencies: Dependencies{
+			InspectStatusline: func() (statusline.Status, error) {
+				return status, nil
+			},
+			InstallStatusline: func() error {
+				installs++
+				status = statusline.Status{State: statusline.StateInstalled, Command: "cc-watch statusline"}
+				return nil
+			},
+		},
+	})
+
+	model = moveConfigFocusTo(t, model, "config_statusline_action")
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+
+	if installs != 1 {
+		t.Fatalf("installs = %d, want 1", installs)
+	}
+	if !strings.Contains(model.View(), "Installed in Claude Code") || !strings.Contains(model.View(), "Uninstall from Claude Code") {
+		t.Fatalf("installed statusline state missing:\n%s", model.View())
+	}
+	if model.LastAction() != "install_statusline" {
+		t.Fatalf("last action = %q, want install_statusline", model.LastAction())
+	}
+}
+
+func TestConfigEditorCanUninstallStatusline(t *testing.T) {
+	status := statusline.Status{State: statusline.StateInstalled, Command: "cc-watch statusline"}
+	uninstalls := 0
+	model := NewModel(Options{
+		StartMode: StartConfig,
+		Config:    config.Default(),
+		Dependencies: Dependencies{
+			InspectStatusline: func() (statusline.Status, error) {
+				return status, nil
+			},
+			UninstallStatusline: func() error {
+				uninstalls++
+				status = statusline.Status{State: statusline.StateNotInstalled}
+				return nil
+			},
+		},
+	})
+
+	model = moveConfigFocusTo(t, model, "config_statusline_action")
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+
+	if uninstalls != 1 {
+		t.Fatalf("uninstalls = %d, want 1", uninstalls)
+	}
+	if !strings.Contains(model.View(), "Not installed") || !strings.Contains(model.View(), "Install in Claude Code") {
+		t.Fatalf("uninstalled statusline state missing:\n%s", model.View())
+	}
+	if model.LastAction() != "uninstall_statusline" {
+		t.Fatalf("last action = %q, want uninstall_statusline", model.LastAction())
+	}
+}
+
+func TestConfigEditorStatuslineManualReviewDoesNotWrite(t *testing.T) {
+	writes := 0
+	model := NewModel(Options{
+		StartMode: StartConfig,
+		Config:    config.Default(),
+		Dependencies: Dependencies{
+			InspectStatusline: func() (statusline.Status, error) {
+				return statusline.Status{State: statusline.StateManualReview}, nil
+			},
+			InstallStatusline: func() error {
+				writes++
+				return errors.New("must not write")
+			},
+			UninstallStatusline: func() error {
+				writes++
+				return errors.New("must not write")
+			},
+		},
+	})
+
+	model = moveConfigFocusTo(t, model, "config_statusline_action")
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+
+	if writes != 0 {
+		t.Fatalf("writes = %d, want 0 for manual review", writes)
+	}
+	if !strings.Contains(model.View(), "Needs manual review") || !strings.Contains(model.View(), "Run cc-watch statusline --check") {
+		t.Fatalf("manual review copy missing:\n%s", model.View())
 	}
 }
 

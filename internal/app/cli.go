@@ -13,20 +13,20 @@ type Mode string
 const (
 	DefaultLimit = 25
 
-	ModeTUI        Mode = "tui"
-	ModeHelp       Mode = "help"
-	ModeVersion    Mode = "version"
-	ModeConfig     Mode = "config"
-	ModeStatusline Mode = "statusline"
+	ModeTUI            Mode = "tui"
+	ModeHelp           Mode = "help"
+	ModeVersion        Mode = "version"
+	ModeConfig         Mode = "config"
+	ModeStatusline     Mode = "statusline"
+	ModeStatuslineHelp Mode = "statusline_help"
 )
 
-const statuslineUsageError = "statusline: invalid arguments, expected one of: `cc-watch statusline`, `cc-watch statusline -- <command>`, `cc-watch statusline --check`"
+const statuslineUsageError = "statusline: invalid arguments, expected one of: `cc-watch statusline`, `cc-watch statusline -- <command>`, `cc-watch statusline --check`, `cc-watch statusline --help`"
 
 type Command struct {
 	Mode           Mode
 	Limit          int
 	ID             string
-	Remind         bool
 	WrappedCommand []string
 	CheckConfig    bool
 }
@@ -57,6 +57,12 @@ func ParseArgs(args []string) (Command, error) {
 			}
 			cmd.CheckConfig = true
 			return cmd, nil
+		case rest[0] == "--help" || rest[0] == "-h":
+			if len(rest) > 1 {
+				return cmd, errors.New(statuslineUsageError)
+			}
+			cmd.Mode = ModeStatuslineHelp
+			return cmd, nil
 		case rest[0] == "--":
 			if len(rest) < 2 {
 				return cmd, fmt.Errorf("statusline: no command given after --")
@@ -78,7 +84,6 @@ func ParseArgs(args []string) (Command, error) {
 	fs.BoolVar(&version, "version", false, "show version")
 	fs.IntVar(&cmd.Limit, "n", cmd.Limit, "number of recent sessions")
 	fs.StringVar(&cmd.ID, "id", "", "session id")
-	fs.BoolVar(&cmd.Remind, "remind", false, "enable reminders")
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -105,33 +110,64 @@ func ParseArgs(args []string) (Command, error) {
 }
 
 func WriteHelp(w io.Writer) {
-	fmt.Fprint(w, `Usage: cc-watch [--n N] [--id <partial-id>] [--remind]
-       cc-watch config
-       cc-watch statusline
-       cc-watch statusline -- <command> [args...]
-       cc-watch statusline --check
-       cc-watch --help
-       cc-watch --version
+	fmt.Fprint(w, `Usage:
+  cc-watch [--n N] [--id <partial-id>]
+  cc-watch config
+  cc-watch statusline
+  cc-watch statusline -- <command> [args...]
+  cc-watch statusline --check
+  cc-watch statusline --help
+  cc-watch --help
+  cc-watch --version
 
-Options:
-  --n N              load N recent sessions for the List View
-  --id <partial-id> open one session
-  --remind          start TUI with reminders enabled
-  --help, -h        show help
-  --version         show version
+TUI:
+  cc-watch                  Open recent Claude Code sessions.
+  cc-watch --n 10           Load 10 recent sessions.
+  cc-watch --id d4b247b7    Open the matching session.
+  cc-watch config           Edit Reminder, KeepAlive, and Statusline settings.
 
-statusline:
-  Plugs into Claude Code's statusLine.command hook to append an estimated
-  "messages left before the 5-hour rate limit resets" readout.
-    cc-watch statusline               emit only cc-watch's own readout
-    cc-watch statusline -- <command>  wrap an existing statusline command
-    cc-watch statusline --check       read-only: report current wiring
+Statusline:
+  See: cc-watch statusline --help
+
+Safety:
+  Reminder and KeepAlive are controlled inside the TUI.
+  statusline --check never edits Claude Code settings.
+  statusline runtime exits 0 so it does not break Claude Code's UI.
 
 Examples:
   cc-watch
-  cc-watch --n 10
   cc-watch --id d4b247b7
   cc-watch config
   cc-watch statusline --check
+  cc-watch statusline -- ~/.claude/statusline.sh
+`)
+}
+
+func WriteStatuslineHelp(w io.Writer) {
+	fmt.Fprint(w, `Usage:
+  cc-watch statusline
+  cc-watch statusline -- <command> [args...]
+  cc-watch statusline --check
+
+Modes:
+  cc-watch statusline
+      Read Claude Code statusline JSON from stdin and print cc-watch's segment,
+      for example: ⏱ 34% (5h) / 41% (7d) used.
+
+  cc-watch statusline -- <command> [args...]
+      Run an existing statusline command, then append cc-watch after " | ".
+
+  cc-watch statusline --check
+      Read ~/.claude/settings.json and print install/uninstall guidance.
+      It writes nothing.
+
+Warning:
+  "KeepAlive at risk" means a 5h or 7d Claude Code account limit may block
+  future KeepAlive sends.
+
+Examples:
+  cc-watch statusline --check
+  cc-watch statusline -- ~/.claude/statusline.sh
+  cc-watch statusline -- sh -c 'echo "$USER"'
 `)
 }

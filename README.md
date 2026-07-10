@@ -48,8 +48,7 @@ Opens the session list. From there:
 ```bash
 cc-watch --id d4b247b7     # jump straight into one session (partial IDs OK)
 cc-watch --n 10            # load 10 recent sessions instead of the default 25
-cc-watch --remind          # start with Reminder switched on
-cc-watch config            # edit your defaults
+cc-watch config            # edit defaults and Statusline install
 ```
 
 There's no `--watch` flag, on purpose — the TUI already refreshes itself
@@ -127,22 +126,26 @@ Lives at `~/.config/cc-watch/config.json`. Edit it by hand or run
 
 ## statusline
 
-Claude Code's account-wide 5-hour rate limit is a separate thing from the
-per-session cache TTL cc-watch otherwise tracks — and it matters, because a
-capped account can't send anything, including a KeepAlive ping. `cc-watch
-statusline` plugs into Claude Code's `statusLine.command` hook and appends a
-conservative "messages left before the limit resets" estimate to your
-existing statusline.
+Claude Code's account-wide 5-hour and 7-day rate limits are separate from
+the per-session cache TTL cc-watch otherwise tracks — and they matter,
+because a capped account can't send anything, including a KeepAlive ping.
+`cc-watch statusline` plugs into Claude Code's `statusLine.command` hook and
+adds usage plus KeepAlive-risk context inside Claude Code.
 
 ```bash
 cc-watch statusline                   # emit only cc-watch's own readout
-cc-watch statusline -- <command>      # wrap your existing statusline command
-cc-watch statusline --check           # read-only: report current wiring
+cc-watch statusline -- <command>      # keep an existing statusline and add cc-watch
+cc-watch statusline --check           # read-only: print install/uninstall guidance
+cc-watch statusline --help            # explain the hook CLI
 ```
 
-`--check` reads `~/.claude/settings.json` and prints the exact snippet to
-add or revert, without ever writing the file yourself — for example, if
-your existing statusline command is some tool, wiring it in looks like:
+The config TUI can install or uninstall the Statusline integration for you.
+It preserves an existing Claude Code statusline when the shape is safe, and
+refuses to write when the current setting needs manual review. `--check`
+is the read-only path: it reads `~/.claude/settings.json` and prints the
+exact snippet to enable or undo cc-watch, without writing the file itself.
+For example, if your existing statusline command is some tool, wiring it in
+looks like:
 
 ```json
 { "statusLine": { "type": "command", "command": "cc-watch statusline -- <your statusline command>" } }
@@ -153,14 +156,16 @@ single executable, wrap it in `sh -c '...'` first — cc-watch spawns the
 wrapped command directly (argv, no shell), so it can't run a pipe on its
 own.
 
-The appended readout looks like `5h 34%` or `5h 34% ~12 msg left`, or `!
-5h 87% cap before reset` when you're at risk of hitting the limit before a
-session's cache needs its next KeepAlive ping. "Messages left" is always an
-estimate — Claude Code never exposes an absolute token budget, only a
-percentage and a reset time — and it's deliberately conservative, since
-it's calibrated from your actual mix of messages rather than isolating
-KeepAlive's own (cheaper) cost. Set `NO_COLOR` to suppress the at-risk
-color.
+When wrapping an existing statusline, cc-watch appends its segment after
+` | `. The readout looks like `⏱ 34% (5h) / 41% (7d) used`, or `⏱ 34%
+(5h) / 41% (7d) used · ✉ ~12 msgs` once it has enough 5-hour history to
+estimate messages left. If the 5-hour or 7-day account limit looks likely
+to block future KeepAlive sends, it shows `⏱ 87% (5h) / 94% (7d) used · ⚠
+KeepAlive at risk`. "Messages" is always an estimate — Claude Code exposes
+percentages and reset times, not an absolute token budget — and it's
+deliberately conservative, since it's calibrated from your actual mix of
+messages rather than isolating KeepAlive's own cheaper cost. Set `NO_COLOR`
+to suppress the at-risk color.
 
 ## Local-first, no exceptions
 
@@ -169,13 +174,15 @@ color.
   own logs/state under `~/.config/cc-watch/`: `keepalive.log` for
   KeepAlive sends and `ratelimit.json` for `cc-watch statusline`
   (self-healing, no delete command needed).
+- Can install/uninstall Claude Code's statusLine setting from the config
+  TUI by editing `~/.claude/settings.json`; it writes a timestamped backup
+  first and refuses unclear shapes.
 - Notifies through macOS `osascript`. Nothing leaves your machine.
 - Only runs `claude` locally, and only as part of a KeepAlive send you
   configured. `cc-watch statusline` may also run one subprocess: your own
   existing statusline command, if you chose to wrap it.
-- `cc-watch statusline --check` only reads `~/.claude/settings.json`. It
-  never writes it — applying or reverting the change is a manual step you
-  do yourself.
+- `cc-watch statusline --check` only reads `~/.claude/settings.json`; it
+  never writes.
 - Never calls an Anthropic API directly, never runs as a background daemon.
 
 ## What this isn't

@@ -17,14 +17,25 @@ import (
 )
 
 func statuslinePayloadJSON(usedPct float64, resetsAt time.Time, transcriptPath string) string {
+	return statuslinePayloadJSONWithWeek(usedPct, resetsAt, nil, nil, transcriptPath)
+}
+
+func statuslinePayloadJSONWithWeek(usedPct float64, resetsAt time.Time, weekUsedPct *float64, weekResetsAt *time.Time, transcriptPath string) string {
+	rateLimits := map[string]any{
+		"five_hour": map[string]any{
+			"used_percentage": usedPct,
+			"resets_at":       resetsAt.Unix(),
+		},
+	}
+	if weekUsedPct != nil && weekResetsAt != nil {
+		rateLimits["seven_day"] = map[string]any{
+			"used_percentage": *weekUsedPct,
+			"resets_at":       weekResetsAt.Unix(),
+		}
+	}
 	data, err := json.Marshal(map[string]any{
 		"transcript_path": transcriptPath,
-		"rate_limits": map[string]any{
-			"five_hour": map[string]any{
-				"used_percentage": usedPct,
-				"resets_at":       resetsAt.Unix(),
-			},
-		},
+		"rate_limits":     rateLimits,
 	})
 	if err != nil {
 		panic(err)
@@ -58,8 +69,24 @@ func TestRunStatuslineBareModeUnknownMomentumShowsRawPercentage(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
-	if stdout.String() != "5h 34%" {
-		t.Fatalf("stdout = %q, want %q", stdout.String(), "5h 34%")
+	if stdout.String() != "⏱ 34% (5h) used" {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), "⏱ 34% (5h) used")
+	}
+}
+
+func TestRunStatuslineShowsWeeklyLimitWhenPresent(t *testing.T) {
+	deps := fakeDeps(t)
+	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	deps.Now = func() time.Time { return now }
+	weekUsedPct := 41.0
+	weekResetsAt := now.Add(4 * 24 * time.Hour)
+	payload := statuslinePayloadJSONWithWeek(34, now.Add(3*time.Hour), &weekUsedPct, &weekResetsAt, "")
+	var stdout bytes.Buffer
+
+	runStatusline(Command{Mode: ModeStatusline}, deps.Dependencies, strings.NewReader(payload), &stdout, io.Discard)
+
+	if stdout.String() != "⏱ 34% (5h) / 41% (7d) used" {
+		t.Fatalf("stdout = %q, want weekly limit segment", stdout.String())
 	}
 }
 
@@ -87,7 +114,7 @@ func TestRunStatuslineMomentumSafeShowsMessagesLeft(t *testing.T) {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
 	// pctPerMessage=5, messagesLeft=floor(85/5)=17; pingsNeeded=ceil((10800-60)/3600)=3; safe.
-	want := "5h 15% ~17 msg left"
+	want := "⏱ 15% (5h) used · ✉ ~17 msgs"
 	if stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
@@ -116,7 +143,7 @@ func TestRunStatuslineMomentumAtRiskAppendsWarningAndColor(t *testing.T) {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
 	// pctPerMessage=5, messagesLeft=17; fallback TTL 300s, pingsNeeded=ceil(35940/300)=120; at risk.
-	want := "\x1b[1;31m! 5h 15% cap before reset\x1b[0m"
+	want := "\x1b[1;31m⏱ 15% (5h) used · ⚠ KeepAlive at risk\x1b[0m"
 	if stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
@@ -141,8 +168,33 @@ func TestRunStatuslineNoColorSuppressesColorCodes(t *testing.T) {
 	if strings.Contains(stdout.String(), "\x1b[") {
 		t.Fatalf("stdout = %q, want no ANSI codes when NO_COLOR is set", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "cap before reset") {
+	if !strings.Contains(stdout.String(), "KeepAlive at risk") {
 		t.Fatalf("stdout = %q, want at-risk text", stdout.String())
+	}
+}
+
+func TestRunStatuslineWeeklyLimitCanPutKeepAliveAtRisk(t *testing.T) {
+	deps := fakeDeps(t)
+	home := t.TempDir()
+	deps.HomeDir = func() (string, error) { return home, nil }
+	now1 := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	now2 := now1.Add(time.Minute)
+	resetsAt := now1.Add(30 * time.Minute)
+	weekResetsAt := now1.Add(7 * 24 * time.Hour)
+	weekUsed1 := 90.0
+	weekUsed2 := 95.0
+
+	deps.Now = func() time.Time { return now1 }
+	runStatusline(Command{Mode: ModeStatusline}, deps.Dependencies, strings.NewReader(statuslinePayloadJSONWithWeek(10, resetsAt, &weekUsed1, &weekResetsAt, "")), io.Discard, io.Discard)
+
+	t.Setenv("NO_COLOR", "")
+	deps.Now = func() time.Time { return now2 }
+	var stdout bytes.Buffer
+	runStatusline(Command{Mode: ModeStatusline}, deps.Dependencies, strings.NewReader(statuslinePayloadJSONWithWeek(15, resetsAt, &weekUsed2, &weekResetsAt, "")), &stdout, io.Discard)
+
+	want := "\x1b[1;31m⏱ 15% (5h) / 95% (7d) used · ⚠ KeepAlive at risk\x1b[0m"
+	if stdout.String() != want {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
 }
 
@@ -174,7 +226,7 @@ func TestRunStatuslineWrappedCommandSuccessTrimsNewlineAndAppendsSuffix(t *testi
 	if string(capturedStdin) != payload {
 		t.Fatalf("runner stdin = %q, want original untruncated payload", capturedStdin)
 	}
-	if stdout.String() != "base output 5h 34%" {
+	if stdout.String() != "base output | ⏱ 34% (5h) used" {
 		t.Fatalf("stdout = %q, want trimmed wrapped output plus suffix", stdout.String())
 	}
 	if stderr.String() != "warn: from wrapped\n" {
@@ -233,11 +285,14 @@ func TestRunStatuslineCheckNotConfigured(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
-	if !strings.Contains(stdout.String(), "Not configured") {
-		t.Fatalf("stdout = %q, want 'Not configured'", stdout.String())
+	if !strings.Contains(stdout.String(), "statusLine is not configured") {
+		t.Fatalf("stdout = %q, want not-configured message", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), `"type": "command"`) || !strings.Contains(stdout.String(), `"command": "cc-watch statusline"`) {
 		t.Fatalf("stdout = %q, want bare command snippet", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "No files were changed.") {
+		t.Fatalf("stdout = %q, want read-only reminder", stdout.String())
 	}
 }
 
@@ -253,11 +308,14 @@ func TestRunStatuslineCheckConfiguredNotWrapped(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
-	if !strings.Contains(stdout.String(), "not cc-watch-wrapped") {
-		t.Fatalf("stdout = %q, want 'not cc-watch-wrapped'", stdout.String())
+	if !strings.Contains(stdout.String(), "cc-watch is not in the chain") {
+		t.Fatalf("stdout = %q, want not-in-chain message", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), `"command": "cc-watch statusline -- ccstatusline"`) {
 		t.Fatalf("stdout = %q, want wrapped snippet", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "To undo later:") || !strings.Contains(stdout.String(), "No files were changed.") {
+		t.Fatalf("stdout = %q, want reversible read-only copy", stdout.String())
 	}
 }
 
@@ -291,11 +349,14 @@ func TestRunStatuslineCheckConfiguredWrappedWithAbsolutePath(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
-	if !strings.Contains(stdout.String(), "cc-watch-wrapped") {
+	if !strings.Contains(stdout.String(), "already includes cc-watch") {
 		t.Fatalf("stdout = %q, want detection via absolute install path, not just a bare cc-watch prefix", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), `"command": "ccstatusline --theme dark"`) {
 		t.Fatalf("stdout = %q, want revert-to original inner command", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "To undo:") || !strings.Contains(stdout.String(), "No files were changed.") {
+		t.Fatalf("stdout = %q, want undo read-only copy", stdout.String())
 	}
 }
 
@@ -303,11 +364,8 @@ func TestRunStatuslineCheckAmbiguousWrappingReportsUncertainty(t *testing.T) {
 	deps := fakeDeps(t)
 	home := t.TempDir()
 	deps.HomeDir = func() (string, error) { return home, nil }
-	// Already contains cc-watch's own subcommand invocation, but with no
-	// recognizable " -- " wrap marker (e.g. already bare-configured) --
-	// genuinely ambiguous, unlike an unrelated tool that merely shares the
-	// "statusline" substring in its own name.
-	writeSettings(t, home, `{"statusLine":{"command":"cc-watch statusline"}}`)
+	// Mentions cc-watch, but is not the runtime statusline command.
+	writeSettings(t, home, `{"statusLine":{"command":"cc-watch statusline --check"}}`)
 
 	var stdout bytes.Buffer
 	code := runStatuslineCheck(deps.Dependencies, &stdout)
@@ -315,8 +373,11 @@ func TestRunStatuslineCheckAmbiguousWrappingReportsUncertainty(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
-	if !strings.Contains(stdout.String(), "Couldn't confidently determine") {
+	if !strings.Contains(stdout.String(), "wrapper shape is unclear") {
 		t.Fatalf("stdout = %q, want uncertainty message for ambiguous statusline value", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "No files were changed.") {
+		t.Fatalf("stdout = %q, want read-only reminder", stdout.String())
 	}
 }
 
@@ -382,8 +443,8 @@ func TestStatuslineDispatchReadsStdinAndExitsZero(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d, want 0; stderr=%q", code, stderr.String())
 	}
-	if stdout.String() != "5h 34%" {
-		t.Fatalf("stdout = %q, want %q", stdout.String(), "5h 34%")
+	if stdout.String() != "⏱ 34% (5h) used" {
+		t.Fatalf("stdout = %q, want %q", stdout.String(), "⏱ 34% (5h) used")
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())

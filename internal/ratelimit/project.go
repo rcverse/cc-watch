@@ -6,7 +6,6 @@ import "math"
 // KeepAlive pings before the account-wide 5-hour window resets.
 type Projection struct {
 	MessagesLeft int
-	PingsNeeded  int
 	AtRisk       bool
 }
 
@@ -26,7 +25,6 @@ func Project(usedPct, pctPerMessage float64, momentumOK bool, timeToResetSeconds
 	pingsNeeded := int(math.Ceil(timeToResetSeconds / float64(ttlSeconds)))
 	return Projection{
 		MessagesLeft: messagesLeft,
-		PingsNeeded:  pingsNeeded,
 		AtRisk:       messagesLeft <= pingsNeeded,
 	}, true
 }

@@ -104,9 +104,9 @@ while still refusing to send within seconds of expiry.
   a wrapped command may depend on stderr passthrough for its own
   progress/warnings. Only stdout is captured.
 - Exactly one trailing newline is trimmed from the wrapped command's
-  stdout before cc-watch's own segment is appended; everything else is
-  handled as raw bytes, never string-normalized (could mangle ANSI
-  sequences the wrapped command emitted).
+  stdout before cc-watch's own segment is appended after ` | `;
+  everything else is handled as raw bytes, never string-normalized (could
+  mangle ANSI sequences the wrapped command emitted).
 - On a non-clean wrapped-command exit (nonzero, spawn error, or timeout),
   cc-watch relays whatever partial stdout it produced and appends
   **nothing** — never risk turning a truncated line into a garbled
@@ -120,6 +120,15 @@ while still refusing to send within seconds of expiry.
   `os.WriteFile` pattern as `internal/config`. It self-heals every turn
   (rebuilt from the next hook invocation regardless of prior contents),
   so there's no delete/`--clean` verb — `rm` the file if you ever need to.
+- The config TUI may install or uninstall the Claude Code statusLine
+  setting in `~/.claude/settings.json`. It only writes for unambiguous
+  states, preserves existing non-statusLine settings, writes a timestamped
+  backup first, and refuses unclear commands with manual-review copy.
+  `cc-watch statusline --check` remains read-only.
+- Both Claude Code account windows matter for KeepAlive availability. The
+  statusline displays both `five_hour` and `seven_day` when Claude provides
+  them, and `KeepAlive at risk` means at least one account window may run
+  out before enough future KeepAlive sends can happen.
 - **Momentum is a conservative estimate, never a fact.** `pctPerMessage`
   is the average of the last few consecutive reading-to-reading deltas in
   the account's overall `used_percentage` — not isolated to KeepAlive's

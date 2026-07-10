@@ -8,17 +8,15 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/richardchen/cc-watch/internal/ratelimit"
+	"github.com/richardchen/cc-watch/internal/statusline"
 )
 
 const (
 	statuslineStdinCap    = 1 << 20 // defensive upper bound; never truncate a real payload
 	statuslineTimeout     = 5 * time.Second
-	statuslineWrapMarker  = " statusline -- "
 	statuslineFallbackTTL = 300 // matches the parser's own "unknown tier" TTL convention
 )
 
@@ -76,7 +74,7 @@ func runStatusline(cmd Command, deps Dependencies, stdin io.Reader, stdout, stde
 	stdout.Write(trimmed)
 	if suffix != "" {
 		if len(trimmed) > 0 {
-			stdout.Write([]byte(" "))
+			stdout.Write([]byte(" | "))
 		}
 		stdout.Write([]byte(suffix))
 	}
@@ -86,11 +84,19 @@ func runStatusline(cmd Command, deps Dependencies, stdin io.Reader, stdout, stde
 type statuslinePayload struct {
 	TranscriptPath string `json:"transcript_path"`
 	RateLimits     struct {
-		FiveHour struct {
-			UsedPercentage *float64 `json:"used_percentage"`
-			ResetsAt       *int64   `json:"resets_at"`
-		} `json:"five_hour"`
+		FiveHour statuslineLimitWindow `json:"five_hour"`
+		SevenDay statuslineLimitWindow `json:"seven_day"`
 	} `json:"rate_limits"`
+}
+
+type statuslineLimitWindow struct {
+	UsedPercentage *float64 `json:"used_percentage"`
+	ResetsAt       *int64   `json:"resets_at"`
+}
+
+type statuslineReading struct {
+	UsedPct  float64
+	ResetsAt time.Time
 }
 
 // statuslineSuffix parses the hook payload, updates persisted rate-limit
@@ -103,38 +109,64 @@ func statuslineSuffix(deps Dependencies, raw []byte) string {
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return ""
 	}
-	fiveHour := payload.RateLimits.FiveHour
-	if fiveHour.UsedPercentage == nil || fiveHour.ResetsAt == nil {
+	fiveHour, ok := parseStatuslineReading(payload.RateLimits.FiveHour)
+	if !ok {
 		return ""
 	}
-	usedPct := *fiveHour.UsedPercentage
-	resetsAt := time.Unix(*fiveHour.ResetsAt, 0).UTC()
-	pct := fmt.Sprintf("%.0f", usedPct)
+	sevenDay, hasSevenDay := parseStatuslineReading(payload.RateLimits.SevenDay)
 
 	home, err := deps.HomeDir()
 	if err != nil {
-		return "5h " + pct + "%"
+		return statuslineText(fiveHour, sevenDay, hasSevenDay, 0, false, false)
 	}
 	state, err := ratelimit.Load(home)
 	if err != nil {
-		return "5h " + pct + "%"
+		return statuslineText(fiveHour, sevenDay, hasSevenDay, 0, false, false)
 	}
 
 	now := deps.Now()
-	state.AddReading(now, ratelimit.Reading{UsedPct: usedPct, ResetsAt: resetsAt})
+	state.AddReading(ratelimit.Reading{UsedPct: fiveHour.UsedPct, ResetsAt: fiveHour.ResetsAt})
+	if hasSevenDay {
+		state.AddSevenDayReading(ratelimit.Reading{UsedPct: sevenDay.UsedPct, ResetsAt: sevenDay.ResetsAt})
+	}
 	ttlSeconds := statuslineTTLSeconds(deps, &state, payload.TranscriptPath)
 	_ = ratelimit.Save(home, state) // best-effort; a save failure must not break the statusline
 
 	pctPerMessage, momentumOK := ratelimit.Momentum(state.History)
-	timeToReset := resetsAt.Sub(now).Seconds()
-	projection, ok := ratelimit.Project(usedPct, pctPerMessage, momentumOK, timeToReset, ttlSeconds)
-	if !ok {
-		return "5h " + pct + "%"
+	projection, hasProjection := ratelimit.Project(fiveHour.UsedPct, pctPerMessage, momentumOK, fiveHour.ResetsAt.Sub(now).Seconds(), ttlSeconds)
+	atRisk := hasProjection && projection.AtRisk
+	if hasSevenDay {
+		weekPctPerMessage, weekMomentumOK := ratelimit.Momentum(state.SevenDayHistory)
+		weekProjection, ok := ratelimit.Project(sevenDay.UsedPct, weekPctPerMessage, weekMomentumOK, sevenDay.ResetsAt.Sub(now).Seconds(), ttlSeconds)
+		atRisk = atRisk || (ok && weekProjection.AtRisk)
 	}
-	if projection.AtRisk {
-		return colorAtRisk("! 5h " + pct + "% cap before reset")
+	return statuslineText(fiveHour, sevenDay, hasSevenDay, projection.MessagesLeft, hasProjection, atRisk)
+}
+
+func parseStatuslineReading(window statuslineLimitWindow) (statuslineReading, bool) {
+	if window.UsedPercentage == nil || window.ResetsAt == nil {
+		return statuslineReading{}, false
 	}
-	return fmt.Sprintf("5h %s%% ~%d msg left", pct, projection.MessagesLeft)
+	return statuslineReading{
+		UsedPct:  *window.UsedPercentage,
+		ResetsAt: time.Unix(*window.ResetsAt, 0).UTC(),
+	}, true
+}
+
+func statuslineText(fiveHour, sevenDay statuslineReading, hasSevenDay bool, messagesLeft int, hasMessagesLeft, atRisk bool) string {
+	text := fmt.Sprintf("⏱ %.0f%% (5h)", fiveHour.UsedPct)
+	if hasSevenDay {
+		text += fmt.Sprintf(" / %.0f%% (7d)", sevenDay.UsedPct)
+	}
+	text += " used"
+	if hasMessagesLeft && !atRisk {
+		text += fmt.Sprintf(" · ✉ ~%d msgs", messagesLeft)
+	}
+	if atRisk {
+		text += " · ⚠ KeepAlive at risk"
+		return colorAtRisk(text)
+	}
+	return text
 }
 
 // statuslineTTLSeconds resolves the current session's cache-tier TTL,
@@ -144,14 +176,14 @@ func statuslineTTLSeconds(deps Dependencies, state *ratelimit.State, transcriptP
 	if transcriptPath == "" {
 		return statuslineFallbackTTL
 	}
-	if cached, ok := state.TierCache[transcriptPath]; ok && cached.Known {
-		return cached.TTLSeconds
+	if cached, ok := state.TierCache[transcriptPath]; ok {
+		return cached
 	}
 	ttl := statuslineFallbackTTL
 	if parsed, err := deps.ParseFile(transcriptPath); err == nil {
 		ttl = parsed.CacheWindow.TTLSeconds
 		if parsed.CacheWindow.Known {
-			state.TierCache[transcriptPath] = ratelimit.TierInfo{TTLSeconds: ttl, Known: true}
+			state.TierCache[transcriptPath] = ttl
 		}
 	}
 	return ttl
@@ -174,77 +206,51 @@ func runStatuslineCheck(deps Dependencies, stdout io.Writer) int {
 		return 0
 	}
 
-	current, err := readStatuslineCommand(home)
+	status, err := statusline.Inspect(home)
 	if err != nil {
 		fmt.Fprintln(stdout, "Could not read ~/.claude/settings.json: "+err.Error())
 		return 0
 	}
-	if current == "" {
-		fmt.Fprintln(stdout, "Not configured. Add to ~/.claude/settings.json:")
-		fmt.Fprintln(stdout, "  "+statuslineSettingsSnippet("cc-watch statusline"))
+
+	switch status.State {
+	case statusline.StateNotInstalled:
+		fmt.Fprintln(stdout, "Claude Code statusLine is not configured.")
+		fmt.Fprintln(stdout, "To enable cc-watch:")
+		fmt.Fprintln(stdout, "  "+statusline.SettingsSnippet("cc-watch statusline"))
+		fmt.Fprintln(stdout, "To undo later: remove the statusLine block.")
+		fmt.Fprintln(stdout, "No files were changed.")
 		return 0
-	}
-
-	if idx := strings.Index(current, statuslineWrapMarker); idx >= 0 {
-		original := strings.TrimSpace(current[idx+len(statuslineWrapMarker):])
-		fmt.Fprintln(stdout, "Configured, cc-watch-wrapped:")
-		fmt.Fprintln(stdout, "  current:   "+statuslineSettingsSnippet(current))
-		fmt.Fprintln(stdout, "  revert to: "+statuslineSettingsSnippet(original))
-		return 0
-	}
-
-	// Anchored on the actual "cc-watch statusline" invocation token, not a
-	// bare "statusline" substring -- a real, unrelated statusline tool can
-	// coincidentally contain that substring in its own name (e.g. the
-	// illustrative "ccstatusline"), which must never be misreported as an
-	// ambiguous cc-watch wrapping state.
-	if strings.Contains(current, "cc-watch statusline") {
-		fmt.Fprintln(stdout, "Couldn't confidently determine wrapping state. Current value:")
-		fmt.Fprintln(stdout, "  "+statuslineSettingsSnippet(current))
-		return 0
-	}
-
-	wrapped := "cc-watch statusline -- " + current
-	if needsShell(current) {
-		wrapped = "cc-watch statusline -- sh -c " + shellQuote(current)
-	}
-	fmt.Fprintln(stdout, "Configured, not cc-watch-wrapped:")
-	fmt.Fprintln(stdout, "  current:    "+statuslineSettingsSnippet(current))
-	fmt.Fprintln(stdout, "  add cc-watch: "+statuslineSettingsSnippet(wrapped))
-	return 0
-}
-
-func readStatuslineCommand(home string) (string, error) {
-	data, err := os.ReadFile(filepath.Join(home, ".claude", "settings.json"))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", nil
+	case statusline.StateInstalled:
+		fmt.Fprintln(stdout, "Claude Code statusLine already includes cc-watch.")
+		fmt.Fprintln(stdout, "Current:")
+		fmt.Fprintln(stdout, "  "+statusline.SettingsSnippet(status.Command))
+		if status.PreviousCommand == "" {
+			fmt.Fprintln(stdout, "To undo: remove the statusLine block.")
+		} else {
+			fmt.Fprintln(stdout, "To undo:")
+			fmt.Fprintln(stdout, "  "+statusline.SettingsSnippet(status.PreviousCommand))
 		}
-		return "", err
+		fmt.Fprintln(stdout, "No files were changed.")
+		return 0
+	case statusline.StateManualReview:
+		fmt.Fprintln(stdout, "cc-watch appears in statusLine, but the wrapper shape is unclear.")
+		fmt.Fprintln(stdout, "Current:")
+		fmt.Fprintln(stdout, "  "+statusline.SettingsSnippet(status.Command))
+		fmt.Fprintln(stdout, "No files were changed.")
+		return 0
 	}
-	var settings struct {
-		StatusLine struct {
-			Command string `json:"command"`
-		} `json:"statusLine"`
+
+	wrapped := "cc-watch statusline -- " + status.Command
+	if statusline.NeedsShell(status.Command) {
+		wrapped = "cc-watch statusline -- sh -c " + statusline.ShellQuote(status.Command)
 	}
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return "", err
-	}
-	return settings.StatusLine.Command, nil
-}
-
-func statuslineSettingsSnippet(command string) string {
-	escaped, _ := json.Marshal(command)
-	return fmt.Sprintf(`"statusLine": {"type": "command", "command": %s}`, escaped)
-}
-
-func needsShell(command string) bool {
-	return strings.ContainsAny(command, "|&;<>()$`\\\n") ||
-		strings.Contains(command, ">") ||
-		strings.Contains(command, "<") ||
-		strings.Contains(command, "=")
-}
-
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+	fmt.Fprintln(stdout, "Claude Code statusLine is set, but cc-watch is not in the chain.")
+	fmt.Fprintln(stdout, "Current:")
+	fmt.Fprintln(stdout, "  "+statusline.SettingsSnippet(status.Command))
+	fmt.Fprintln(stdout, "To enable cc-watch:")
+	fmt.Fprintln(stdout, "  "+statusline.SettingsSnippet(wrapped))
+	fmt.Fprintln(stdout, "To undo later:")
+	fmt.Fprintln(stdout, "  "+statusline.SettingsSnippet(status.Command))
+	fmt.Fprintln(stdout, "No files were changed.")
+	return 0
 }

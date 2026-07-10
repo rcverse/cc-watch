@@ -84,7 +84,9 @@ scripts/test-install.sh # exercises install.sh against a temp HOME, safe to run
 - `statusline` is the only feature besides KeepAlive allowed to spawn a
   subprocess, and only the user's own configured statusline command,
   argv-only (never a shell), bounded 5s timeout, always relays output and
-  exits 0. It never writes `~/.claude/settings.json`.
+  exits 0. The runtime hook and `--check` never write
+  `~/.claude/settings.json`; config TUI install/uninstall may edit it only
+  for unambiguous statusLine states, with a timestamped backup first.
 - Don't add Linux/Windows support, a daemon, a public watch/interval flag,
   Homebrew/GitHub Release packaging, or direct Anthropic API calls without
   the user asking first — these are deliberate non-goals, not oversights.

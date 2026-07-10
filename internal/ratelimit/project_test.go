@@ -26,9 +26,6 @@ func TestProjectSafeWhenMessagesLeftExceedsPingsNeeded(t *testing.T) {
 	if proj.MessagesLeft != 10 {
 		t.Fatalf("MessagesLeft = %d, want 10", proj.MessagesLeft)
 	}
-	if proj.PingsNeeded != 1 {
-		t.Fatalf("PingsNeeded = %d, want 1", proj.PingsNeeded)
-	}
 	if proj.AtRisk {
 		t.Fatal("AtRisk = true, want false")
 	}
@@ -43,9 +40,6 @@ func TestProjectAtRiskWhenMessagesLeftAtOrBelowPingsNeeded(t *testing.T) {
 	}
 	if proj.MessagesLeft != 2 {
 		t.Fatalf("MessagesLeft = %d, want 2", proj.MessagesLeft)
-	}
-	if proj.PingsNeeded != 2 {
-		t.Fatalf("PingsNeeded = %d, want 2", proj.PingsNeeded)
 	}
 	if !proj.AtRisk {
 		t.Fatal("AtRisk = false, want true at the messagesLeft == pingsNeeded boundary")
