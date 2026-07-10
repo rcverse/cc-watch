@@ -47,9 +47,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmd, refreshTickCommand(m.refreshTiming.SafetyInterval))
 		}
 		return m, cmd
-	case WatcherEventMsg:
-		m.watcherEvents = append(m.watcherEvents, typed)
-		return m.scheduleRefresh(refresh.SourceFsnotify, false)
 	case RefreshWatcherEventsMsg:
 		m.refresh.Watcher = typed.State
 		decision := m.refreshCoordinator.OnWatcherEvents(typed.Events)
@@ -113,13 +110,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case KeepAliveCountdownElapsedMsg:
 		if !m.keepAliveAsyncCurrent(typed.SessionID, typed.InstanceToken, typed.SelectedID) {
-			m.lastAction = ErrKeepAliveStaleMessage.Error()
 			return m, nil
 		}
 		return m.withKeepAliveActions(m.keepAliveManager.CountdownElapsed(typed.SessionID, typed.InstanceToken, typed.Now))
 	case KeepAliveRunnerResultMsg:
 		if !m.keepAliveAsyncCurrent(typed.SessionID, typed.InstanceToken, typed.SelectedID) {
-			m.lastAction = ErrKeepAliveStaleMessage.Error()
 			return m, nil
 		}
 		state := m.keepAliveManager.ApplyRunnerExecution(typed.Action, typed.Execution)
@@ -129,7 +124,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.keepAliveLifecycleNotification(typed.SessionID, state)
 	case KeepAliveConfirmationResultMsg:
 		if !m.keepAliveAsyncCurrent(typed.SessionID, typed.InstanceToken, typed.SelectedID) {
-			m.lastAction = ErrKeepAliveStaleMessage.Error()
 			return m, nil
 		}
 		if typed.Err != nil {
@@ -142,7 +136,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.keepAliveManager.MarkSuccess(typed.SessionID, typed.InstanceToken)
 		state := m.KeepAliveState(typed.SessionID)
-		m.lastAction = "keepalive_confirmed"
 		m.setNotice("✓ KeepAlive sent and confirmed", RoleSuccess, 3*time.Second)
 		commands := []tea.Cmd{
 			m.keepAliveSuccessNotification(typed.SessionID),
@@ -156,7 +149,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.deps.ResetNotificationSuppression != nil {
 			m.deps.ResetNotificationSuppression()
 		}
-		m.lastAction = "manual_refresh"
 		if m.route == RouteWorkspace {
 			m.setNotice("updating selected session", RoleInfo, 3*time.Second)
 		} else {
@@ -214,10 +206,7 @@ func (m *Model) applyNotificationResult(msg NotificationResultMsg) {
 		Notification: notification,
 		Result:       msg.Result,
 	}
-	m.notificationStatuses = append([]NotificationStatus{status}, m.notificationStatuses...)
-	if len(m.notificationStatuses) > 5 {
-		m.notificationStatuses = m.notificationStatuses[:5]
-	}
+	m.lastNotification = &status
 	if msg.Result.Degraded {
 		m.refresh.NotificationDegraded = msg.Result.Message
 	} else if msg.Result.Delivered {
@@ -324,7 +313,6 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "q", "ctrl+c":
-		m.lastAction = "quit"
 		return m, tea.Quit
 	case "down":
 		if m.route == RouteWorkspace && m.FocusedAction() == "details_scroll" {
@@ -371,7 +359,6 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.configReturnRoute = m.route
 			m.route = RouteConfig
 			m.focusIndex = m.defaultFocusIndex()
-			m.lastAction = "open_config"
 		} else if m.route == RouteWorkspace {
 			return m, nil
 		}
@@ -381,16 +368,13 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.sessionInfoExpanded = !m.sessionInfoExpanded
 			m.detailsOffset = 0
 			m.focusIndex = m.defaultFocusIndex()
-			m.lastAction = "toggle_session_info_details"
 		}
 		return m, nil
 	case "b", "esc":
 		if m.route == RouteWorkspace {
 			m.route = RouteList
-			m.lastAction = "back_to_list"
 		} else if m.route == RouteAmbiguous {
 			m.route = RouteList
-			m.lastAction = "back_to_list"
 		} else if m.route == RouteConfig {
 			return m.cancelConfig()
 		}
@@ -401,7 +385,6 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.saveConfig()
 		case m.route == RouteWorkspace && m.sessionInfoExpanded:
 			m.gapSortNewest = !m.gapSortNewest
-			m.lastAction = "toggle_gap_sort"
 			return m, nil
 		case m.route == RouteWorkspace && m.workspaceCanSendKeepAlive():
 			return m.sendKeepAliveNow()
@@ -441,10 +424,8 @@ func (m *Model) applyKeepAliveActions(actions []keepalive.Action, commands *[]te
 		case keepalive.ActionCountdownStarted:
 			m.countdowns[action.SessionID] = action.CountdownSeconds
 		case keepalive.ActionStartRunner:
-			m.lastAction = "keepalive_runner_ready"
 			*commands = append(*commands, m.keepAliveRunnerCommand(action))
 		case keepalive.ActionScopeComplete:
-			m.lastAction = "keepalive_scope_complete"
 			if cmd := m.keepAliveLifecycleNotification(action.SessionID, m.KeepAliveState(action.SessionID)); cmd != nil {
 				*commands = append(*commands, cmd)
 			}
@@ -501,7 +482,6 @@ func (m Model) sendKeepAliveNow() (tea.Model, tea.Cmd) {
 	}
 	if reason := m.keepAliveUnavailableReason(*selected); reason != "" {
 		m.disableKeepAlive(selected.SessionID)
-		m.lastAction = "keepalive_unavailable_expired"
 		m.setNotice("KeepAlive N/A "+reason, RoleMuted, 3*time.Second)
 		m.restoreFocusAction("keepalive")
 		return m, nil
@@ -509,7 +489,6 @@ func (m Model) sendKeepAliveNow() (tea.Model, tea.Cmd) {
 	state := m.KeepAliveState(selected.SessionID)
 	actions := m.keepAliveManager.SendNow(selected.SessionID, state.InstanceToken)
 	commands := m.applyKeepAliveActions(actions, nil)
-	m.lastAction = "send_keepalive_now"
 	m.focusIndex = m.defaultFocusIndex()
 	return m, tea.Batch(commands...)
 }
@@ -525,7 +504,6 @@ func (m *Model) cancelKeepAlive() {
 	} else {
 		m.keepAliveManager.Cancel(selected.SessionID, state.InstanceToken)
 	}
-	m.lastAction = "cancel_keepalive"
 	m.setNotice("KeepAlive cancelled", RoleInfo, 3*time.Second)
 	m.restoreFocusAction("keepalive")
 }

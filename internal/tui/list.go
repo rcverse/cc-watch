@@ -70,8 +70,8 @@ func (m Model) listDegradedBanner() string {
 	if m.refresh.NotificationDegraded != "" {
 		messages = append(messages, "notifications degraded: "+m.refresh.NotificationDegraded)
 	}
-	if len(m.notificationStatuses) > 0 {
-		status := m.notificationStatuses[0]
+	if m.lastNotification != nil {
+		status := *m.lastNotification
 		switch {
 		case status.Result.Degraded:
 			messages = append(messages, "notification failed: "+status.Notification.Title)
@@ -493,14 +493,12 @@ func (m Model) isEmptyListState() bool {
 }
 
 func (m *Model) toggleReminderForSelected() {
-	m.lastAction = "toggle_reminder"
 	selected := m.selectedSession()
 	if selected == nil {
 		return
 	}
 	if selected.StatusAt(m.now).State == session.StatusExpired {
 		m.reminderEnabled[selected.SessionID] = false
-		m.lastAction = "reminder_unavailable_expired"
 		m.setNotice("Reminder N/A after expiry", RoleMuted, 3*time.Second)
 		return
 	}
@@ -508,14 +506,12 @@ func (m *Model) toggleReminderForSelected() {
 }
 
 func (m *Model) toggleKeepAliveForSelected() tea.Cmd {
-	m.lastAction = "toggle_keepalive"
 	selected := m.selectedSession()
 	if selected == nil {
 		return nil
 	}
 	if reason := m.keepAliveUnavailableReason(*selected); reason != "" {
 		m.disableKeepAlive(selected.SessionID)
-		m.lastAction = "keepalive_unavailable_expired"
 		m.setNotice("KeepAlive N/A "+reason, RoleMuted, 3*time.Second)
 		return nil
 	}

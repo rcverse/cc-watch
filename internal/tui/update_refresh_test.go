@@ -39,7 +39,7 @@ func TestWatcherEventsDebounceBeforeRefreshSnapshot(t *testing.T) {
 		t.Fatal("watcher event returned nil debounce command")
 	}
 
-	updated, cmd = model.Update(RefreshDebounceElapsedMsg{Now: now.Add(300 * time.Millisecond), Token: model.RefreshDebounceToken()})
+	updated, cmd = model.Update(RefreshDebounceElapsedMsg{Now: now.Add(300 * time.Millisecond), Token: model.refreshDebounceToken})
 	model = updated.(Model)
 	if cmd == nil {
 		t.Fatal("debounce elapsed returned nil refresh command")
@@ -54,8 +54,8 @@ func TestWatcherEventsDebounceBeforeRefreshSnapshot(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("calls = %d, want 1", calls)
 	}
-	if model.LastRefreshSource() != refresh.SourceFsnotify {
-		t.Fatalf("LastRefreshSource = %q, want fsnotify", model.LastRefreshSource())
+	if model.lastRefreshSource != refresh.SourceFsnotify {
+		t.Fatalf("last refresh source = %q, want fsnotify", model.lastRefreshSource)
 	}
 }
 
@@ -77,14 +77,14 @@ func TestStaleWatcherDebounceElapsedDoesNotRefresh(t *testing.T) {
 		State:  refresh.State{Status: refresh.StatusOK, SafetyRefreshActive: true},
 	})
 	model = updated.(Model)
-	firstToken := model.RefreshDebounceToken()
+	firstToken := model.refreshDebounceToken
 
 	updated, _ = model.Update(RefreshWatcherEventsMsg{
 		Events: []refresh.NormalizedEvent{{Kind: refresh.EventWritten, Path: "/tmp/two.jsonl"}},
 		State:  refresh.State{Status: refresh.StatusOK, SafetyRefreshActive: true},
 	})
 	model = updated.(Model)
-	secondToken := model.RefreshDebounceToken()
+	secondToken := model.refreshDebounceToken
 	if secondToken == firstToken {
 		t.Fatalf("second token = first token = %d, want fresh debounce token", secondToken)
 	}
@@ -123,47 +123,6 @@ func TestManualRefreshResetsNotificationSuppression(t *testing.T) {
 	if resets != 1 {
 		t.Fatalf("notification suppression resets = %d, want 1", resets)
 	}
-	if model.LastAction() != "manual_refresh" {
-		t.Fatalf("last action = %q, want manual_refresh", model.LastAction())
-	}
-}
-
-func TestWatcherEventsArriveAsMessages(t *testing.T) {
-	model := NewModel(Options{
-		Dependencies: Dependencies{
-			RefreshSnapshot: func(source refresh.Source, generation int, selected *session.Session) RefreshSnapshot {
-				if source != refresh.SourceFsnotify {
-					t.Fatalf("source = %q, want fsnotify", source)
-				}
-				return RefreshSnapshot{Sessions: []session.Session{{SessionID: "fsnotify", ShortID: "fsnotify"}}}
-			},
-		},
-	})
-
-	updated, cmd := model.Update(WatcherEventMsg{
-		Path: "/tmp/session.jsonl",
-		Op:   "write",
-	})
-	model = updated.(Model)
-
-	if cmd == nil {
-		t.Fatalf("WatcherEvent returned nil command, want refresh command")
-	}
-	msg := cmd()
-	result, ok := msg.(RefreshResultMsg)
-	if !ok {
-		t.Fatalf("watcher command returned %#v, want RefreshResultMsg", msg)
-	}
-	if len(result.Sessions) != 1 || result.Sessions[0].SessionID != "fsnotify" {
-		t.Fatalf("watcher refresh result = %#v", result)
-	}
-	events := model.WatcherEvents()
-	if len(events) != 1 {
-		t.Fatalf("len(events) = %d, want 1", len(events))
-	}
-	if events[0].Path != "/tmp/session.jsonl" || events[0].Op != "write" {
-		t.Fatalf("event = %#v", events[0])
-	}
 }
 
 func TestSafetyRefreshProducesFreshGenerationCommand(t *testing.T) {
@@ -188,8 +147,8 @@ func TestSafetyRefreshProducesFreshGenerationCommand(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("safety refresh returned nil command")
 	}
-	if model.RefreshGeneration() != 5 {
-		t.Fatalf("generation = %d, want 5", model.RefreshGeneration())
+	if model.refreshGeneration != 5 {
+		t.Fatalf("generation = %d, want 5", model.refreshGeneration)
 	}
 	msg := cmd()
 	result, ok := msg.(RefreshResultMsg)
@@ -212,8 +171,8 @@ func TestRefreshResultsReplaceSessionStateAndIgnoreStaleGenerations(t *testing.T
 		Sessions:   []session.Session{{SessionID: "stale", ShortID: "stale", Project: "stale"}},
 	})
 	model = updated.(Model)
-	if model.Sessions()[0].SessionID != "old" {
-		t.Fatalf("stale refresh replaced sessions: %#v", model.Sessions())
+	if model.sessions[0].SessionID != "old" {
+		t.Fatalf("stale refresh replaced sessions: %#v", model.sessions)
 	}
 
 	updated, _ = model.Update(RefreshResultMsg{
@@ -221,8 +180,8 @@ func TestRefreshResultsReplaceSessionStateAndIgnoreStaleGenerations(t *testing.T
 		Sessions:   []session.Session{{SessionID: "new", ShortID: "new", Project: "new"}},
 	})
 	model = updated.(Model)
-	if model.Sessions()[0].SessionID != "new" {
-		t.Fatalf("current refresh did not replace sessions: %#v", model.Sessions())
+	if model.sessions[0].SessionID != "new" {
+		t.Fatalf("current refresh did not replace sessions: %#v", model.sessions)
 	}
 }
 
@@ -319,13 +278,13 @@ func TestManualRefreshBypassesDebounceWithFreshGeneration(t *testing.T) {
 	} else {
 		t.Fatal("manual refresh returned nil command, want reparse command")
 	}
-	if model.RefreshGeneration() != 3 {
-		t.Fatalf("generation = %d, want 3", model.RefreshGeneration())
+	if model.refreshGeneration != 3 {
+		t.Fatalf("generation = %d, want 3", model.refreshGeneration)
 	}
-	if model.LastRefreshSource() != refresh.SourceManual {
-		t.Fatalf("source = %q, want manual", model.LastRefreshSource())
+	if model.lastRefreshSource != refresh.SourceManual {
+		t.Fatalf("source = %q, want manual", model.lastRefreshSource)
 	}
-	if !model.LastRefreshBypassedDebounce() {
+	if !model.lastBypassedDebounce {
 		t.Fatal("manual refresh did not bypass debounce")
 	}
 }
@@ -338,13 +297,13 @@ func TestRefreshResultHandlesDeletedAndNewSessions(t *testing.T) {
 
 	updated, _ := model.Update(RefreshResultMsg{Generation: 2, Sessions: []session.Session{}})
 	model = updated.(Model)
-	if len(model.Sessions()) != 0 {
-		t.Fatalf("deleted session remained after refresh: %#v", model.Sessions())
+	if len(model.sessions) != 0 {
+		t.Fatalf("deleted session remained after refresh: %#v", model.sessions)
 	}
 
 	updated, _ = model.Update(RefreshResultMsg{Generation: 3, Sessions: []session.Session{{SessionID: "new", ShortID: "new"}}})
 	model = updated.(Model)
-	if got := model.Sessions(); len(got) != 1 || got[0].SessionID != "new" {
+	if got := model.sessions; len(got) != 1 || got[0].SessionID != "new" {
 		t.Fatalf("new session not reflected: %#v", got)
 	}
 }
@@ -370,11 +329,11 @@ func TestRefreshTickReparsesListAndWorkspaceSessions(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("refresh tick returned nil list command")
 	}
-	if msg := cmd(); msg.(RefreshResultMsg).Generation != list.RefreshGeneration() {
+	if msg := cmd(); msg.(RefreshResultMsg).Generation != list.refreshGeneration {
 		t.Fatalf("refresh result generation did not match model generation")
 	}
-	if listCalls != 1 || list.LastRefreshSource() != refresh.SourceSafety {
-		t.Fatalf("list refresh calls=%d source=%q", listCalls, list.LastRefreshSource())
+	if listCalls != 1 || list.lastRefreshSource != refresh.SourceSafety {
+		t.Fatalf("list refresh calls=%d source=%q", listCalls, list.lastRefreshSource)
 	}
 
 	selectedCalls := 0
@@ -406,8 +365,8 @@ func TestRefreshTickReparsesListAndWorkspaceSessions(t *testing.T) {
 	if !result.SelectedOnly || result.SelectedID != "workspace-id" {
 		t.Fatalf("workspace refresh result selectedOnly=%v selectedID=%q", result.SelectedOnly, result.SelectedID)
 	}
-	if selectedCalls != 1 || workspace.LastRefreshSource() != refresh.SourceSafety {
-		t.Fatalf("workspace refresh calls=%d source=%q", selectedCalls, workspace.LastRefreshSource())
+	if selectedCalls != 1 || workspace.lastRefreshSource != refresh.SourceSafety {
+		t.Fatalf("workspace refresh calls=%d source=%q", selectedCalls, workspace.lastRefreshSource)
 	}
 }
 
@@ -446,7 +405,7 @@ func TestRefreshSnapshotAppliesSelectedSessionSnapshot(t *testing.T) {
 		t.Fatalf("message = %#v, want RefreshResultMsg", msg)
 	}
 	updated, _ = updated.Update(result)
-	got := updated.(Model).Sessions()[0].Messages.LastUserExcerpt
+	got := updated.(Model).sessions[0].Messages.LastUserExcerpt
 	if got != "fresh selected session" {
 		t.Fatalf("last excerpt = %q, want refreshed selected session", got)
 	}
@@ -467,8 +426,8 @@ func TestDisplayTickDoesNotRefreshData(t *testing.T) {
 	})
 	updated, cmd := model.Update(DisplayTickMsg{Now: now.Add(time.Second)})
 	model = updated.(Model)
-	if refreshCalls != 0 || model.LastRefreshSource() != "" {
-		t.Fatalf("display tick refreshed data: calls=%d source=%q", refreshCalls, model.LastRefreshSource())
+	if refreshCalls != 0 || model.lastRefreshSource != "" {
+		t.Fatalf("display tick refreshed data: calls=%d source=%q", refreshCalls, model.lastRefreshSource)
 	}
 	if cmd != nil {
 		if _, ok := cmd().(RefreshResultMsg); ok {
@@ -530,8 +489,8 @@ func TestWorkspaceManualRefreshIsFocusableAndUsesSelectedIDSnapshot(t *testing.T
 	if len(result.Sessions) != 1 || result.Sessions[0].SessionID != "workspace-id" {
 		t.Fatalf("manual workspace refresh result = %#v, want only selected session", result.Sessions)
 	}
-	if model.LastAction() != "manual_refresh" || !model.LastRefreshBypassedDebounce() {
-		t.Fatalf("manual refresh state = action %q bypass %v", model.LastAction(), model.LastRefreshBypassedDebounce())
+	if !model.lastBypassedDebounce {
+		t.Fatal("manual refresh did not bypass debounce")
 	}
 }
 
@@ -613,7 +572,7 @@ func TestWorkspaceManualRefreshUpdatesOnlySelectedSessionWhenSnapshotReturnsList
 	updated, _ = model.Update(result)
 	model = updated.(Model)
 
-	got := model.Sessions()
+	got := model.sessions
 	if len(got) != 2 {
 		t.Fatalf("sessions length = %d, want 2 selected plus existing other: %#v", len(got), got)
 	}

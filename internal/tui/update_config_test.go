@@ -74,9 +74,6 @@ func TestConfigEditorCanInstallStatusline(t *testing.T) {
 	if !strings.Contains(model.View(), "Installed in Claude Code") || !strings.Contains(model.View(), "Uninstall from Claude Code") {
 		t.Fatalf("installed statusline state missing:\n%s", model.View())
 	}
-	if model.LastAction() != "install_statusline" {
-		t.Fatalf("last action = %q, want install_statusline", model.LastAction())
-	}
 }
 
 func TestConfigEditorCanUninstallStatusline(t *testing.T) {
@@ -106,9 +103,6 @@ func TestConfigEditorCanUninstallStatusline(t *testing.T) {
 	}
 	if !strings.Contains(model.View(), "Not installed") || !strings.Contains(model.View(), "Install in Claude Code") {
 		t.Fatalf("uninstalled statusline state missing:\n%s", model.View())
-	}
-	if model.LastAction() != "uninstall_statusline" {
-		t.Fatalf("last action = %q, want uninstall_statusline", model.LastAction())
 	}
 }
 
@@ -150,8 +144,8 @@ func TestListConfigShortcutOpensConfigEditor(t *testing.T) {
 	updated, _ := model.Update(keyRunes("c"))
 	model = updated.(Model)
 
-	if model.Route() != RouteConfig {
-		t.Fatalf("c from list route = %q, want config", model.Route())
+	if model.route != RouteConfig {
+		t.Fatalf("c from list route = %q, want config", model.route)
 	}
 	if !strings.Contains(model.View(), "Claude Code Watch / config") {
 		t.Fatalf("config shortcut did not render config editor:\n%s", model.View())
@@ -163,11 +157,8 @@ func TestListConfigShortcutOpensConfigEditor(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("esc from list-opened config returned command, want nil")
 	}
-	if model.Route() != RouteList {
-		t.Fatalf("route = %q, want list", model.Route())
-	}
-	if model.LastAction() != "back_to_list" {
-		t.Fatalf("last action = %q, want back_to_list", model.LastAction())
+	if model.route != RouteList {
+		t.Fatalf("route = %q, want list", model.route)
 	}
 }
 
@@ -247,9 +238,6 @@ func TestConfigEditorFocusEditToggleSaveAndCancel(t *testing.T) {
 	if !strings.Contains(model.View(), "✓ Saved") {
 		t.Fatalf("save success missing notice:\n%s", model.View())
 	}
-	if model.LastAction() != "save_config" {
-		t.Fatalf("last action = %q, want save_config", model.LastAction())
-	}
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	model = updated.(Model)
@@ -258,9 +246,6 @@ func TestConfigEditorFocusEditToggleSaveAndCancel(t *testing.T) {
 	}
 	if saves != 1 {
 		t.Fatalf("esc wrote config; saves = %d", saves)
-	}
-	if model.LastAction() != "cancel_config" {
-		t.Fatalf("last action = %q, want cancel_config", model.LastAction())
 	}
 }
 
@@ -290,9 +275,6 @@ func TestConfigEditorInvalidConfigCannotSave(t *testing.T) {
 
 	if saves != 0 {
 		t.Fatalf("invalid config saved %d time(s)", saves)
-	}
-	if model.LastAction() != "save_config_invalid" {
-		t.Fatalf("last action = %q, want save_config_invalid", model.LastAction())
 	}
 	if !strings.Contains(model.View(), "✕ Cannot save") || !strings.Contains(model.View(), "✕ Validation failed:") {
 		t.Fatalf("invalid config view missing summary:\n%s", model.View())

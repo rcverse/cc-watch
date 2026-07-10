@@ -18,11 +18,6 @@ type RefreshTickMsg struct {
 	Now time.Time
 }
 
-type WatcherEventMsg struct {
-	Path string
-	Op   string
-}
-
 type RefreshWatcherEventsMsg struct {
 	Events []refresh.NormalizedEvent
 	State  refresh.State

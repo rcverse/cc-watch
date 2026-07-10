@@ -20,9 +20,6 @@ func (m Model) View() string {
 	fmt.Fprintf(&b, "cc-watch %s\n", m.route)
 	fmt.Fprintf(&b, "focus: %s\n", m.FocusedAction())
 	b.WriteString(m.refreshBanner())
-	if len(m.watcherEvents) > 0 {
-		fmt.Fprintf(&b, "watcher events: %d\n", len(m.watcherEvents))
-	}
 	return b.String()
 }
 

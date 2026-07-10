@@ -433,11 +433,14 @@ func TestTUIAmbiguousIDMapsToAmbiguousRouteCandidates(t *testing.T) {
 		t.Fatalf("buildTUIOptions returned error: %v", err)
 	}
 	model := tui.NewModel(options)
-	if model.Route() != tui.RouteAmbiguous {
-		t.Fatalf("route = %q, want ambiguous", model.Route())
+	view := model.View()
+	if !strings.Contains(view, "matched more than one session") {
+		t.Fatalf("ambiguous route did not render:\n%s", view)
 	}
-	if len(model.Sessions()) != 2 {
-		t.Fatalf("candidate sessions = %d, want 2", len(model.Sessions()))
+	for _, candidate := range []string{"11111111", "11112222"} {
+		if !strings.Contains(view, candidate) {
+			t.Fatalf("ambiguous route missing candidate %q:\n%s", candidate, view)
+		}
 	}
 }
 
@@ -679,9 +682,6 @@ func TestConfigEditorStartupLoadsAndSavesConfig(t *testing.T) {
 		t.Fatalf("buildTUIOptions returned error: %v", err)
 	}
 	model := tui.NewModel(options)
-	if model.Route() != tui.RouteConfig {
-		t.Fatalf("route = %q, want config", model.Route())
-	}
 	if !strings.Contains(model.View(), "Claude Code Watch / config") || !strings.Contains(model.View(), "Reminder thresholds") {
 		t.Fatalf("config editor did not render:\n%s", model.View())
 	}

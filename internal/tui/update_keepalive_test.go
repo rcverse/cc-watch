@@ -42,7 +42,7 @@ func TestDisplayTickEvaluatesKeepAliveMonitoringSessions(t *testing.T) {
 	if got := model.KeepAliveState("workspace-id").State; got != keepalive.StateCountdown {
 		t.Fatalf("state = %q, want countdown", got)
 	}
-	if got := model.Countdown("workspace-id"); got != 30 {
+	if got := model.countdowns["workspace-id"]; got != 30 {
 		t.Fatalf("countdown = %d, want 30", got)
 	}
 }
@@ -67,9 +67,6 @@ func TestExpiredSessionDoesNotEnableKeepAlive(t *testing.T) {
 	}
 	if model.KeepAliveEnabled(expired.SessionID) {
 		t.Fatalf("expired session enabled KeepAlive")
-	}
-	if model.LastAction() != "keepalive_unavailable_expired" {
-		t.Fatalf("last action = %q, want expired unavailable", model.LastAction())
 	}
 	if !strings.Contains(model.View(), "N/A after expiry") {
 		t.Fatalf("expired workspace missing KeepAlive disabled reason:\n%s", model.View())
@@ -159,8 +156,8 @@ func TestWorkspaceIgnoresStaleKeepAliveAsyncMessages(t *testing.T) {
 	model = switched.(Model)
 	updated, _ = model.Update(KeepAliveConfirmationResultMsg{SessionID: "workspace-id", InstanceToken: 41, ConfirmedAt: now.Add(time.Minute)})
 	model = updated.(Model)
-	if model.LastAction() == "keepalive_confirmed" {
-		t.Fatalf("stale confirmation after session switch was applied")
+	if got := model.KeepAliveState("workspace-id").State; got == keepalive.StateScopeComplete {
+		t.Fatalf("stale confirmation after session switch changed state to %q", got)
 	}
 }
 

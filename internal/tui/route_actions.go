@@ -25,10 +25,8 @@ func (m Model) activateListAction(action string) (tea.Model, tea.Cmd) {
 		if selected := m.selectedSession(); selected != nil {
 			m.route = RouteWorkspace
 			m.selectedID = selected.SessionID
-			m.lastAction = "open_session"
 			return m, nil
 		}
-		m.lastAction = "activate_session"
 		return m, nil
 	case "reminder":
 		m.toggleReminderForSelected()
@@ -52,7 +50,6 @@ func (m Model) activateWorkspaceAction(action string) (tea.Model, tea.Cmd) {
 	case "keepalive_reset_limit":
 		if selected := m.selectedSession(); selected != nil {
 			m.keepAliveManager.ResetLimit(selected.SessionID)
-			m.lastAction = "reset_keepalive_limit"
 			m.setNotice("✓ KeepAlive limit reset", RoleSuccess, 3*time.Second)
 			m.focusIndex = m.defaultFocusIndex()
 		}
@@ -64,7 +61,6 @@ func (m Model) activateWorkspaceAction(action string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "back":
 		m.route = RouteList
-		m.lastAction = "back_to_list"
 		return m, nil
 	default:
 		return m.activateSharedAction(action)
@@ -98,10 +94,8 @@ func (m Model) activateSharedAction(action string) (tea.Model, tea.Cmd) {
 		m.focusIndex = m.defaultFocusIndex()
 		return m, nil
 	case "quit":
-		m.lastAction = "quit"
 		return m, tea.Quit
 	default:
-		m.lastAction = "activate_" + action
 		return m, nil
 	}
 }

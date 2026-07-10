@@ -50,12 +50,12 @@ func TestDisplayTickRecomputesTimeOnly(t *testing.T) {
 	if refreshCalls != 0 {
 		t.Fatalf("display tick called refresh %d time(s)", refreshCalls)
 	}
-	statuses := model.SessionStatuses()
-	if *statuses["11111111-1111-1111-1111-111111111111"].RemainingSeconds != 3299 {
-		t.Fatalf("remaining seconds = %d, want 3299", *statuses["11111111-1111-1111-1111-111111111111"].RemainingSeconds)
+	status := model.sessions[0].StatusAt(model.now)
+	if *status.RemainingSeconds != 3299 {
+		t.Fatalf("remaining seconds = %d, want 3299", *status.RemainingSeconds)
 	}
-	if model.Countdown("11111111-1111-1111-1111-111111111111") != 4 {
-		t.Fatalf("countdown = %d, want 4", model.Countdown("11111111-1111-1111-1111-111111111111"))
+	if model.countdowns["11111111-1111-1111-1111-111111111111"] != 4 {
+		t.Fatalf("countdown = %d, want 4", model.countdowns["11111111-1111-1111-1111-111111111111"])
 	}
 }
 
@@ -137,7 +137,7 @@ func TestSessionStateIsDeepCopiedAcrossModelBoundaries(t *testing.T) {
 	input.Gaps[0].Seconds = 999
 	input.Warnings[0].Message = "mutated-warning"
 
-	stored := model.Sessions()[0]
+	stored := model.sessions[0]
 	if stored.CacheWindow.Evidence[0] != "original-evidence" {
 		t.Fatalf("constructor kept aliased evidence: %#v", stored.CacheWindow.Evidence)
 	}
@@ -163,19 +163,11 @@ func TestSessionStateIsDeepCopiedAcrossModelBoundaries(t *testing.T) {
 	refresh.CacheWindow.Evidence[0] = "mutated-refresh-evidence"
 	refresh.Gaps[0].Seconds = 1000
 	refresh.Warnings[0].Message = "mutated-refresh-warning"
-	stored = model.Sessions()[0]
+	stored = model.sessions[0]
 	if stored.CacheWindow.Evidence[0] != "refresh-evidence" || stored.Gaps[0].Seconds != 120 || stored.Warnings[0].Message != "refresh-warning" {
 		t.Fatalf("refresh result aliased caller slices: %#v", stored)
 	}
 
-	exposed := model.Sessions()
-	exposed[0].CacheWindow.Evidence[0] = "mutated-returned-evidence"
-	exposed[0].Gaps[0].Seconds = 2000
-	exposed[0].Warnings[0].Message = "mutated-returned-warning"
-	stored = model.Sessions()[0]
-	if stored.CacheWindow.Evidence[0] != "refresh-evidence" || stored.Gaps[0].Seconds != 120 || stored.Warnings[0].Message != "refresh-warning" {
-		t.Fatalf("Sessions() exposed internal slices: %#v", stored)
-	}
 }
 
 func TestQuestionMarkIsInertAndQuitKeys(t *testing.T) {
@@ -185,9 +177,6 @@ func TestQuestionMarkIsInertAndQuitKeys(t *testing.T) {
 	model = updated.(Model)
 	if cmd != nil {
 		t.Fatalf("? returned command, want nil")
-	}
-	if model.LastAction() == "toggle_help" {
-		t.Fatalf("? recorded removed help action: %q", model.LastAction())
 	}
 	if strings.Contains(model.View(), "\nHelp\n") || strings.Contains(model.View(), "toggle help") {
 		t.Fatalf("removed help overlay rendered:\n%s", model.View())
@@ -200,50 +189,6 @@ func TestQuestionMarkIsInertAndQuitKeys(t *testing.T) {
 	}
 	if msg := cmd(); msg != (tea.QuitMsg{}) {
 		t.Fatalf("q command returned %#v, want tea.QuitMsg", msg)
-	}
-}
-
-func TestAdvertisedShortcutsAreHandledForCurrentRoute(t *testing.T) {
-	model := NewModel(Options{})
-	for _, shortcut := range []string{"r", "k"} {
-		updated, _ := model.Update(keyRunes(shortcut))
-		model = updated.(Model)
-		if model.LastAction() == "" {
-			t.Fatalf("shortcut %q produced no action", shortcut)
-		}
-	}
-
-	model = NewModel(Options{SelectedID: "11111111"})
-	for _, shortcut := range []string{"r", "k", "b"} {
-		updated, _ := model.Update(keyRunes(shortcut))
-		model = updated.(Model)
-		if model.LastAction() == "" {
-			t.Fatalf("workspace shortcut %q produced no action", shortcut)
-		}
-	}
-
-	model = NewModel(Options{
-		SelectedID: "11111111",
-		Sessions:   []session.Session{{SessionID: "11111111", ShortID: "11111111"}},
-		KeepAliveStates: map[string]keepalive.SessionState{
-			"11111111": {SessionID: "11111111", State: keepalive.StateCountdown, InstanceToken: 1, MaxSends: 1},
-		},
-	})
-	for _, shortcut := range []string{"s", "x"} {
-		updated, _ := model.Update(keyRunes(shortcut))
-		model = updated.(Model)
-		if model.LastAction() == "" {
-			t.Fatalf("countdown shortcut %q produced no action", shortcut)
-		}
-	}
-
-	model = NewModel(Options{StartMode: StartConfig})
-	for _, shortcut := range []string{"s", "d"} {
-		updated, _ := model.Update(keyRunes(shortcut))
-		model = updated.(Model)
-		if model.LastAction() == "" {
-			t.Fatalf("config shortcut %q produced no action", shortcut)
-		}
 	}
 }
 
@@ -396,14 +341,11 @@ func TestListEnterOpensFocusedSession(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("enter on session returned command, want nil")
 	}
-	if model.Route() != RouteWorkspace {
-		t.Fatalf("route = %q, want workspace", model.Route())
+	if model.route != RouteWorkspace {
+		t.Fatalf("route = %q, want workspace", model.route)
 	}
 	if model.SelectedSessionID() != "newer-id" {
 		t.Fatalf("selected id = %q, want newer-id", model.SelectedSessionID())
-	}
-	if model.LastAction() != "open_session" {
-		t.Fatalf("last action = %q, want open_session", model.LastAction())
 	}
 }
 
@@ -420,8 +362,8 @@ func TestListSpaceDoesNotOpenSessionRow(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("space on session returned command, want nil")
 	}
-	if model.Route() != RouteList {
-		t.Fatalf("route = %q, want list", model.Route())
+	if model.route != RouteList {
+		t.Fatalf("route = %q, want list", model.route)
 	}
 }
 
@@ -439,11 +381,8 @@ func TestAmbiguousEscapeReturnsToList(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("esc on ambiguous returned command, want nil")
 	}
-	if model.Route() != RouteList {
-		t.Fatalf("route = %q, want list", model.Route())
-	}
-	if model.LastAction() != "back_to_list" {
-		t.Fatalf("last action = %q, want back_to_list", model.LastAction())
+	if model.route != RouteList {
+		t.Fatalf("route = %q, want list", model.route)
 	}
 }
 
@@ -465,7 +404,7 @@ func TestListDirectKeysToggleAndActivate(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("r returned command, want nil")
 	}
-	if !model.ReminderEnabled(selectedID) {
+	if !model.reminderEnabled[selectedID] {
 		t.Fatalf("ReminderEnabled(%s) = false, want true", selectedID)
 	}
 
@@ -484,17 +423,11 @@ func TestListDirectKeysToggleAndActivate(t *testing.T) {
 	if cmd == nil {
 		t.Fatalf("u returned nil command, want manual refresh command")
 	}
-	if model.LastAction() != "manual_refresh" {
-		t.Fatalf("last action = %q, want manual_refresh", model.LastAction())
-	}
 
 	updated, cmd = model.Update(keyRunes("?"))
 	model = updated.(Model)
 	if cmd != nil {
 		t.Fatalf("? returned command, want nil")
-	}
-	if model.LastAction() == "toggle_help" {
-		t.Fatalf("? recorded removed help action: %q", model.LastAction())
 	}
 
 	updated, cmd = model.Update(keyRunes("q"))
@@ -524,7 +457,7 @@ func TestListAcceleratorsToggleSelectedSession(t *testing.T) {
 
 	updated, _ = model.Update(keyRunes("r"))
 	model = updated.(Model)
-	if !model.ReminderEnabled("target-id") {
+	if !model.reminderEnabled["target-id"] {
 		t.Fatalf("r did not enable reminder for selected session")
 	}
 	if model.SelectedSessionID() != "target-id" || model.FocusedAction() != "session" {
@@ -532,7 +465,7 @@ func TestListAcceleratorsToggleSelectedSession(t *testing.T) {
 	}
 	updated, _ = model.Update(keyRunes("r"))
 	model = updated.(Model)
-	if model.ReminderEnabled("target-id") {
+	if model.reminderEnabled["target-id"] {
 		t.Fatalf("second r did not disable reminder for selected session")
 	}
 
@@ -624,7 +557,7 @@ func TestWorkspaceEnterAndSpaceToggleFocusedControls(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("enter on reminder returned command, want nil")
 	}
-	if !model.ReminderEnabled("workspace-id") {
+	if !model.reminderEnabled["workspace-id"] {
 		t.Fatalf("enter did not toggle Reminder for selected session")
 	}
 
@@ -706,7 +639,7 @@ func TestWorkspaceActionFeedbackForUpdateAndCancelWatching(t *testing.T) {
 
 	updated, _ = model.Update(keyRunes("c"))
 	model = updated.(Model)
-	if strings.Contains(model.View(), "Session ID shown") || model.LastAction() == "copy_session_id" {
+	if strings.Contains(model.View(), "Session ID shown") {
 		t.Fatalf("workspace c still triggers Copy ID feedback/action:\n%s", model.View())
 	}
 
@@ -785,7 +718,7 @@ func TestExpiredWorkspaceReminderIsNAAndCannotToggle(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("expired reminder toggle returned command, want nil")
 	}
-	if model.ReminderEnabled(expired.SessionID) {
+	if model.reminderEnabled[expired.SessionID] {
 		t.Fatalf("expired reminder stayed enabled after blocked toggle")
 	}
 	if !strings.Contains(model.View(), "Reminder N/A after expiry") {
@@ -928,18 +861,17 @@ func TestWorkspaceShortcutAvailabilityAndDefaultActiveFocus(t *testing.T) {
 			if model.FocusedAction() != tc.focus {
 				t.Fatalf("initial active focus = %q, want %q", model.FocusedAction(), tc.focus)
 			}
-			updated, _ := model.Update(keyRunes("s"))
-			afterS := updated.(Model)
-			if tc.sendOK && afterS.LastAction() != "send_keepalive_now" {
-				t.Fatalf("s in %s last action = %q, want send", tc.name, afterS.LastAction())
+			updated, cmd := model.Update(keyRunes("s"))
+			if tc.sendOK && cmd == nil {
+				t.Fatalf("s in %s returned nil command, want send", tc.name)
 			}
-			if !tc.sendOK && afterS.LastAction() == "send_keepalive_now" {
-				t.Fatalf("s in %s unexpectedly sent", tc.name)
+			if !tc.sendOK && cmd != nil {
+				t.Fatalf("s in %s returned command, want inert", tc.name)
 			}
 			updated, _ = model.Update(keyRunes("x"))
 			afterX := updated.(Model)
-			if tc.xOK && afterX.LastAction() != "cancel_keepalive" {
-				t.Fatalf("x in %s last action = %q, want cancel", tc.name, afterX.LastAction())
+			if tc.xOK && afterX.KeepAliveState("workspace-id").State != keepalive.StateMonitoringIdle {
+				t.Fatalf("x in %s did not stop the active send", tc.name)
 			}
 		})
 	}
@@ -949,27 +881,27 @@ func TestWorkspaceShortcutAvailabilityAndDefaultActiveFocus(t *testing.T) {
 		SelectedID: "workspace-id",
 		Sessions:   []session.Session{workspaceSession(now)},
 	})
-	updated, _ := model.Update(keyRunes("s"))
-	if updated.(Model).LastAction() == "send_keepalive_now" {
-		t.Fatalf("s sent while no KeepAlive send action was available")
+	updated, cmd := model.Update(keyRunes("s"))
+	if cmd != nil {
+		t.Fatal("s produced command while no KeepAlive send action was available")
 	}
-	updated, _ = model.Update(keyRunes("x"))
-	if updated.(Model).LastAction() == "cancel_keepalive" {
-		t.Fatalf("x canceled while no KeepAlive instance was available")
+	updated, cmd = model.Update(keyRunes("x"))
+	if cmd != nil || updated.(Model).KeepAliveEnabled("workspace-id") {
+		t.Fatal("x changed state while no KeepAlive instance was available")
 	}
 }
 
 func TestInitialRoutes(t *testing.T) {
-	if route := NewModel(Options{}).Route(); route != RouteList {
+	if route := NewModel(Options{}).route; route != RouteList {
 		t.Fatalf("default route = %q, want list", route)
 	}
-	if route := NewModel(Options{SelectedID: "11111111"}).Route(); route != RouteWorkspace {
+	if route := NewModel(Options{SelectedID: "11111111"}).route; route != RouteWorkspace {
 		t.Fatalf("selected id route = %q, want workspace", route)
 	}
-	if route := NewModel(Options{AmbiguousID: "111"}).Route(); route != RouteAmbiguous {
+	if route := NewModel(Options{AmbiguousID: "111"}).route; route != RouteAmbiguous {
 		t.Fatalf("ambiguous id route = %q, want ambiguous", route)
 	}
-	if route := NewModel(Options{StartMode: StartConfig}).Route(); route != RouteConfig {
+	if route := NewModel(Options{StartMode: StartConfig}).route; route != RouteConfig {
 		t.Fatalf("config route = %q, want config", route)
 	}
 }

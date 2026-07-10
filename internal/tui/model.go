@@ -128,13 +128,11 @@ type Model struct {
 	refreshTiming        RefreshTiming
 	refreshDebounceToken int
 	liveRefresh          tea.Cmd
-	watcherEvents        []WatcherEventMsg
-	notificationStatuses []NotificationStatus
+	lastNotification     *NotificationStatus
 	focusIndex           int
 	selectedIndex        int
 	selectedID           string
 	ambiguousID          string
-	lastAction           string
 	notice               Notice
 	refresh              RefreshViewState
 	lastRefreshSource    refresh.Source
@@ -258,56 +256,8 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(commands...)
 }
 
-func (m Model) Route() Route {
-	return m.route
-}
-
-func (m Model) Sessions() []session.Session {
-	return cloneSessions(m.sessions)
-}
-
-func (m Model) SessionStatuses() map[string]session.Status {
-	statuses := make(map[string]session.Status, len(m.sessions))
-	for _, s := range m.sessions {
-		statuses[s.SessionID] = s.StatusAt(m.now)
-	}
-	return statuses
-}
-
-func (m Model) Countdown(sessionID string) int {
-	return m.countdowns[sessionID]
-}
-
-func (m Model) WatcherEvents() []WatcherEventMsg {
-	return append([]WatcherEventMsg(nil), m.watcherEvents...)
-}
-
-func (m Model) NotificationStatuses() []NotificationStatus {
-	return append([]NotificationStatus(nil), m.notificationStatuses...)
-}
-
 func (m Model) FocusedAction() string {
 	return m.focusedAction()
-}
-
-func (m Model) LastAction() string {
-	return m.lastAction
-}
-
-func (m Model) RefreshGeneration() int {
-	return m.refreshGeneration
-}
-
-func (m Model) LastRefreshSource() refresh.Source {
-	return m.lastRefreshSource
-}
-
-func (m Model) LastRefreshBypassedDebounce() bool {
-	return m.lastBypassedDebounce
-}
-
-func (m Model) RefreshDebounceToken() int {
-	return m.refreshDebounceToken
 }
 
 func (m Model) SelectedSessionID() string {
@@ -319,10 +269,6 @@ func (m Model) SelectedSessionID() string {
 		return ""
 	}
 	return selected.SessionID
-}
-
-func (m Model) ReminderEnabled(sessionID string) bool {
-	return m.reminderEnabled[sessionID]
 }
 
 func (m Model) KeepAliveEnabled(sessionID string) bool {

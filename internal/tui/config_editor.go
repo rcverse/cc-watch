@@ -148,26 +148,21 @@ func (m Model) statuslineConfigCopy() (state string, detail string, action strin
 func (m Model) activateStatuslineConfigAction() (tea.Model, tea.Cmd) {
 	status, err := m.deps.InspectStatusline()
 	if err != nil || status.State == statusline.StateManualReview {
-		m.lastAction = "statusline_manual_review"
 		m.setNotice("Run cc-watch statusline --check for manual instructions", RoleWarning, 5*time.Second)
 		return m, nil
 	}
 	if status.State == statusline.StateInstalled {
 		if err := m.deps.UninstallStatusline(); err != nil {
-			m.lastAction = "statusline_uninstall_failed"
 			m.setNotice("✕ Could not uninstall statusline", RoleDanger, 3*time.Second)
 			return m, nil
 		}
-		m.lastAction = "uninstall_statusline"
 		m.setNotice("✓ Statusline uninstalled from Claude Code", RoleSuccess, 3*time.Second)
 		return m, nil
 	}
 	if err := m.deps.InstallStatusline(); err != nil {
-		m.lastAction = "statusline_install_failed"
 		m.setNotice("✕ Could not install statusline", RoleDanger, 3*time.Second)
 		return m, nil
 	}
-	m.lastAction = "install_statusline"
 	m.setNotice("✓ Statusline installed in Claude Code", RoleSuccess, 3*time.Second)
 	return m, nil
 }
@@ -191,7 +186,6 @@ func (m Model) updateConfigEditing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.configEditingField = ""
 		m.configInput = ""
 		m.configInputFresh = false
-		m.lastAction = "cancel_config_edit"
 		return m, nil
 	case tea.KeyEnter:
 		m.commitConfigInput()
@@ -226,7 +220,6 @@ func (m *Model) startConfigEdit(field string) {
 	m.configInput = m.configFieldValue(field)
 	m.configInputFresh = true
 	m.clearConfigFieldError(field)
-	m.lastAction = "edit_" + field
 }
 
 func (m Model) configFieldValue(field string) string {
@@ -311,40 +304,34 @@ func (m *Model) commitConfigInput() {
 	m.configInput = ""
 	m.configInputFresh = false
 	m.configResetConfirm = false
-	m.lastAction = "commit_config_edit"
 }
 
 func (m Model) saveConfig() (tea.Model, tea.Cmd) {
 	if err := m.configEditorValidation(); err != nil {
 		m.setNotice("✕ Cannot save", RoleDanger, 3*time.Second)
-		m.lastAction = "save_config_invalid"
 		return m, nil
 	}
 	if m.deps.SaveConfig != nil {
 		if err := m.deps.SaveConfig(m.configDraft); err != nil {
 			m.setNotice("✕ Cannot save: "+err.Error(), RoleDanger, 3*time.Second)
-			m.lastAction = "save_config_failed"
 			return m, nil
 		}
 	}
 	m.configOriginal = m.configDraft
 	m.configResetConfirm = false
 	m.setNotice("✓ Saved", RoleSuccess, 3*time.Second)
-	m.lastAction = "save_config"
 	return m, nil
 }
 
 func (m Model) resetConfigDefaults() (tea.Model, tea.Cmd) {
 	if !m.configResetConfirm {
 		m.configResetConfirm = true
-		m.lastAction = "reset_defaults_confirm"
 		return m, nil
 	}
 	defaults := config.Default()
 	if m.deps.SaveConfig != nil {
 		if err := m.deps.SaveConfig(defaults); err != nil {
 			m.setNotice("✕ Cannot save: "+err.Error(), RoleDanger, 3*time.Second)
-			m.lastAction = "reset_defaults_failed"
 			return m, nil
 		}
 	}
@@ -357,7 +344,6 @@ func (m Model) resetConfigDefaults() (tea.Model, tea.Cmd) {
 	m.configInput = ""
 	m.configInputFresh = false
 	m.setNotice("✓ Saved", RoleSuccess, 3*time.Second)
-	m.lastAction = "reset_defaults"
 	return m, nil
 }
 
@@ -373,10 +359,8 @@ func (m Model) cancelConfig() (tea.Model, tea.Cmd) {
 		m.route = m.configReturnRoute
 		m.configReturnRoute = ""
 		m.focusIndex = m.defaultFocusIndex()
-		m.lastAction = "back_to_list"
 		return m, nil
 	}
-	m.lastAction = "cancel_config"
 	return m, tea.Quit
 }
 
