@@ -48,14 +48,11 @@ func TestLoadReadsConfigFromHome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
-	if len(result.Warnings) != 0 {
-		t.Fatalf("Warnings = %#v, want none", result.Warnings)
+	if result.KeepAlive.Message != "still there?" {
+		t.Fatalf("Message = %q, want custom config", result.KeepAlive.Message)
 	}
-	if result.Config.KeepAlive.Message != "still there?" {
-		t.Fatalf("Message = %q, want custom config", result.Config.KeepAlive.Message)
-	}
-	if result.Config.KeepAlive.Scope.MaxSends != 3 {
-		t.Fatalf("MaxSends = %d, want 3", result.Config.KeepAlive.Scope.MaxSends)
+	if result.KeepAlive.Scope.MaxSends != 3 {
+		t.Fatalf("MaxSends = %d, want 3", result.KeepAlive.Scope.MaxSends)
 	}
 }
 
@@ -73,21 +70,21 @@ func TestLoadMergesPartialConfigWithDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
-	if result.Config.KeepAlive.Message != "custom" {
-		t.Fatalf("Message = %q, want partial config override", result.Config.KeepAlive.Message)
+	if result.KeepAlive.Message != "custom" {
+		t.Fatalf("Message = %q, want partial config override", result.KeepAlive.Message)
 	}
-	if result.Config.KeepAlive.TriggerBeforeExpiryMinutes != Default().KeepAlive.TriggerBeforeExpiryMinutes {
-		t.Fatalf("trigger = %d, want default", result.Config.KeepAlive.TriggerBeforeExpiryMinutes)
+	if result.KeepAlive.TriggerBeforeExpiryMinutes != Default().KeepAlive.TriggerBeforeExpiryMinutes {
+		t.Fatalf("trigger = %d, want default", result.KeepAlive.TriggerBeforeExpiryMinutes)
 	}
-	if result.Config.KeepAlive.Scope.MaxSends != Default().KeepAlive.Scope.MaxSends {
-		t.Fatalf("max sends = %d, want default", result.Config.KeepAlive.Scope.MaxSends)
+	if result.KeepAlive.Scope.MaxSends != Default().KeepAlive.Scope.MaxSends {
+		t.Fatalf("max sends = %d, want default", result.KeepAlive.Scope.MaxSends)
 	}
-	if len(result.Config.ReminderThresholds) != len(Default().ReminderThresholds) {
-		t.Fatalf("reminder thresholds = %#v, want defaults", result.Config.ReminderThresholds)
+	if len(result.ReminderThresholds) != len(Default().ReminderThresholds) {
+		t.Fatalf("reminder thresholds = %#v, want defaults", result.ReminderThresholds)
 	}
 }
 
-func TestLoadInvalidJSONFallsBackWithVisibleWarning(t *testing.T) {
+func TestLoadInvalidJSONFallsBackToDefaults(t *testing.T) {
 	home := t.TempDir()
 	path := ConfigPath(home)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -101,14 +98,8 @@ func TestLoadInvalidJSONFallsBackWithVisibleWarning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
-	if !reflect.DeepEqual(result.Config, Default()) {
-		t.Fatalf("Config = %#v, want defaults after invalid JSON", result.Config)
-	}
-	if len(result.Warnings) != 1 {
-		t.Fatalf("Warnings = %#v, want one visible warning", result.Warnings)
-	}
-	if result.Warnings[0].Code != WarningInvalidJSON {
-		t.Fatalf("Warning code = %q, want %q", result.Warnings[0].Code, WarningInvalidJSON)
+	if !reflect.DeepEqual(result, Default()) {
+		t.Fatalf("Config = %#v, want defaults after invalid JSON", result)
 	}
 }
 
@@ -124,8 +115,8 @@ func TestSaveWritesOnlyValidConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
-	if loaded.Config.KeepAlive.Scope.MaxSends != 2 {
-		t.Fatalf("saved MaxSends = %d, want 2", loaded.Config.KeepAlive.Scope.MaxSends)
+	if loaded.KeepAlive.Scope.MaxSends != 2 {
+		t.Fatalf("saved MaxSends = %d, want 2", loaded.KeepAlive.Scope.MaxSends)
 	}
 
 	invalid := valid
@@ -137,8 +128,8 @@ func TestSaveWritesOnlyValidConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load after invalid save returned error: %v", err)
 	}
-	if after.Config.KeepAlive.Scope.MaxSends != 2 {
-		t.Fatalf("invalid save changed MaxSends to %d, want existing value 2", after.Config.KeepAlive.Scope.MaxSends)
+	if after.KeepAlive.Scope.MaxSends != 2 {
+		t.Fatalf("invalid save changed MaxSends to %d, want existing value 2", after.KeepAlive.Scope.MaxSends)
 	}
 }
 

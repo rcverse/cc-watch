@@ -9,17 +9,16 @@ import (
 )
 
 type Loaders struct {
-	LoadConfig   func(home string) (config.LoadResult, error)
+	LoadConfig   func(home string) (config.Config, error)
 	DiscoverHome func(home string, limit int) (session.DiscoveryResult, error)
 	ParseFile    func(path string) (session.Session, error)
 }
 
 type Request struct {
-	Home   string
-	Now    time.Time
-	Limit  int
-	ID     string
-	Remind bool
+	Home  string
+	Now   time.Time
+	Limit int
+	ID    string
 }
 
 type EmptyState string
@@ -31,36 +30,19 @@ const (
 )
 
 type Error struct {
-	Code    string
-	Message string
-	Query   string
-}
-
-type ReminderState struct {
-	Enabled    bool
-	Thresholds []int
-}
-
-type KeepAliveState struct {
-	Enabled  bool
-	MaxSends int
-	State    string
+	Code  string
+	Query string
 }
 
 type Result struct {
-	GeneratedAt    time.Time
-	QueryID        string
-	QueryLimit     int
-	Config         config.Config
-	ConfigWarnings []config.Warning
-	ProjectsDir    string
-	EmptyState     EmptyState
-	Sessions       []session.Session
-	Selected       *session.Session
-	Candidates     []session.Session
-	Reminder       map[string]ReminderState
-	KeepAlive      map[string]KeepAliveState
-	Error          *Error
+	GeneratedAt time.Time
+	Config      config.Config
+	ProjectsDir string
+	EmptyState  EmptyState
+	Sessions    []session.Session
+	Selected    *session.Session
+	Candidates  []session.Session
+	Error       *Error
 }
 
 type ErrorStage string
@@ -124,7 +106,6 @@ func Build(req Request, loaders Loaders) (Result, error) {
 	if len(result.Sessions) == 0 && result.EmptyState == EmptyNone {
 		result.EmptyState = EmptyNoSessions
 	}
-	result.populateRuntime(req.Remind)
 	return result, nil
 }
 
@@ -137,7 +118,7 @@ func ConfigOnly(req Request, loaders Loaders) (Result, error) {
 }
 
 func loadBase(req Request, loaders Loaders) (Result, error) {
-	cfgResult, err := loaders.LoadConfig(req.Home)
+	cfg, err := loaders.LoadConfig(req.Home)
 	if err != nil {
 		return Result{}, err
 	}
@@ -145,18 +126,9 @@ func loadBase(req Request, loaders Loaders) (Result, error) {
 	if generatedAt.IsZero() {
 		generatedAt = time.Now().UTC()
 	}
-	limit := req.Limit
-	if limit <= 0 {
-		limit = 5
-	}
 	return Result{
-		GeneratedAt:    generatedAt,
-		QueryID:        req.ID,
-		QueryLimit:     limit,
-		Config:         cloneConfig(cfgResult.Config),
-		ConfigWarnings: cloneWarnings(cfgResult.Warnings),
-		Reminder:       map[string]ReminderState{},
-		KeepAlive:      map[string]KeepAliveState{},
+		GeneratedAt: generatedAt,
+		Config:      cloneConfig(cfg),
 	}, nil
 }
 
@@ -165,20 +137,16 @@ func buildSelected(req Request, loaders Loaders, result Result, files []session.
 	if err != nil {
 		if resolveErr, ok := err.(*session.ResolveError); ok {
 			result.Error = &Error{
-				Code:    resolveErr.Code,
-				Message: resolveErr.Error(),
-				Query:   resolveErr.Query,
+				Code:  resolveErr.Code,
+				Query: resolveErr.Query,
 			}
 			result.Candidates = sessionFilesToCandidates(resolveErr.Candidates)
-			result.populateRuntime(req.Remind)
 			return result, nil
 		}
 		result.Error = &Error{
-			Code:    "session_not_found",
-			Message: err.Error(),
-			Query:   req.ID,
+			Code:  "session_not_found",
+			Query: req.ID,
 		}
-		result.populateRuntime(req.Remind)
 		return result, nil
 	}
 	parsed, err := loaders.ParseFile(selectedFile.Path)
@@ -188,7 +156,6 @@ func buildSelected(req Request, loaders Loaders, result Result, files []session.
 	selected := cloneSession(parsed)
 	result.Sessions = []session.Session{selected}
 	result.Selected = &result.Sessions[0]
-	result.populateRuntime(req.Remind)
 	return result, nil
 }
 
@@ -204,26 +171,6 @@ func sessionFilesToCandidates(files []session.SessionFile) []session.Session {
 		})
 	}
 	return candidates
-}
-
-func (r *Result) populateRuntime(remind bool) {
-	r.Reminder = map[string]ReminderState{}
-	r.KeepAlive = map[string]KeepAliveState{}
-	sessions := r.Sessions
-	if len(sessions) == 0 && len(r.Candidates) > 0 {
-		sessions = r.Candidates
-	}
-	for _, s := range sessions {
-		r.Reminder[s.SessionID] = ReminderState{
-			Enabled:    remind,
-			Thresholds: append([]int(nil), r.Config.ReminderThresholds...),
-		}
-		r.KeepAlive[s.SessionID] = KeepAliveState{
-			Enabled:  false,
-			MaxSends: r.Config.KeepAlive.Scope.MaxSends,
-			State:    "off",
-		}
-	}
 }
 
 func cloneConfig(cfg config.Config) config.Config {
@@ -252,8 +199,4 @@ func cloneSession(s session.Session) session.Session {
 		s.LastMessageAt = &lastMessageAt
 	}
 	return s
-}
-
-func cloneWarnings(warnings []config.Warning) []config.Warning {
-	return append([]config.Warning(nil), warnings...)
 }

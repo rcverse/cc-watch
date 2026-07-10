@@ -44,7 +44,6 @@ func OptionsFromSnapshot(input SnapshotOptionsInput) Options {
 		Sessions:           sessions,
 		SelectedID:         selectedID,
 		AmbiguousID:        ambiguousID,
-		ReminderEnabled:    reminderEnabledFromSnapshot(result.Reminder),
 		ReminderThresholds: result.Config.ReminderThresholds,
 		KeepAliveConfig:    result.Config.KeepAlive,
 		Refresh:            refreshState,
@@ -86,14 +85,4 @@ func emptyStateFromSnapshot(state snapshot.EmptyState) EmptyState {
 	default:
 		return EmptyNone
 	}
-}
-
-func reminderEnabledFromSnapshot(states map[string]snapshot.ReminderState) map[string]bool {
-	enabled := make(map[string]bool, len(states))
-	for id, state := range states {
-		if state.Enabled {
-			enabled[id] = true
-		}
-	}
-	return enabled
 }

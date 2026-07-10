@@ -6,57 +6,28 @@ import (
 	"path/filepath"
 )
 
-type WarningCode string
-
-const (
-	WarningInvalidJSON   WarningCode = "invalid_json"
-	WarningInvalidConfig WarningCode = "invalid_config"
-)
-
-type Warning struct {
-	Code    WarningCode
-	Message string
-}
-
-type LoadResult struct {
-	Config   Config
-	Warnings []Warning
-}
-
 func ConfigPath(home string) string {
 	return filepath.Join(home, ".config", "cc-watch", "config.json")
 }
 
-func Load(home string) (LoadResult, error) {
+func Load(home string) (Config, error) {
 	path := ConfigPath(home)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return LoadResult{Config: Default()}, nil
+			return Default(), nil
 		}
-		return LoadResult{}, err
+		return Config{}, err
 	}
 
 	cfg := Default()
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return LoadResult{
-			Config: Default(),
-			Warnings: []Warning{{
-				Code:    WarningInvalidJSON,
-				Message: err.Error(),
-			}},
-		}, nil
+		return Default(), nil
 	}
 	if err := Validate(cfg); err != nil {
-		return LoadResult{
-			Config: Default(),
-			Warnings: []Warning{{
-				Code:    WarningInvalidConfig,
-				Message: err.Error(),
-			}},
-		}, nil
+		return Default(), nil
 	}
-	return LoadResult{Config: cfg}, nil
+	return cfg, nil
 }
 
 func Save(home string, cfg Config) error {

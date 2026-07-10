@@ -33,12 +33,6 @@ func TestBuildListSnapshotLoadsConfigDiscoversAndParsesSessions(t *testing.T) {
 	if result.EmptyState != EmptyNone {
 		t.Fatalf("empty state = %q, want none", result.EmptyState)
 	}
-	if got := result.Reminder["11111111-1111-1111-1111-111111111111"].Enabled; got {
-		t.Fatalf("reminder enabled = %v, want false without --remind", got)
-	}
-	if got := result.KeepAlive["11111111-1111-1111-1111-111111111111"].State; got != "off" {
-		t.Fatalf("keepalive state = %q, want off", got)
-	}
 }
 
 func TestBuildSelectedSnapshotResolvesPartialIDAndParsesOnlySelected(t *testing.T) {
@@ -49,7 +43,7 @@ func TestBuildSelectedSnapshotResolvesPartialIDAndParsesOnlySelected(t *testing.
 		{SessionID: "22222222-2222-2222-2222-222222222222", ShortID: "22222222", Project: "beta", Path: "/tmp/beta.jsonl", ModTime: now},
 	}
 
-	result, err := Build(Request{Home: "/home/me", Now: now, Limit: 5, ID: "2222", Remind: true}, loaders.Loaders())
+	result, err := Build(Request{Home: "/home/me", Now: now, Limit: 5, ID: "2222"}, loaders.Loaders())
 	if err != nil {
 		t.Fatalf("Build returned error: %v", err)
 	}
@@ -61,9 +55,6 @@ func TestBuildSelectedSnapshotResolvesPartialIDAndParsesOnlySelected(t *testing.
 	}
 	if result.Selected == nil || result.Selected.SessionID != "22222222-2222-2222-2222-222222222222" {
 		t.Fatalf("selected = %#v, want beta session", result.Selected)
-	}
-	if got := result.Reminder[result.Selected.SessionID].Enabled; !got {
-		t.Fatalf("reminder enabled = %v, want true with --remind", got)
 	}
 }
 
@@ -127,21 +118,6 @@ func TestBuildMapsProjectsDirMissingToEmptyState(t *testing.T) {
 	}
 }
 
-func TestBuildPropagatesConfigWarnings(t *testing.T) {
-	loaders := fakeLoaders(t)
-	loaders.configWarnings = []config.Warning{{
-		Code:    config.WarningInvalidJSON,
-		Message: "bad config",
-	}}
-	result, err := Build(Request{Home: "/home/me", Limit: 5}, loaders.Loaders())
-	if err != nil {
-		t.Fatalf("Build returned error: %v", err)
-	}
-	if len(result.ConfigWarnings) != 1 || result.ConfigWarnings[0].Message != "bad config" {
-		t.Fatalf("config warnings = %#v, want bad config warning", result.ConfigWarnings)
-	}
-}
-
 func TestBuildReturnsOperationalErrors(t *testing.T) {
 	loaders := fakeLoaders(t)
 	loaders.discoverErr = errors.New("disk unavailable")
@@ -182,7 +158,6 @@ type snapshotFakeLoaders struct {
 	discovery      session.DiscoveryResult
 	discoverErr    error
 	parseErr       error
-	configWarnings []config.Warning
 	discoverCalled bool
 	discoveryLimit int
 	parsedPaths    []string
@@ -195,11 +170,11 @@ func fakeLoaders(t *testing.T) *snapshotFakeLoaders {
 
 func (f *snapshotFakeLoaders) Loaders() Loaders {
 	return Loaders{
-		LoadConfig: func(home string) (config.LoadResult, error) {
+		LoadConfig: func(home string) (config.Config, error) {
 			if home != "/home/me" {
 				f.t.Fatalf("home = %q, want /home/me", home)
 			}
-			return config.LoadResult{Config: config.Default(), Warnings: f.configWarnings}, nil
+			return config.Default(), nil
 		},
 		DiscoverHome: func(home string, limit int) (session.DiscoveryResult, error) {
 			f.discoverCalled = true

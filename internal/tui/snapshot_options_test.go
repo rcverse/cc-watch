@@ -44,7 +44,7 @@ func TestOptionsFromSnapshotMapsSelectedWorkspace(t *testing.T) {
 	}
 }
 
-func TestOptionsFromSnapshotMapsAmbiguousCandidatesAndReminders(t *testing.T) {
+func TestOptionsFromSnapshotMapsAmbiguousCandidates(t *testing.T) {
 	candidates := []session.Session{
 		{SessionID: "candidate-1", ShortID: "11111111"},
 		{SessionID: "candidate-2", ShortID: "11112222"},
@@ -54,11 +54,6 @@ func TestOptionsFromSnapshotMapsAmbiguousCandidatesAndReminders(t *testing.T) {
 			Config:     config.Default(),
 			Error:      &snapshot.Error{Code: "ambiguous_session_id", Query: "1111"},
 			Candidates: candidates,
-			Reminder: map[string]snapshot.ReminderState{
-				"candidate-1": {Enabled: true},
-				"candidate-2": {Enabled: true},
-				"disabled":    {Enabled: false},
-			},
 		},
 		StartMode: StartList,
 	})
@@ -68,12 +63,6 @@ func TestOptionsFromSnapshotMapsAmbiguousCandidatesAndReminders(t *testing.T) {
 	}
 	if len(options.Sessions) != 2 {
 		t.Fatalf("Sessions len = %d, want candidates", len(options.Sessions))
-	}
-	if !options.ReminderEnabled["candidate-1"] || !options.ReminderEnabled["candidate-2"] {
-		t.Fatalf("ReminderEnabled = %#v, want enabled candidates", options.ReminderEnabled)
-	}
-	if options.ReminderEnabled["disabled"] {
-		t.Fatalf("disabled reminder projected as enabled: %#v", options.ReminderEnabled)
 	}
 }
 

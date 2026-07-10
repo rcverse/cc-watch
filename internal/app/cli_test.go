@@ -697,8 +697,8 @@ func TestConfigEditorStartupLoadsAndSavesConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config load after save: %v", err)
 	}
-	if loaded.Config.KeepAlive.Scope.MaxSends != config.Default().KeepAlive.Scope.MaxSends {
-		t.Fatalf("saved config changed max sends: %#v", loaded.Config)
+	if loaded.KeepAlive.Scope.MaxSends != config.Default().KeepAlive.Scope.MaxSends {
+		t.Fatalf("saved config changed max sends: %#v", loaded)
 	}
 }
 
