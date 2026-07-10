@@ -25,11 +25,6 @@ type ConfirmationTarget struct {
 	Offset int64
 }
 
-type FallbackCommand struct {
-	Args    []string
-	Display string
-}
-
 func NewConfirmationTarget(path string, after time.Time) ConfirmationTarget {
 	var offset int64
 	if stat, err := os.Stat(path); err == nil {
@@ -40,10 +35,6 @@ func NewConfirmationTarget(path string, after time.Time) ConfirmationTarget {
 
 func (t ConfirmationTarget) Check() (ConfirmationResult, error) {
 	return confirmJSONLFromOffset(t.Path, t.After, t.Offset)
-}
-
-func ConfirmJSONL(path string, after time.Time) (ConfirmationResult, error) {
-	return confirmJSONLFromOffset(path, after, 0)
 }
 
 func confirmJSONLFromOffset(path string, after time.Time, offset int64) (ConfirmationResult, error) {
@@ -98,7 +89,7 @@ func WaitForConfirmation(ctx context.Context, check func() (ConfirmationResult, 
 	}
 }
 
-func ManualFallbackCommand(sessionID, message, dir string) FallbackCommand {
+func ManualFallbackCommand(sessionID, message, dir string) string {
 	args := []string{"claude", "-r", sessionID, "-p", message}
 	display := shellJoin(args)
 	if dir != "" {
@@ -106,10 +97,7 @@ func ManualFallbackCommand(sessionID, message, dir string) FallbackCommand {
 		// copy-paste fallback must cd there first or it fails the same way.
 		display = "cd " + shellQuote(dir) + " && " + display
 	}
-	return FallbackCommand{
-		Args:    append([]string(nil), args...),
-		Display: display,
-	}
+	return display
 }
 
 func shellJoin(args []string) string {

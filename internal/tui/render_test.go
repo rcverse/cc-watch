@@ -471,16 +471,14 @@ func TestKeepAliveCountdownPlacesTimeAfterProgressBar(t *testing.T) {
 		InstanceToken: 7,
 	}
 	view := NewModel(Options{
-		Now:             now,
-		Width:           132,
-		Height:          36,
-		Sessions:        []session.Session{workspaceSession(now)},
-		SelectedID:      "workspace-id",
-		KeepAliveConfig: cfg,
-		KeepAliveStates: map[string]keepalive.SessionState{
-			"workspace-id": state,
-		},
-		Countdowns: map[string]int{"workspace-id": 20},
+		Now:              now,
+		Width:            132,
+		Height:           36,
+		Sessions:         []session.Session{workspaceSession(now)},
+		SelectedID:       "workspace-id",
+		KeepAliveConfig:  cfg,
+		KeepAliveManager: keepAliveManagerInState(state),
+		Countdowns:       map[string]int{"workspace-id": 20},
 	}).View()
 	plain := stripANSI(view)
 
@@ -625,12 +623,12 @@ func TestListViewResponsivePriorityFields(t *testing.T) {
 		Known:      true,
 	}, "first wide message", "last wide message")
 	wideSession.DurationSeconds = &duration
-	wideSession.Warnings = []session.ParseWarning{{Message: "bad timestamp"}}
+	wideSession.WarningCount = 1
 	wide := NewModel(Options{
-		Now:             now,
-		Width:           140,
-		Sessions:        []session.Session{wideSession},
-		KeepAliveStates: map[string]keepalive.SessionState{"wide-id": {SessionID: "wide-id", State: keepalive.StateMonitoringIdle, MaxSends: 5}},
+		Now:              now,
+		Width:            140,
+		Sessions:         []session.Session{wideSession},
+		KeepAliveManager: keepAliveManagerInState(keepalive.SessionState{SessionID: "wide-id", State: keepalive.StateMonitoringIdle, MaxSends: 5}),
 	}).View()
 	for _, want := range []string{"wide-id", "wide-project", "5-min cache", "40%", "last  last wide message", "! 1 parse warning(s)", "KeepAlive ON"} {
 		if !strings.Contains(wide, want) {
@@ -844,8 +842,8 @@ func TestListViewRequiredStates(t *testing.T) {
 					NotificationDegraded:     "osascript failed",
 					ClaudeUnavailableMessage: "claude not found",
 				},
-				Sessions:        []session.Session{listViewSession("armed-id", "armed", now, now.Add(-1*time.Minute), session.CacheWindow{Label: "1h", TTLSeconds: 3600, Known: true}, "", "")},
-				KeepAliveStates: map[string]keepalive.SessionState{"armed-id": {SessionID: "armed-id", State: keepalive.StateMonitoringIdle, MaxSends: 5}},
+				Sessions:         []session.Session{listViewSession("armed-id", "armed", now, now.Add(-1*time.Minute), session.CacheWindow{Label: "1h", TTLSeconds: 3600, Known: true}, "", "")},
+				KeepAliveManager: keepAliveManagerInState(keepalive.SessionState{SessionID: "armed-id", State: keepalive.StateMonitoringIdle, MaxSends: 5}),
 			},
 			want: []string{"watcher partial", "permission denied", "notifications degraded: osascript failed", "claude unavailable: claude not found"},
 		},
@@ -856,7 +854,7 @@ func TestListViewRequiredStates(t *testing.T) {
 				Width: 120,
 				Sessions: []session.Session{func() session.Session {
 					s := listViewSession("warn-id", "parser", now, now.Add(-1*time.Minute), session.CacheWindow{Label: "TTL ?", Known: false}, "", "")
-					s.Warnings = []session.ParseWarning{{Message: "bad json"}, {Message: "bad timestamp"}}
+					s.WarningCount = 2
 					return s
 				}()},
 			},
@@ -1081,7 +1079,7 @@ func TestWorkspaceRendersCanonicalCacheStatusAndSessionInfoCards(t *testing.T) {
 	expiredLast := now.Add(-2 * time.Hour)
 	active := workspaceSession(now)
 	active.LastMessageAt = &activeLast
-	active.CacheWindow = session.CacheWindow{Tier: session.Tier1Hour, Label: "1h", TTLSeconds: 3600, Known: true, Evidence: []string{"ephemeral_1h_input_tokens"}}
+	active.CacheWindow = session.CacheWindow{Tier: session.Tier1Hour, Label: "1h", TTLSeconds: 3600, Known: true}
 	active.TokenStats.HitRate = 95
 	expired := active
 	expired.SessionID = "expired-id"
@@ -1207,10 +1205,10 @@ func TestWorkspaceDetailsShowsRewindWindowsWithExpiredCutoff(t *testing.T) {
 	expiredNew := now.Add(-70 * time.Minute)
 	expiredOld := now.Add(-90 * time.Minute)
 	s.RecentMessages = []session.MessageWindow{
-		{At: expiredOld, Role: "user", Excerpt: "older expired prompt"},
-		{At: expiredNew, Role: "user", Excerpt: "newest expired prompt"},
-		{At: activeOld, Role: "user", Excerpt: "older active prompt"},
-		{At: activeNew, Role: "user", Excerpt: "newest active prompt " + strings.Repeat("with long text ", 12)},
+		{At: expiredOld, Excerpt: "older expired prompt"},
+		{At: expiredNew, Excerpt: "newest expired prompt"},
+		{At: activeOld, Excerpt: "older active prompt"},
+		{At: activeNew, Excerpt: "newest active prompt " + strings.Repeat("with long text ", 12)},
 	}
 
 	model := NewModel(Options{
@@ -1325,7 +1323,7 @@ func TestWorkspaceKeepAliveCardStatesRenderSafetyContract(t *testing.T) {
 		{
 			name:  "safety paused",
 			state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StatePaused, MaxSends: 1, InstanceToken: 8},
-			want:  []string{"KeepAlive · ! Paused", "Next", "Automatic send paused", "Last", "Cache is too close to expiry", "Message", "Sends"},
+			want:  []string{"KeepAlive · ! Paused", "Next", "Automatic send paused", "Last", "countdown does not fit the safe send window", "Message", "Sends"},
 		},
 		{
 			name:  "confirming",
@@ -1335,7 +1333,7 @@ func TestWorkspaceKeepAliveCardStatesRenderSafetyContract(t *testing.T) {
 		{
 			name:  "armed with last success",
 			state: keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateMonitoringIdle, ScopeUsed: 1, MaxSends: 2, InstanceToken: 10, LastResult: "confirmed at 12:00:30"},
-			want:  []string{"KeepAlive · ✓ Armed", "Next", "Message will be sent at", "Last", "confirmed at 12:00:30", "Message", "Sends"},
+			want:  []string{"KeepAlive · ✓ Armed", "Next", "Message will be sent at", "Last", "Sent and confirmed", "Message", "Sends"},
 		},
 		{
 			name:  "failure",
@@ -1350,13 +1348,13 @@ func TestWorkspaceKeepAliveCardStatesRenderSafetyContract(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			model := NewModel(Options{
-				Now:             now,
-				Width:           120,
-				SelectedID:      "workspace-id",
-				Sessions:        []session.Session{workspaceSession(now)},
-				KeepAliveConfig: cfg,
-				KeepAliveStates: map[string]keepalive.SessionState{"workspace-id": tc.state},
-				Countdowns:      map[string]int{"workspace-id": 24},
+				Now:              now,
+				Width:            120,
+				SelectedID:       "workspace-id",
+				Sessions:         []session.Session{workspaceSession(now)},
+				KeepAliveConfig:  cfg,
+				KeepAliveManager: keepAliveManagerInState(tc.state),
+				Countdowns:       map[string]int{"workspace-id": 24},
 			})
 			view := model.View()
 			for _, want := range tc.want {
@@ -1380,14 +1378,12 @@ func TestWorkspaceKeepAliveNextTimeUsesLocalDisplayZone(t *testing.T) {
 
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 	model := NewModel(Options{
-		Now:        now,
-		Width:      120,
-		Height:     32,
-		SelectedID: "workspace-id",
-		Sessions:   []session.Session{workspaceSession(now)},
-		KeepAliveStates: map[string]keepalive.SessionState{
-			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateMonitoringIdle, MaxSends: 1},
-		},
+		Now:              now,
+		Width:            120,
+		Height:           32,
+		SelectedID:       "workspace-id",
+		Sessions:         []session.Session{workspaceSession(now)},
+		KeepAliveManager: keepAliveManagerInState(keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateMonitoringIdle, MaxSends: 1}),
 	})
 
 	if view := model.View(); !strings.Contains(view, "Message will be sent at 20:01:30") {
@@ -1398,13 +1394,11 @@ func TestWorkspaceKeepAliveNextTimeUsesLocalDisplayZone(t *testing.T) {
 func TestWorkspaceKeepAliveCardIsAdditiveAndControlsOwnFocus(t *testing.T) {
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 	model := NewModel(Options{
-		Now:        now,
-		Width:      120,
-		SelectedID: "workspace-id",
-		Sessions:   []session.Session{workspaceSession(now)},
-		KeepAliveStates: map[string]keepalive.SessionState{
-			"workspace-id": {SessionID: "workspace-id", State: keepalive.StatePaused, MaxSends: 1, InstanceToken: 8},
-		},
+		Now:              now,
+		Width:            120,
+		SelectedID:       "workspace-id",
+		Sessions:         []session.Session{workspaceSession(now)},
+		KeepAliveManager: keepAliveManagerInState(keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StatePaused, MaxSends: 1, InstanceToken: 8}),
 	})
 
 	view := model.View()
@@ -1459,8 +1453,8 @@ func TestListRowsUseDomainSemanticRoles(t *testing.T) {
 			TTLSeconds: 3600,
 			Known:      true,
 		}, "first semantic message", "last semantic message")},
-		KeepAliveStates: map[string]keepalive.SessionState{"semantic-id": {SessionID: "semantic-id", State: keepalive.StateMonitoringIdle, MaxSends: 5}},
-		ReminderEnabled: map[string]bool{"semantic-id": true},
+		KeepAliveManager: keepAliveManagerInState(keepalive.SessionState{SessionID: "semantic-id", State: keepalive.StateMonitoringIdle, MaxSends: 5}),
+		ReminderEnabled:  map[string]bool{"semantic-id": true},
 	})
 
 	view := model.View()
@@ -1474,14 +1468,12 @@ func TestListRowsUseDomainSemanticRoles(t *testing.T) {
 func TestWorkspaceKeepAlivePausedFitsEightyByTwentyFour(t *testing.T) {
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 	view := NewModel(Options{
-		Now:        now,
-		Width:      80,
-		Height:     24,
-		SelectedID: "workspace-id",
-		Sessions:   []session.Session{workspaceSession(now)},
-		KeepAliveStates: map[string]keepalive.SessionState{
-			"workspace-id": {SessionID: "workspace-id", State: keepalive.StatePaused, MaxSends: 1, InstanceToken: 8},
-		},
+		Now:              now,
+		Width:            80,
+		Height:           24,
+		SelectedID:       "workspace-id",
+		Sessions:         []session.Session{workspaceSession(now)},
+		KeepAliveManager: keepAliveManagerInState(keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StatePaused, MaxSends: 1, InstanceToken: 8}),
 	}).View()
 
 	assertMaxLineWidth(t, view, 80)
@@ -1499,14 +1491,12 @@ func TestWorkspaceWrapsLongMessagesAndUsesSectionedKeepAliveCard(t *testing.T) {
 	longSession.Messages.FirstUserExcerpt = strings.Repeat("first excerpt that should not run beyond the terminal ", 6)
 	longSession.Messages.LastUserExcerpt = strings.Repeat("last excerpt that should remain bounded and readable ", 6)
 	view := NewModel(Options{
-		Now:        now,
-		Width:      80,
-		Height:     24,
-		SelectedID: "workspace-id",
-		Sessions:   []session.Session{longSession},
-		KeepAliveStates: map[string]keepalive.SessionState{
-			"workspace-id": {SessionID: "workspace-id", State: keepalive.StatePaused, MaxSends: 1, InstanceToken: 8, SafetyDisabled: true},
-		},
+		Now:              now,
+		Width:            80,
+		Height:           24,
+		SelectedID:       "workspace-id",
+		Sessions:         []session.Session{longSession},
+		KeepAliveManager: keepAliveManagerInState(keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StatePaused, MaxSends: 1}),
 	}).View()
 
 	assertMaxLineWidth(t, view, 80)
@@ -1531,13 +1521,11 @@ func TestWorkspaceWrapsLongMessagesAndUsesSectionedKeepAliveCard(t *testing.T) {
 func TestWorkspaceShowsClaudeUnavailableBeforeCountdownCanSend(t *testing.T) {
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 	model := NewModel(Options{
-		Now:        now,
-		SelectedID: "workspace-id",
-		Sessions:   []session.Session{workspaceSession(now)},
-		Refresh:    RefreshViewState{ClaudeUnavailableMessage: "claude command not found"},
-		KeepAliveStates: map[string]keepalive.SessionState{
-			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateErrorNoClaude, LastFailure: "claude command not found", MaxSends: 1},
-		},
+		Now:              now,
+		SelectedID:       "workspace-id",
+		Sessions:         []session.Session{workspaceSession(now)},
+		Refresh:          RefreshViewState{ClaudeUnavailableMessage: "claude command not found"},
+		KeepAliveManager: keepAliveManagerInState(keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateErrorNoClaude, LastFailure: "claude command not found", MaxSends: 1}),
 	})
 
 	view := model.View()
@@ -1566,15 +1554,12 @@ func workspaceSession(now time.Time) session.Session {
 		JSONLPath:       "/tmp/home/.claude/projects/workspace-api/workspace-id.jsonl",
 		FileModifiedAt:  now,
 		LastMessageAt:   &last,
-		StartedAt:       &last,
-		EndedAt:         &now,
 		DurationSeconds: &duration,
 		CacheWindow: session.CacheWindow{
 			Tier:       session.Tier1Hour,
 			Label:      "1h",
 			TTLSeconds: 3600,
 			Known:      true,
-			Evidence:   []string{"ephemeral_1h_input_tokens"},
 		},
 		Messages: session.Messages{
 			FirstUserExcerpt: "can you check whether this session is cached for 5m or 1h?",

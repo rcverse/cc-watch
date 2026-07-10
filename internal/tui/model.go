@@ -96,7 +96,6 @@ type Options struct {
 	ReminderThresholds []int
 	KeepAliveConfig    config.KeepAliveConfig
 	KeepAliveManager   *keepalive.Manager
-	KeepAliveStates    map[string]keepalive.SessionState
 	RefreshGeneration  int
 	RefreshTiming      RefreshTiming
 	SelectedID         string
@@ -187,9 +186,6 @@ func NewModel(options Options) Model {
 	}
 	sessions := cloneSessions(options.Sessions)
 	selectedIndex := selectedIndexFor(sessions, options.SelectedID)
-	for _, state := range options.KeepAliveStates {
-		keepAliveManager.SetState(state)
-	}
 	refreshTiming := options.RefreshTiming
 	if refreshTiming.Debounce <= 0 {
 		refreshTiming.Debounce = 300 * time.Millisecond
@@ -337,9 +333,7 @@ func cloneSessions(sessions []session.Session) []session.Session {
 	cloned := make([]session.Session, len(sessions))
 	for i, s := range sessions {
 		cloned[i] = s
-		cloned[i].CacheWindow.Evidence = append([]string(nil), s.CacheWindow.Evidence...)
 		cloned[i].Gaps = append([]session.Gap(nil), s.Gaps...)
-		cloned[i].Warnings = append([]session.ParseWarning(nil), s.Warnings...)
 	}
 	sort.SliceStable(cloned, func(i, j int) bool {
 		return cloned[i].FileModifiedAt.After(cloned[j].FileModifiedAt)

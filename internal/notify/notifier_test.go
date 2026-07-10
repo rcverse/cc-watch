@@ -43,9 +43,6 @@ func TestRepeatedIdenticalFailureIsSuppressedUntilDistinctEventOrManualRefresh(t
 	if !second.Suppressed {
 		t.Fatalf("second identical failure was not suppressed: %#v", second)
 	}
-	if len(manager.Attempts()) != 1 {
-		t.Fatalf("attempts = %d, want 1 after suppressed duplicate", len(manager.Attempts()))
-	}
 	if failing.calls != 1 {
 		t.Fatalf("notifier calls = %d, want 1 after suppressed duplicate", failing.calls)
 	}
@@ -53,9 +50,6 @@ func TestRepeatedIdenticalFailureIsSuppressedUntilDistinctEventOrManualRefresh(t
 	distinct := manager.Notify(Event{Kind: EventKeepAliveSuccess, SessionID: "one"})
 	if distinct.Suppressed {
 		t.Fatalf("distinct event failure was suppressed: %#v", distinct)
-	}
-	if len(manager.Attempts()) != 2 {
-		t.Fatalf("attempts = %d, want 2 after distinct event", len(manager.Attempts()))
 	}
 	if failing.calls != 2 {
 		t.Fatalf("notifier calls = %d, want 2 after distinct event", failing.calls)

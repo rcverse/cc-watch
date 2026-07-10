@@ -179,17 +179,7 @@ func cloneConfig(cfg config.Config) config.Config {
 }
 
 func cloneSession(s session.Session) session.Session {
-	s.CacheWindow.Evidence = append([]string(nil), s.CacheWindow.Evidence...)
 	s.Gaps = append([]session.Gap(nil), s.Gaps...)
-	s.Warnings = append([]session.ParseWarning(nil), s.Warnings...)
-	if s.StartedAt != nil {
-		startedAt := *s.StartedAt
-		s.StartedAt = &startedAt
-	}
-	if s.EndedAt != nil {
-		endedAt := *s.EndedAt
-		s.EndedAt = &endedAt
-	}
 	if s.DurationSeconds != nil {
 		durationSeconds := *s.DurationSeconds
 		s.DurationSeconds = &durationSeconds

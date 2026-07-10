@@ -22,7 +22,6 @@ type Event struct {
 	ShortID          string
 	Project          string
 	ThresholdPercent int
-	CountdownSeconds int
 	Reason           string
 	RateLimited      bool
 }
@@ -42,12 +41,6 @@ type Result struct {
 	Err        error
 }
 
-type Attempt struct {
-	Event        Event
-	Notification Notification
-	Result       Result
-}
-
 type Notifier interface {
 	Notify(Event) Result
 }
@@ -60,7 +53,6 @@ type CommandNotifier struct {
 
 type Manager struct {
 	notifier           Notifier
-	attempts           []Attempt
 	lastFailureKey     string
 	lastFailureEventID string
 }
@@ -103,7 +95,6 @@ func (n CommandNotifier) Notify(event Event) Result {
 }
 
 func (m *Manager) Notify(event Event) Result {
-	notification := FormatEvent(event)
 	eventID := eventKey(event)
 	if m.lastFailureKey != "" && eventID == m.lastFailureEventID {
 		return Result{
@@ -115,7 +106,6 @@ func (m *Manager) Notify(event Event) Result {
 	}
 	if m.notifier == nil {
 		result := Result{Degraded: true, Message: "notifications unavailable", Err: errors.New("notifications unavailable")}
-		m.record(event, notification, result)
 		m.lastFailureKey = result.Message
 		m.lastFailureEventID = eventID
 		return result
@@ -132,25 +122,12 @@ func (m *Manager) Notify(event Event) Result {
 	} else if result.Delivered {
 		m.ResetSuppression()
 	}
-	m.record(event, notification, result)
 	return result
-}
-
-func (m *Manager) Attempts() []Attempt {
-	return append([]Attempt(nil), m.attempts...)
 }
 
 func (m *Manager) ResetSuppression() {
 	m.lastFailureKey = ""
 	m.lastFailureEventID = ""
-}
-
-func (m *Manager) record(event Event, notification Notification, result Result) {
-	m.attempts = append(m.attempts, Attempt{
-		Event:        event,
-		Notification: notification,
-		Result:       result,
-	})
 }
 
 func FormatEvent(event Event) Notification {
@@ -224,5 +201,5 @@ func NewPlatformNotifier(runner Runner) Notifier {
 }
 
 func eventKey(event Event) string {
-	return fmt.Sprintf("%s:%s:%d:%d:%s", event.Kind, event.SessionID, event.ThresholdPercent, event.CountdownSeconds, event.Reason)
+	return fmt.Sprintf("%s:%s:%d:%s", event.Kind, event.SessionID, event.ThresholdPercent, event.Reason)
 }

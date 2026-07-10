@@ -13,14 +13,11 @@ import (
 	"github.com/richardchen/cc-watch/internal/session"
 )
 
-func TestTimingDefaultsUseTTLSpecificTriggerWindows(t *testing.T) {
+func TestTimingDefaultsAllowConfiguredCountdown(t *testing.T) {
 	cfg := config.Default().KeepAlive
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 
 	oneHour := EvaluateTiming(sessionWithTTL(now, session.Tier1Hour, 3600, true), now, cfg)
-	if oneHour.EffectiveTriggerSeconds != 300 {
-		t.Fatalf("1h trigger = %d, want 300", oneHour.EffectiveTriggerSeconds)
-	}
 	if oneHour.EffectiveCountdownSeconds != 30 {
 		t.Fatalf("1h countdown = %d, want 30", oneHour.EffectiveCountdownSeconds)
 	}
@@ -29,9 +26,6 @@ func TestTimingDefaultsUseTTLSpecificTriggerWindows(t *testing.T) {
 	}
 
 	fiveMinute := EvaluateTiming(sessionWithTTL(now, session.Tier5Minute, 300, true), now, cfg)
-	if fiveMinute.EffectiveTriggerSeconds != 60 {
-		t.Fatalf("5m trigger = %d, want 60", fiveMinute.EffectiveTriggerSeconds)
-	}
 	if fiveMinute.EffectiveCountdownSeconds != 30 {
 		t.Fatalf("5m countdown = %d, want 30", fiveMinute.EffectiveCountdownSeconds)
 	}
@@ -40,20 +34,17 @@ func TestTimingDefaultsUseTTLSpecificTriggerWindows(t *testing.T) {
 	}
 }
 
-func TestTimingUnknownTTLUsesConservativeFiveMinuteHeuristic(t *testing.T) {
-	cfg := config.Default().KeepAlive
+func TestUnknownTTLUsesConservativeFiveMinuteWindow(t *testing.T) {
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
-
-	result := EvaluateTiming(sessionWithTTL(now, session.TierUnknown, 0, false), now, cfg)
-
-	if result.EffectiveTTLSeconds != 300 {
-		t.Fatalf("unknown effective TTL = %d, want 300", result.EffectiveTTLSeconds)
+	last := now.Add(-4 * time.Minute)
+	s := session.Session{
+		SessionID:     "unknown",
+		LastMessageAt: &last,
+		CacheWindow:   session.CacheWindow{Tier: session.TierUnknown},
 	}
-	if result.EffectiveTriggerSeconds != 60 {
-		t.Fatalf("unknown trigger = %d, want conservative 60", result.EffectiveTriggerSeconds)
-	}
-	if !result.UsesConservativeTTL {
-		t.Fatalf("UsesConservativeTTL = false, want true")
+	actions := NewManager(config.Default().KeepAlive).Enable(s, now)
+	if len(actions) != 1 || actions[0].Kind != ActionCountdownStarted || actions[0].CountdownSeconds != 30 {
+		t.Fatalf("unknown TTL actions = %#v, want conservative 30s countdown", actions)
 	}
 }
 
@@ -66,9 +57,6 @@ func TestTimingClampsCountdownToPreserveSafetyMargin(t *testing.T) {
 
 	if result.EffectiveCountdownSeconds != 30 {
 		t.Fatalf("countdown = %d, want clamped 30", result.EffectiveCountdownSeconds)
-	}
-	if result.SafetyClamped == false {
-		t.Fatalf("SafetyClamped = false, want true")
 	}
 	if !result.SendAllowed {
 		t.Fatalf("SendAllowed = false, want true after clamp: %#v", result)
@@ -92,9 +80,6 @@ func TestTimingPausesSendWhenSafetyMarginCannotBePreserved(t *testing.T) {
 
 	result := EvaluateTiming(s, now, cfg)
 
-	if result.EffectiveTriggerSeconds != 20 {
-		t.Fatalf("trigger = %d, want current remaining 20", result.EffectiveTriggerSeconds)
-	}
 	if result.SendAllowed {
 		t.Fatalf("SendAllowed = true, want false: %#v", result)
 	}
@@ -171,8 +156,8 @@ func TestStateMachineImmediatePausedAndFailureStates(t *testing.T) {
 	if len(actions) != 0 {
 		t.Fatalf("unsafe enable actions = %#v, want no runner/countdown", actions)
 	}
-	if state := paused.State("paused"); state.State != StatePaused || !state.SafetyDisabled {
-		t.Fatalf("unsafe state = %#v, want paused with safety disabled", state)
+	if state := paused.State("paused"); state.State != StatePaused {
+		t.Fatalf("unsafe state = %#v, want paused", state)
 	}
 
 	for _, tc := range []struct {
@@ -252,7 +237,8 @@ func TestStateMachineIsEdgeTriggeredScopedAndPerSession(t *testing.T) {
 		t.Fatalf("b state = %q, want unchanged countdown", got)
 	}
 
-	manager.Refresh(activeSession("b", now.Add(10*time.Minute), time.Hour, 50*time.Minute), now.Add(10*time.Minute))
+	manager.Cancel("b", actions[1].InstanceToken)
+	manager.Check(now.Add(10*time.Minute), []session.Session{activeSession("b", now.Add(10*time.Minute), time.Hour, 50*time.Minute)})
 	if got := manager.State("b").State; got != StateMonitoringIdle {
 		t.Fatalf("refresh above trigger state = %q, want monitoring idle", got)
 	}
@@ -264,7 +250,7 @@ func TestStateMachineIsEdgeTriggeredScopedAndPerSession(t *testing.T) {
 	}
 }
 
-func TestStateMachineIgnoresStaleTokenEventsAfterCancellationAndRefresh(t *testing.T) {
+func TestStateMachineIgnoresStaleTokenEventsAfterCancellation(t *testing.T) {
 	cfg := config.Default().KeepAlive
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 	manager := NewManager(cfg)
@@ -278,9 +264,9 @@ func TestStateMachineIgnoresStaleTokenEventsAfterCancellationAndRefresh(t *testi
 		t.Fatalf("state after stale countdown = %q, want monitoring idle", got)
 	}
 
-	manager.Refresh(activeSession("stale", now.Add(time.Minute), time.Hour, 50*time.Minute), now.Add(time.Minute))
+	manager.Check(now.Add(time.Minute), []session.Session{activeSession("stale", now.Add(time.Minute), time.Hour, 50*time.Minute)})
 	oldToken := manager.State("stale").InstanceToken
-	manager.Refresh(activeSession("stale", now.Add(2*time.Minute), time.Hour, 5*time.Minute), now.Add(2*time.Minute))
+	manager.Check(now.Add(2*time.Minute), []session.Session{activeSession("stale", now.Add(2*time.Minute), time.Hour, 5*time.Minute)})
 	if actions := manager.CountdownElapsed("stale", oldToken, now.Add(2*time.Minute+30*time.Second)); len(actions) != 0 {
 		t.Fatalf("stale countdown actions after refresh edge reset = %#v, want none", actions)
 	}
@@ -315,12 +301,12 @@ func TestStateMachineDoesNotRearmWithinSameTriggerWindowWhenScopeRemains(t *test
 	if len(actions) != 0 {
 		t.Fatalf("same-window check actions = %#v, want no re-arm", actions)
 	}
-	actions = manager.Refresh(activeSession("rearm", now.Add(3*time.Second), time.Hour, 5*time.Minute-3*time.Second), now.Add(3*time.Second))
+	actions = manager.Check(now.Add(3*time.Second), []session.Session{activeSession("rearm", now.Add(3*time.Second), time.Hour, 5*time.Minute-3*time.Second)})
 	if len(actions) != 0 {
 		t.Fatalf("same-window refresh actions = %#v, want no re-arm", actions)
 	}
 
-	manager.Refresh(activeSession("rearm", now.Add(time.Minute), time.Hour, 50*time.Minute), now.Add(time.Minute))
+	manager.Check(now.Add(time.Minute), []session.Session{activeSession("rearm", now.Add(time.Minute), time.Hour, 50*time.Minute)})
 	actions = manager.Check(now.Add(46*time.Minute), []session.Session{
 		activeSession("rearm", now.Add(46*time.Minute), time.Hour, 5*time.Minute),
 	})
@@ -342,8 +328,8 @@ func TestCountdownElapsedDoesNotSendWhenSafetyDeadlineIsMissed(t *testing.T) {
 		t.Fatalf("delayed countdown actions = %#v, want no runner", actions)
 	}
 	state := delayed.State("delayed")
-	if state.State != StatePaused || state.ScopeUsed != 0 || !state.SafetyDisabled {
-		t.Fatalf("delayed state = %#v, want safety-disabled paused without scope use", state)
+	if state.State != StatePaused || state.ScopeUsed != 0 {
+		t.Fatalf("delayed state = %#v, want paused without scope use", state)
 	}
 }
 
@@ -460,7 +446,8 @@ func TestConfirmationRequiresTargetSessionLineAfterSendAttempt(t *testing.T) {
 	sendAt := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 
 	writeJSONL(t, other, `{"timestamp":"2026-06-05T12:00:05Z","message":{"role":"assistant"}}`+"\n")
-	result, err := ConfirmJSONL(target, sendAt)
+	confirmation := ConfirmationTarget{Path: target, After: sendAt}
+	result, err := confirmation.Check()
 	if err != nil {
 		t.Fatalf("ConfirmJSONL missing target returned error: %v", err)
 	}
@@ -469,7 +456,7 @@ func TestConfirmationRequiresTargetSessionLineAfterSendAttempt(t *testing.T) {
 	}
 
 	writeJSONL(t, target, `{"timestamp":"2026-06-05T11:59:59Z","message":{"role":"assistant"}}`+"\n")
-	result, err = ConfirmJSONL(target, sendAt)
+	result, err = confirmation.Check()
 	if err != nil {
 		t.Fatalf("ConfirmJSONL before-send returned error: %v", err)
 	}
@@ -478,7 +465,7 @@ func TestConfirmationRequiresTargetSessionLineAfterSendAttempt(t *testing.T) {
 	}
 
 	appendJSONL(t, target, `{"timestamp":"2026-06-05T12:00:01Z","message":{"role":"assistant"}}`+"\n")
-	result, err = ConfirmJSONL(target, sendAt)
+	result, err = confirmation.Check()
 	if err != nil {
 		t.Fatalf("ConfirmJSONL returned error: %v", err)
 	}
@@ -526,13 +513,9 @@ func TestConfirmationWaitTimeoutPath(t *testing.T) {
 func TestManualFallbackCommandUsesSafeDisplayQuoting(t *testing.T) {
 	fallback := ManualFallbackCommand("abc123", `don't "; rm -rf / #`, "/tmp/my dir")
 
-	wantArgs := []string{"claude", "-r", "abc123", "-p", `don't "; rm -rf / #`}
-	if strings.Join(fallback.Args, "\x00") != strings.Join(wantArgs, "\x00") {
-		t.Fatalf("Args = %#v, want %#v", fallback.Args, wantArgs)
-	}
 	wantDisplay := `cd '/tmp/my dir' && claude -r abc123 -p 'don'\''t "; rm -rf / #'`
-	if fallback.Display != wantDisplay {
-		t.Fatalf("Display = %q, want %q", fallback.Display, wantDisplay)
+	if fallback != wantDisplay {
+		t.Fatalf("Display = %q, want %q", fallback, wantDisplay)
 	}
 }
 

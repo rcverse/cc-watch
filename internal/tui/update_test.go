@@ -117,53 +117,32 @@ func TestInitStartsDisplayTickerWhenEnabled(t *testing.T) {
 	}
 }
 
-func TestSessionStateIsDeepCopiedAcrossModelBoundaries(t *testing.T) {
+func TestSessionGapsAreDeepCopiedAcrossModelBoundaries(t *testing.T) {
 	input := session.Session{
 		SessionID: "input",
 		ShortID:   "input",
 		Project:   "tmp",
-		CacheWindow: session.CacheWindow{
-			Evidence: []string{"original-evidence"},
-		},
-		Gaps: []session.Gap{{Seconds: 60}},
-		Warnings: []session.ParseWarning{{
-			Code:    session.WarningMalformedJSON,
-			Message: "original-warning",
-		}},
+		Gaps:      []session.Gap{{Seconds: 60}},
 	}
 	model := NewModel(Options{Sessions: []session.Session{input}})
-	input.CacheWindow.Evidence[0] = "mutated-evidence"
 	input.Gaps[0].Seconds = 999
-	input.Warnings[0].Message = "mutated-warning"
 
 	stored := model.sessions[0]
-	if stored.CacheWindow.Evidence[0] != "original-evidence" {
-		t.Fatalf("constructor kept aliased evidence: %#v", stored.CacheWindow.Evidence)
-	}
 	if stored.Gaps[0].Seconds != 60 {
 		t.Fatalf("constructor kept aliased gaps: %#v", stored.Gaps)
-	}
-	if stored.Warnings[0].Message != "original-warning" {
-		t.Fatalf("constructor kept aliased warnings: %#v", stored.Warnings)
 	}
 
 	refresh := session.Session{
 		SessionID: "refresh",
 		ShortID:   "refresh",
 		Project:   "tmp",
-		CacheWindow: session.CacheWindow{
-			Evidence: []string{"refresh-evidence"},
-		},
-		Gaps:     []session.Gap{{Seconds: 120}},
-		Warnings: []session.ParseWarning{{Message: "refresh-warning"}},
+		Gaps:      []session.Gap{{Seconds: 120}},
 	}
 	updated, _ := model.Update(RefreshResultMsg{Generation: 1, Sessions: []session.Session{refresh}})
 	model = updated.(Model)
-	refresh.CacheWindow.Evidence[0] = "mutated-refresh-evidence"
 	refresh.Gaps[0].Seconds = 1000
-	refresh.Warnings[0].Message = "mutated-refresh-warning"
 	stored = model.sessions[0]
-	if stored.CacheWindow.Evidence[0] != "refresh-evidence" || stored.Gaps[0].Seconds != 120 || stored.Warnings[0].Message != "refresh-warning" {
+	if stored.Gaps[0].Seconds != 120 {
 		t.Fatalf("refresh result aliased caller slices: %#v", stored)
 	}
 
@@ -216,13 +195,11 @@ func TestFocusActionAlwaysHasVisibleMarker(t *testing.T) {
 		{
 			name: "keepalive active",
 			options: Options{
-				Now:             now,
-				SelectedID:      "workspace-id",
-				Sessions:        []session.Session{workspaceSession(now)},
-				KeepAliveConfig: cfg,
-				KeepAliveStates: map[string]keepalive.SessionState{
-					"workspace-id": {SessionID: "workspace-id", State: keepalive.StatePaused, MaxSends: 1, InstanceToken: 8},
-				},
+				Now:              now,
+				SelectedID:       "workspace-id",
+				Sessions:         []session.Session{workspaceSession(now)},
+				KeepAliveConfig:  cfg,
+				KeepAliveManager: keepAliveManagerInState(keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StatePaused, MaxSends: 1, InstanceToken: 8}),
 			},
 		},
 		{
@@ -581,14 +558,12 @@ func TestWorkspaceResetLimitRearmsKeepAlive(t *testing.T) {
 		Now:        now,
 		SelectedID: "workspace-id",
 		Sessions:   []session.Session{workspaceSession(now)},
-		KeepAliveStates: map[string]keepalive.SessionState{
-			"workspace-id": {
-				SessionID: "workspace-id",
-				State:     keepalive.StateScopeComplete,
-				ScopeUsed: 5,
-				MaxSends:  5,
-			},
-		},
+		KeepAliveManager: keepAliveManagerInState(keepalive.SessionState{
+			SessionID: "workspace-id",
+			State:     keepalive.StateScopeComplete,
+			ScopeUsed: 5,
+			MaxSends:  5,
+		}),
 	})
 	model = moveWorkspaceFocusTo(t, model, "keepalive_reset_limit")
 
@@ -644,12 +619,10 @@ func TestWorkspaceActionFeedbackForUpdateAndCancelWatching(t *testing.T) {
 
 	state := keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateMonitoringIdle, MaxSends: 1}
 	model = NewModel(Options{
-		Now:        now,
-		SelectedID: "workspace-id",
-		Sessions:   []session.Session{workspaceSession(now)},
-		KeepAliveStates: map[string]keepalive.SessionState{
-			"workspace-id": state,
-		},
+		Now:              now,
+		SelectedID:       "workspace-id",
+		Sessions:         []session.Session{workspaceSession(now)},
+		KeepAliveManager: keepAliveManagerInState(state),
 	})
 	model = moveWorkspaceFocusTo(t, model, "keepalive")
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -731,15 +704,13 @@ func TestWorkspaceFailureOffersResetLimit(t *testing.T) {
 		Now:        now,
 		SelectedID: "workspace-id",
 		Sessions:   []session.Session{workspaceSession(now)},
-		KeepAliveStates: map[string]keepalive.SessionState{
-			"workspace-id": {
-				SessionID:   "workspace-id",
-				State:       keepalive.StateErrorNoClaude,
-				LastFailure: "claude command not found",
-				ScopeUsed:   1,
-				MaxSends:    1,
-			},
-		},
+		KeepAliveManager: keepAliveManagerInState(keepalive.SessionState{
+			SessionID:   "workspace-id",
+			State:       keepalive.StateErrorNoClaude,
+			LastFailure: "claude command not found",
+			ScopeUsed:   1,
+			MaxSends:    1,
+		}),
 	})
 
 	seen := map[string]bool{}
@@ -760,12 +731,10 @@ func TestWorkspaceSendingAndConfirmingShowTransientKeepAliveStatus(t *testing.T)
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 	for _, state := range []keepalive.State{keepalive.StateSending, keepalive.StateConfirming} {
 		model := NewModel(Options{
-			Now:        now,
-			SelectedID: "workspace-id",
-			Sessions:   []session.Session{workspaceSession(now)},
-			KeepAliveStates: map[string]keepalive.SessionState{
-				"workspace-id": {SessionID: "workspace-id", State: state, InstanceToken: 7, MaxSends: 1},
-			},
+			Now:              now,
+			SelectedID:       "workspace-id",
+			Sessions:         []session.Session{workspaceSession(now)},
+			KeepAliveManager: keepAliveManagerInState(keepalive.SessionState{SessionID: "workspace-id", State: state, InstanceToken: 7, MaxSends: 1}),
 		})
 		if !strings.Contains(model.View(), "KeepAlive · ✓ Armed") {
 			t.Fatalf("%s view missing armed chip:\n%s", state, model.View())
@@ -788,9 +757,8 @@ func TestWorkspaceDetailsDisclosureDoesNotBecomeFocusRow(t *testing.T) {
 	}
 
 	overflowSession := workspaceSession(now)
+	overflowSession.WarningCount = 12
 	for i := 0; i < 12; i++ {
-		overflowSession.Warnings = append(overflowSession.Warnings, session.ParseWarning{Message: "warning"})
-		overflowSession.CacheWindow.Evidence = append(overflowSession.CacheWindow.Evidence, "extra")
 		overflowSession.Gaps = append(overflowSession.Gaps, session.Gap{
 			Seconds: float64(60 + i),
 			From:    now.Add(-time.Duration(i+2) * time.Minute),
@@ -850,12 +818,10 @@ func TestWorkspaceShortcutAvailabilityAndDefaultActiveFocus(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			model := NewModel(Options{
-				Now:        now,
-				SelectedID: "workspace-id",
-				Sessions:   []session.Session{workspaceSession(now)},
-				KeepAliveStates: map[string]keepalive.SessionState{
-					"workspace-id": tc.state,
-				},
+				Now:              now,
+				SelectedID:       "workspace-id",
+				Sessions:         []session.Session{workspaceSession(now)},
+				KeepAliveManager: keepAliveManagerInState(tc.state),
 			})
 			if model.FocusedAction() != tc.focus {
 				t.Fatalf("initial active focus = %q, want %q", model.FocusedAction(), tc.focus)
@@ -909,6 +875,72 @@ type errForTest string
 
 func (e errForTest) Error() string {
 	return string(e)
+}
+
+func keepAliveManagerInState(desired keepalive.SessionState) *keepalive.Manager {
+	cfg := config.Default().KeepAlive
+	if desired.MaxSends > 0 {
+		cfg.Scope.MaxSends = desired.MaxSends
+	}
+	if desired.State == keepalive.StateScopeComplete {
+		cfg.Scope.MaxSends = 1
+	}
+	manager := keepalive.NewManager(cfg)
+	if desired.State == "" || desired.State == keepalive.StateOff {
+		return manager
+	}
+
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	remaining := 5 * time.Minute
+	if desired.State == keepalive.StateMonitoringIdle && desired.ScopeUsed == 0 {
+		remaining = 10 * time.Minute
+	}
+	if desired.State == keepalive.StatePaused {
+		remaining = 20 * time.Second
+	}
+	s := activeSessionForTUITest(desired.SessionID, now, time.Hour, remaining)
+	actions := manager.Enable(s, now)
+	if desired.State == keepalive.StatePaused || desired.State == keepalive.StateMonitoringIdle && desired.ScopeUsed == 0 {
+		return manager
+	}
+	if len(actions) == 0 {
+		return manager
+	}
+	if desired.State == keepalive.StateCountdown {
+		return manager
+	}
+	send := manager.SendNow(desired.SessionID, actions[0].InstanceToken)
+	if len(send) == 0 {
+		return manager
+	}
+	if desired.State == keepalive.StateSending {
+		return manager
+	}
+	manager.MarkSendStarted(desired.SessionID, send[0].InstanceToken)
+	switch desired.State {
+	case keepalive.StateConfirming:
+	case keepalive.StateErrorNoClaude:
+		manager.MarkNoClaude(desired.SessionID, send[0].InstanceToken, desired.LastFailure)
+	case keepalive.StateErrorSubprocess:
+		manager.MarkSubprocessFailure(desired.SessionID, send[0].InstanceToken, desired.LastFailure, desired.RateLimited)
+	case keepalive.StateErrorTimeout:
+		manager.MarkConfirmationTimeout(desired.SessionID, send[0].InstanceToken)
+	case keepalive.StateScopeComplete, keepalive.StateMonitoringIdle:
+		manager.MarkSuccess(desired.SessionID, send[0].InstanceToken)
+	}
+	return manager
+}
+
+func activeSessionForTUITest(id string, now time.Time, ttl, remaining time.Duration) session.Session {
+	last := now.Add(-(ttl - remaining))
+	return session.Session{
+		SessionID:     id,
+		LastMessageAt: &last,
+		CacheWindow: session.CacheWindow{
+			TTLSeconds: int(ttl.Seconds()),
+			Known:      true,
+		},
+	}
 }
 
 type fakeKeepAliveRunner struct {

@@ -100,7 +100,7 @@ func (m Model) keepAliveCard(s session.Session, state keepalive.SessionState) st
 		fmt.Fprintf(&b, "Last         %s\n", reason)
 		fmt.Fprintf(&b, "Message      %s\n", messageText(fmt.Sprintf("%q", m.keepAliveConfig.Message)))
 		fmt.Fprintf(&b, "Sends        %d / %d used\n", state.ScopeUsed, maxSends(state))
-		fmt.Fprintf(&b, "Fallback     %s\n", keepalive.ManualFallbackCommand(s.SessionID, m.keepAliveConfig.Message, s.Cwd).Display)
+		fmt.Fprintf(&b, "Fallback     %s\n", keepalive.ManualFallbackCommand(s.SessionID, m.keepAliveConfig.Message, s.Cwd))
 	case keepalive.StateScopeComplete:
 		fmt.Fprintf(&b, "Next         Automatic sends paused\n")
 		if state.LastResult != "" {

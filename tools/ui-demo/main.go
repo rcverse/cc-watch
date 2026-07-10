@@ -206,8 +206,6 @@ func demoWorkspaceSession(now time.Time) session.Session {
 		JSONLPath:       "/demo/.claude/projects/demo-workspace/demo-workspace-11111111.jsonl",
 		FileModifiedAt:  now,
 		LastMessageAt:   &last,
-		StartedAt:       &start,
-		EndedAt:         &end,
 		DurationSeconds: &duration,
 		Cwd:             "/demo/workspace",
 		CacheWindow: session.CacheWindow{
@@ -215,7 +213,6 @@ func demoWorkspaceSession(now time.Time) session.Session {
 			Label:      "1h",
 			TTLSeconds: 3600,
 			Known:      true,
-			Evidence:   []string{"demo_ephemeral_1h_input_tokens"},
 		},
 		Messages: session.Messages{
 			FirstUserExcerpt: "demo first user message",

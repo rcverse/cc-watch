@@ -23,18 +23,13 @@ const (
 )
 
 type TimingDecision struct {
-	EffectiveTTLSeconds       int
-	EffectiveTriggerSeconds   int
 	EffectiveCountdownSeconds int
-	RemainingSeconds          int
 	InsideTrigger             bool
 	SendAllowed               bool
-	SafetyClamped             bool
-	UsesConservativeTTL       bool
 }
 
 func EvaluateTiming(s session.Session, now time.Time, cfg config.KeepAliveConfig) TimingDecision {
-	ttl, conservative := effectiveTTL(s)
+	ttl := effectiveTTL(s)
 	remaining := ttl
 	if s.LastMessageAt != nil {
 		remaining = ttl - int(now.Sub(*s.LastMessageAt).Seconds())
@@ -53,33 +48,28 @@ func EvaluateTiming(s session.Session, now time.Time, cfg config.KeepAliveConfig
 		sendWindow = remaining
 	}
 
-	countdown, disabled, clamped := effectiveCountdown(cfg.CountdownSeconds, sendWindow)
+	countdown, disabled := effectiveCountdown(cfg.CountdownSeconds, sendWindow)
 	return TimingDecision{
-		EffectiveTTLSeconds:       ttl,
-		EffectiveTriggerSeconds:   sendWindow,
 		EffectiveCountdownSeconds: countdown,
-		RemainingSeconds:          remaining,
 		InsideTrigger:             insideTrigger,
 		SendAllowed:               !disabled,
-		SafetyClamped:             clamped,
-		UsesConservativeTTL:       conservative,
 	}
 }
 
-func effectiveTTL(s session.Session) (int, bool) {
+func effectiveTTL(s session.Session) int {
 	if s.CacheWindow.Known && s.CacheWindow.TTLSeconds > 0 {
-		return s.CacheWindow.TTLSeconds, false
+		return s.CacheWindow.TTLSeconds
 	}
-	return conservativeTTLSeconds, true
+	return conservativeTTLSeconds
 }
 
-func effectiveCountdown(configuredCountdown, sendWindow int) (int, bool, bool) {
+func effectiveCountdown(configuredCountdown, sendWindow int) (int, bool) {
 	if sendWindow <= safetyMarginSeconds {
-		return 0, true, false
+		return 0, true
 	}
 	latestSafeCountdown := sendWindow - safetyMarginSeconds
 	if configuredCountdown > latestSafeCountdown {
-		return latestSafeCountdown, false, true
+		return latestSafeCountdown, false
 	}
-	return configuredCountdown, false, false
+	return configuredCountdown, false
 }

@@ -46,7 +46,6 @@ func ParseReader(r io.Reader, path string, fileModifiedAt time.Time) (Session, e
 	for {
 		raw, err := reader.ReadString('\n')
 		if raw != "" {
-			parser.line++
 			parser.parseLine(strings.TrimSpace(raw))
 		}
 		if err == nil {
@@ -56,7 +55,7 @@ func ParseReader(r io.Reader, path string, fileModifiedAt time.Time) (Session, e
 			break
 		}
 		readErr = err
-		parser.warn(WarningReadError, err.Error())
+		parser.warn()
 		break
 	}
 
@@ -70,7 +69,6 @@ type lineParser struct {
 	timestamps     []time.Time
 	recentMessages []MessageWindow
 	userTexts      []string
-	line           int
 }
 
 func (p *lineParser) parseLine(raw string) {
@@ -80,7 +78,7 @@ func (p *lineParser) parseLine(raw string) {
 
 	var obj map[string]any
 	if err := json.Unmarshal([]byte(raw), &obj); err != nil {
-		p.warn(WarningMalformedJSON, err.Error())
+		p.warn()
 		return
 	}
 
@@ -108,7 +106,7 @@ func (p *lineParser) parseTimestamp(obj map[string]any) (time.Time, bool) {
 	}
 	ts, err := time.Parse(time.RFC3339Nano, rawTS)
 	if err != nil {
-		p.warn(WarningMalformedTimestamp, err.Error())
+		p.warn()
 		return time.Time{}, false
 	}
 	p.timestamps = append(p.timestamps, ts)
@@ -170,7 +168,6 @@ func (p *lineParser) parseMessageWindow(obj map[string]any, ts time.Time, hasTim
 	}
 	p.recentMessages = append(p.recentMessages, MessageWindow{
 		At:      ts,
-		Role:    role,
 		Excerpt: text,
 	})
 	if len(p.recentMessages) > recentMessageLimit {
@@ -195,8 +192,6 @@ func (p *lineParser) finish() {
 		started := p.timestamps[0]
 		last := p.timestamps[len(p.timestamps)-1]
 		duration := int(last.Sub(started).Seconds())
-		p.session.StartedAt = &started
-		p.session.EndedAt = &last
 		p.session.DurationSeconds = &duration
 		p.session.LastMessageAt = &last
 	}
@@ -211,12 +206,8 @@ func (p *lineParser) finish() {
 	}
 }
 
-func (p *lineParser) warn(code WarningCode, message string) {
-	p.session.Warnings = append(p.session.Warnings, ParseWarning{
-		Code:    code,
-		Line:    p.line,
-		Message: message,
-	})
+func (p *lineParser) warn() {
+	p.session.WarningCount++
 }
 
 func cacheWindow(totals map[string]int) CacheWindow {
@@ -226,7 +217,6 @@ func cacheWindow(totals map[string]int) CacheWindow {
 			Label:      "1h",
 			TTLSeconds: 3600,
 			Known:      true,
-			Evidence:   []string{"ephemeral_1h_input_tokens"},
 		}
 	}
 	if totals["ephemeral_5m_input_tokens"] > 0 {
@@ -235,7 +225,6 @@ func cacheWindow(totals map[string]int) CacheWindow {
 			Label:      "5m",
 			TTLSeconds: 300,
 			Known:      true,
-			Evidence:   []string{"ephemeral_5m_input_tokens"},
 		}
 	}
 	return CacheWindow{

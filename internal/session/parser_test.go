@@ -25,9 +25,6 @@ func TestParseAllFeaturesFixture(t *testing.T) {
 	if s.CacheWindow.TTLSeconds != 3600 || !s.CacheWindow.Known {
 		t.Fatalf("CacheWindow = %+v, want known 3600s", s.CacheWindow)
 	}
-	if !contains(s.CacheWindow.Evidence, "ephemeral_1h_input_tokens") {
-		t.Fatalf("Evidence = %v, want 1h evidence", s.CacheWindow.Evidence)
-	}
 
 	if s.TokenStats.CacheWrites != 130 {
 		t.Fatalf("CacheWrites = %d, want 130", s.TokenStats.CacheWrites)
@@ -40,15 +37,6 @@ func TestParseAllFeaturesFixture(t *testing.T) {
 	}
 	if s.TokenStats.HitRate != 60.60606060606061 {
 		t.Fatalf("HitRate = %.14f, want 60.60606060606061", s.TokenStats.HitRate)
-	}
-	if s.StartedAt == nil || s.EndedAt == nil {
-		t.Fatalf("StartedAt/EndedAt = %v/%v, want timestamps", s.StartedAt, s.EndedAt)
-	}
-	if got := s.StartedAt.Format(time.RFC3339); got != "2026-06-03T00:00:00Z" {
-		t.Fatalf("StartedAt = %s, want first timestamp", got)
-	}
-	if got := s.EndedAt.Format(time.RFC3339); got != "2026-06-03T01:12:40Z" {
-		t.Fatalf("EndedAt = %s, want last timestamp", got)
 	}
 	if s.DurationSeconds == nil || *s.DurationSeconds != 4360 {
 		t.Fatalf("DurationSeconds = %v, want 4360", s.DurationSeconds)
@@ -71,8 +59,9 @@ func TestParseAllFeaturesFixture(t *testing.T) {
 		t.Fatalf("largest gap = %+v, want 4210s reset", s.Gaps[0])
 	}
 
-	assertWarning(t, s.Warnings, WarningMalformedJSON)
-	assertWarning(t, s.Warnings, WarningMalformedTimestamp)
+	if s.WarningCount != 2 {
+		t.Fatalf("WarningCount = %d, want 2", s.WarningCount)
+	}
 
 	status := s.StatusAt(time.Date(2026, 6, 3, 1, 42, 40, 0, time.UTC))
 	if status.State != StatusActive {
@@ -145,10 +134,10 @@ func TestParseReaderKeepsRecentMessageWindows(t *testing.T) {
 	if len(s.RecentMessages) != 2 {
 		t.Fatalf("len(RecentMessages) = %d, want 2", len(s.RecentMessages))
 	}
-	if s.RecentMessages[0].Role != "user" || s.RecentMessages[0].Excerpt != "first prompt" {
+	if s.RecentMessages[0].Excerpt != "first prompt" {
 		t.Fatalf("first recent message = %#v", s.RecentMessages[0])
 	}
-	if s.RecentMessages[1].Role != "user" || s.RecentMessages[1].Excerpt != "second prompt from block" {
+	if s.RecentMessages[1].Excerpt != "second prompt from block" {
 		t.Fatalf("last recent message = %#v", s.RecentMessages[1])
 	}
 	if s.Messages.FirstUserExcerpt != "first prompt" {
@@ -225,7 +214,9 @@ func TestParseReaderReportsReadErrorAfterValidLines(t *testing.T) {
 	if s.TokenStats.CacheWrites != 1 {
 		t.Fatalf("CacheWrites = %d, want parsed valid line before read error", s.TokenStats.CacheWrites)
 	}
-	assertWarning(t, s.Warnings, WarningReadError)
+	if s.WarningCount != 1 {
+		t.Fatalf("WarningCount = %d, want 1", s.WarningCount)
+	}
 }
 
 func TestParseMalformedTimestampWarningDoesNotDropUsage(t *testing.T) {
@@ -240,7 +231,9 @@ func TestParseMalformedTimestampWarningDoesNotDropUsage(t *testing.T) {
 	if s.LastMessageAt != nil {
 		t.Fatalf("LastMessageAt = %v, want nil", s.LastMessageAt)
 	}
-	assertWarning(t, s.Warnings, WarningMalformedTimestamp)
+	if s.WarningCount != 1 {
+		t.Fatalf("WarningCount = %d, want 1", s.WarningCount)
+	}
 }
 
 func TestParseCapturesLastNonEmptyCwd(t *testing.T) {
@@ -282,25 +275,6 @@ func (r *errorAfterValidLineReader) Read(p []byte) (int, error) {
 	}
 	r.sent = true
 	return copy(p, r.line), nil
-}
-
-func contains(values []string, needle string) bool {
-	for _, value := range values {
-		if value == needle {
-			return true
-		}
-	}
-	return false
-}
-
-func assertWarning(t *testing.T, warnings []ParseWarning, code WarningCode) {
-	t.Helper()
-	for _, warning := range warnings {
-		if warning.Code == code {
-			return
-		}
-	}
-	t.Fatalf("warnings = %+v, want code %q", warnings, code)
 }
 
 var _ io.Reader = (*errorAfterValidLineReader)(nil)

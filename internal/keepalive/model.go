@@ -49,7 +49,6 @@ type SessionState struct {
 	LastResult       string
 	LastFailure      string
 	RateLimited      bool
-	SafetyDisabled   bool
 }
 
 type Manager struct {
@@ -76,19 +75,6 @@ func (m *Manager) State(sessionID string) SessionState {
 		}
 	}
 	return state
-}
-
-func (m *Manager) SetState(state SessionState) {
-	if state.SessionID == "" {
-		return
-	}
-	if state.MaxSends == 0 {
-		state.MaxSends = m.cfg.Scope.MaxSends
-	}
-	m.states[state.SessionID] = state
-	if state.InstanceToken > m.tokenID {
-		m.tokenID = state.InstanceToken
-	}
 }
 
 func (m *Manager) nextToken() int64 {

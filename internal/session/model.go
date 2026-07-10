@@ -15,7 +15,6 @@ type CacheWindow struct {
 	Label      string
 	TTLSeconds int
 	Known      bool
-	Evidence   []string
 }
 
 type TokenStats struct {
@@ -32,7 +31,6 @@ type Messages struct {
 
 type MessageWindow struct {
 	At      time.Time
-	Role    string
 	Excerpt string
 }
 
@@ -43,20 +41,6 @@ type Gap struct {
 	Reset   bool
 }
 
-type WarningCode string
-
-const (
-	WarningMalformedJSON      WarningCode = "malformed_json"
-	WarningMalformedTimestamp WarningCode = "malformed_timestamp"
-	WarningReadError          WarningCode = "read_error"
-)
-
-type ParseWarning struct {
-	Code    WarningCode
-	Line    int
-	Message string
-}
-
 type Session struct {
 	SessionID       string
 	ShortID         string
@@ -65,8 +49,6 @@ type Session struct {
 	JSONLPath       string
 	FileModifiedAt  time.Time
 	CacheWindow     CacheWindow
-	StartedAt       *time.Time
-	EndedAt         *time.Time
 	DurationSeconds *int
 	LastMessageAt   *time.Time
 	Messages        Messages
@@ -74,7 +56,7 @@ type Session struct {
 	TokenStats      TokenStats
 	Gaps            []Gap
 	ResetCount      int
-	Warnings        []ParseWarning
+	WarningCount    int
 }
 
 type StatusState string

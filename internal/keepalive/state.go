@@ -32,18 +32,6 @@ func (m *Manager) Check(now time.Time, sessions []session.Session) []Action {
 	return actions
 }
 
-func (m *Manager) Refresh(s session.Session, now time.Time) []Action {
-	state := m.State(s.SessionID)
-	switch state.State {
-	case StateOff, StateScopeComplete:
-		return nil
-	}
-	state.State = StateMonitoringIdle
-	state.InstanceToken = m.nextToken()
-	m.states[s.SessionID] = state
-	return m.evaluate(s, now)
-}
-
 func (m *Manager) CountdownElapsed(sessionID string, token int64, now time.Time) []Action {
 	state := m.State(sessionID)
 	if state.State != StateCountdown || state.InstanceToken != token {
@@ -51,7 +39,6 @@ func (m *Manager) CountdownElapsed(sessionID string, token int64, now time.Time)
 	}
 	if !state.LatestSafeSendAt.IsZero() && now.After(state.LatestSafeSendAt) {
 		state.State = StatePaused
-		state.SafetyDisabled = true
 		state.LastFailure = "send window passed"
 		m.states[sessionID] = state
 		return nil
@@ -82,10 +69,6 @@ func (m *Manager) Cancel(sessionID string, token int64) {
 		state.TriggerArmed = false
 		m.states[sessionID] = state
 	}
-}
-
-func (m *Manager) Dismiss(sessionID string, token int64) {
-	m.Cancel(sessionID, token)
 }
 
 func (m *Manager) MarkSendStarted(sessionID string, token int64) {
@@ -160,7 +143,6 @@ func (m *Manager) evaluate(s session.Session, now time.Time) []Action {
 	state.LatestSafeSendAt = latestSafeSendAt(s)
 	if timing.SendAllowed {
 		state.State = StateCountdown
-		state.SafetyDisabled = false
 		state.LastFailure = ""
 		m.states[s.SessionID] = state
 		return []Action{{
@@ -173,7 +155,6 @@ func (m *Manager) evaluate(s session.Session, now time.Time) []Action {
 	}
 
 	state.State = StatePaused
-	state.SafetyDisabled = true
 	state.LastFailure = "countdown does not fit the safe send window"
 	m.states[s.SessionID] = state
 	return nil
@@ -223,6 +204,6 @@ func latestSafeSendAt(s session.Session) time.Time {
 	if s.LastMessageAt == nil {
 		return time.Time{}
 	}
-	ttl, _ := effectiveTTL(s)
+	ttl := effectiveTTL(s)
 	return s.LastMessageAt.Add(time.Duration(ttl-sendDeadlineMarginSeconds) * time.Second)
 }

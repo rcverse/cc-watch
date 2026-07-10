@@ -207,8 +207,8 @@ func (m Model) renderListRow(index int, s session.Session) string {
 		if s.DurationSeconds != nil {
 			statusLine += "  duration " + formatDuration(*s.DurationSeconds)
 		}
-		if len(s.Warnings) > 0 {
-			statusLine += fmt.Sprintf("  warnings %d", len(s.Warnings))
+		if s.WarningCount > 0 {
+			statusLine += fmt.Sprintf("  warnings %d", s.WarningCount)
 		}
 	}
 	b.WriteString(truncateANSI(statusLine, width))
@@ -226,8 +226,8 @@ func (m Model) renderListRow(index int, s session.Session) string {
 		}
 		fmt.Fprintf(&b, "  %s %s\n", messageChip("last"), messageText(truncateEnd(lastExcerpt, available)))
 	}
-	if len(s.Warnings) > 0 && width < 120 {
-		fmt.Fprintf(&b, "     %s\n", styles.Render(RoleWarning, fmt.Sprintf("! %d parse warning(s)", len(s.Warnings))))
+	if s.WarningCount > 0 && width < 120 {
+		fmt.Fprintf(&b, "     %s\n", styles.Render(RoleWarning, fmt.Sprintf("! %d parse warning(s)", s.WarningCount)))
 	}
 	b.WriteString("\n")
 	return b.String()

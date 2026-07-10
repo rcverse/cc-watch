@@ -556,13 +556,12 @@ func TestWorkspaceIgnoresKeepAliveAsyncAfterSelectionChanges(t *testing.T) {
 			workspaceSession(now),
 			listViewSession("other-id", "other", now, now, session.CacheWindow{Label: "1h", TTLSeconds: 3600, Known: true}, "", ""),
 		},
-		KeepAliveStates: map[string]keepalive.SessionState{
-			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateConfirming, InstanceToken: 12, MaxSends: 1},
-		},
+		KeepAliveManager: keepAliveManagerInState(keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateConfirming, InstanceToken: 12, MaxSends: 1}),
 	})
+	token := model.KeepAliveState("workspace-id").InstanceToken
 	model.selectedIndex = 1
 	model.selectedID = "other-id"
-	updated, _ := model.Update(KeepAliveConfirmationResultMsg{SessionID: "workspace-id", InstanceToken: 12, ConfirmedAt: now, SelectedID: "workspace-id"})
+	updated, _ := model.Update(KeepAliveConfirmationResultMsg{SessionID: "workspace-id", InstanceToken: token, ConfirmedAt: now, SelectedID: "workspace-id"})
 	model = updated.(Model)
 	if got := model.KeepAliveState("workspace-id").State; got != keepalive.StateConfirming {
 		t.Fatalf("stale selected session changed state to %q, want confirming", got)
@@ -576,17 +575,16 @@ func TestWorkspaceKeepAliveConfirmationSurvivesRefreshGenerationChange(t *testin
 		SelectedID:        "workspace-id",
 		RefreshGeneration: 1,
 		Sessions:          []session.Session{workspaceSession(now)},
-		KeepAliveStates: map[string]keepalive.SessionState{
-			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateConfirming, ScopeUsed: 1, InstanceToken: 11, MaxSends: 1},
-		},
+		KeepAliveManager:  keepAliveManagerInState(keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateConfirming, ScopeUsed: 1, InstanceToken: 11, MaxSends: 1}),
 	})
+	token := model.KeepAliveState("workspace-id").InstanceToken
 
 	updated, _ := model.Update(RefreshResultMsg{
 		Generation: 2,
 		Sessions:   []session.Session{workspaceSession(now.Add(time.Minute))},
 	})
 	model = updated.(Model)
-	updated, _ = model.Update(KeepAliveConfirmationResultMsg{SessionID: "workspace-id", InstanceToken: 11, ConfirmedAt: now.Add(time.Minute), SelectedID: "workspace-id"})
+	updated, _ = model.Update(KeepAliveConfirmationResultMsg{SessionID: "workspace-id", InstanceToken: token, ConfirmedAt: now.Add(time.Minute), SelectedID: "workspace-id"})
 	model = updated.(Model)
 
 	if got := model.KeepAliveState("workspace-id").State; got != keepalive.StateScopeComplete {

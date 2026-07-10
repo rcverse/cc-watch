@@ -29,9 +29,7 @@ func TestDisplayTickEvaluatesKeepAliveMonitoringSessions(t *testing.T) {
 			LastMessageAt: &last,
 			CacheWindow:   session.CacheWindow{Label: "1h", TTLSeconds: 3600, Known: true},
 		}},
-		KeepAliveStates: map[string]keepalive.SessionState{
-			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateMonitoringIdle, TriggerArmed: true, MaxSends: 1},
-		},
+		KeepAliveManager: keepAliveManagerInState(keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateMonitoringIdle, TriggerArmed: true, MaxSends: 1}),
 	})
 
 	updated, cmd := model.Update(DisplayTickMsg{Now: now})
@@ -80,12 +78,10 @@ func TestExpiredSessionDisablesExistingKeepAliveAndCannotSend(t *testing.T) {
 	expired.LastMessageAt = &expiredLast
 	expired.CacheWindow = session.CacheWindow{Tier: session.Tier1Hour, Label: "1h", TTLSeconds: 3600, Known: true}
 	model := NewModel(Options{
-		Now:        now,
-		SelectedID: expired.SessionID,
-		Sessions:   []session.Session{expired},
-		KeepAliveStates: map[string]keepalive.SessionState{
-			expired.SessionID: {SessionID: expired.SessionID, State: keepalive.StateMonitoringIdle, MaxSends: 1},
-		},
+		Now:              now,
+		SelectedID:       expired.SessionID,
+		Sessions:         []session.Session{expired},
+		KeepAliveManager: keepAliveManagerInState(keepalive.SessionState{SessionID: expired.SessionID, State: keepalive.StateMonitoringIdle, MaxSends: 1}),
 	})
 
 	updated, cmd := model.Update(DisplayTickMsg{Now: now.Add(time.Second)})
@@ -102,12 +98,10 @@ func TestExpiredSessionDisablesExistingKeepAliveAndCannotSend(t *testing.T) {
 	}
 
 	model = NewModel(Options{
-		Now:        now,
-		SelectedID: expired.SessionID,
-		Sessions:   []session.Session{expired},
-		KeepAliveStates: map[string]keepalive.SessionState{
-			expired.SessionID: {SessionID: expired.SessionID, State: keepalive.StatePaused, InstanceToken: 7, MaxSends: 1},
-		},
+		Now:              now,
+		SelectedID:       expired.SessionID,
+		Sessions:         []session.Session{expired},
+		KeepAliveManager: keepAliveManagerInState(keepalive.SessionState{SessionID: expired.SessionID, State: keepalive.StatePaused, InstanceToken: 7, MaxSends: 1}),
 	})
 	updated, cmd = model.Update(DisplayTickMsg{Now: now.Add(time.Second)})
 	model = updated.(Model)
@@ -123,12 +117,10 @@ func TestWorkspaceIgnoresStaleKeepAliveAsyncMessages(t *testing.T) {
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 	state := keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateCountdown, InstanceToken: 41, MaxSends: 1}
 	model := NewModel(Options{
-		Now:        now,
-		SelectedID: "workspace-id",
-		Sessions:   []session.Session{workspaceSession(now)},
-		KeepAliveStates: map[string]keepalive.SessionState{
-			"workspace-id": state,
-		},
+		Now:              now,
+		SelectedID:       "workspace-id",
+		Sessions:         []session.Session{workspaceSession(now)},
+		KeepAliveManager: keepAliveManagerInState(state),
 	})
 
 	updated, _ := model.Update(keyRunes("x"))
@@ -166,12 +158,10 @@ func TestWorkspaceKeepAliveActionsProduceRunnerAndConfirmationCommands(t *testin
 	runner := fakeKeepAliveRunner{startedAt: now.Add(time.Second)}
 	confirmCalls := 0
 	model := NewModel(Options{
-		Now:        now,
-		SelectedID: "workspace-id",
-		Sessions:   []session.Session{workspaceSession(now)},
-		KeepAliveStates: map[string]keepalive.SessionState{
-			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateCountdown, InstanceToken: 21, MaxSends: 1},
-		},
+		Now:              now,
+		SelectedID:       "workspace-id",
+		Sessions:         []session.Session{workspaceSession(now)},
+		KeepAliveManager: keepAliveManagerInState(keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateCountdown, InstanceToken: 21, MaxSends: 1}),
 		Dependencies: Dependencies{
 			KeepAliveRunner: runner,
 			ConfirmKeepAlive: func(ctx context.Context, target keepalive.ConfirmationTarget) (keepalive.ConfirmationResult, error) {
@@ -218,14 +208,8 @@ func TestWorkspaceKeepAliveActionsProduceRunnerAndConfirmationCommands(t *testin
 func TestWorkspaceKeepAliveRunnerUsesRuntimePolicy(t *testing.T) {
 	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
 	cfg := config.Default().KeepAlive
-	manager := keepalive.NewManager(cfg)
 	s := workspaceSession(now)
-	manager.SetState(keepalive.SessionState{
-		SessionID:     s.SessionID,
-		State:         keepalive.StateCountdown,
-		MaxSends:      1,
-		InstanceToken: 7,
-	})
+	manager := keepAliveManagerInState(keepalive.SessionState{SessionID: s.SessionID, State: keepalive.StateCountdown, MaxSends: 1})
 	model := NewModel(Options{
 		Now:              now,
 		Sessions:         []session.Session{s},
@@ -298,12 +282,10 @@ func TestConfigEditorResetRequiresRepeatConfirmation(t *testing.T) {
 func TestConfigEditorSaveDoesNotMutateActiveKeepAliveState(t *testing.T) {
 	cfg := config.Default()
 	model := NewModel(Options{
-		StartMode: StartConfig,
-		Config:    cfg,
-		Sessions:  []session.Session{workspaceSession(time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC))},
-		KeepAliveStates: map[string]keepalive.SessionState{
-			"workspace-id": {SessionID: "workspace-id", State: keepalive.StateMonitoringIdle, MaxSends: 1},
-		},
+		StartMode:        StartConfig,
+		Config:           cfg,
+		Sessions:         []session.Session{workspaceSession(time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC))},
+		KeepAliveManager: keepAliveManagerInState(keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateMonitoringIdle, MaxSends: 1}),
 		Dependencies: Dependencies{
 			SaveConfig: func(config.Config) error { return nil },
 		},

@@ -13,11 +13,9 @@ func TestQuestionMarkDoesNotOpenInAppHelpOverlay(t *testing.T) {
 		NewModel(Options{}),
 		NewModel(Options{StartMode: StartConfig}),
 		NewModel(Options{
-			SelectedID: "11111111",
-			Sessions:   []session.Session{{SessionID: "11111111", ShortID: "11111111"}},
-			KeepAliveStates: map[string]keepalive.SessionState{
-				"11111111": {SessionID: "11111111", State: keepalive.StateCountdown, InstanceToken: 1, MaxSends: 1},
-			},
+			SelectedID:       "11111111",
+			Sessions:         []session.Session{{SessionID: "11111111", ShortID: "11111111"}},
+			KeepAliveManager: keepAliveManagerInState(keepalive.SessionState{SessionID: "11111111", State: keepalive.StateCountdown, InstanceToken: 1, MaxSends: 1}),
 		}),
 	} {
 		before := model.View()
