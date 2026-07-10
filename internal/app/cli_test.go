@@ -3,7 +3,6 @@ package app
 import (
 	"bytes"
 	"errors"
-	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -152,31 +151,35 @@ func TestTUIDispatchStartsListWithoutKeepAliveSideEffects(t *testing.T) {
 	}
 }
 
-func TestTUIDispatchForwardsPublicCLICommands(t *testing.T) {
+func TestTUIDispatchBuildsOptionsForPublicCLICommands(t *testing.T) {
 	tests := []struct {
-		name string
-		args []string
-		want Command
+		name       string
+		args       []string
+		wantLimit  int
+		wantMode   tui.StartMode
+		wantSelect string
 	}{
 		{
-			name: "default cc-watch",
-			args: nil,
-			want: Command{Mode: ModeTUI, Limit: 25},
+			name:      "default cc-watch",
+			wantLimit: 25,
+			wantMode:  tui.StartList,
 		},
 		{
-			name: "--n N",
-			args: []string{"--n", "2"},
-			want: Command{Mode: ModeTUI, Limit: 2},
+			name:      "--n N",
+			args:      []string{"--n", "2"},
+			wantLimit: 2,
+			wantMode:  tui.StartList,
 		},
 		{
-			name: "--id partial",
-			args: []string{"--id", "11111111"},
-			want: Command{Mode: ModeTUI, Limit: 25, ID: "11111111"},
+			name:       "--id partial",
+			args:       []string{"--id", "2222"},
+			wantMode:   tui.StartList,
+			wantSelect: "22222222-2222-2222-2222-222222222222",
 		},
 		{
-			name: "config",
-			args: []string{"config"},
-			want: Command{Mode: ModeConfig, Limit: 25},
+			name:     "config",
+			args:     []string{"config"},
+			wantMode: tui.StartConfig,
 		},
 	}
 
@@ -184,10 +187,19 @@ func TestTUIDispatchForwardsPublicCLICommands(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			deps := fakeDeps(t)
-			var got Command
-			deps.StartTUI = func(cmd Command) error {
+			if tt.wantSelect != "" {
+				deps = testDepsWithTwoSessions(t)
+			}
+			discoveryLimit := -1
+			originalDiscover := deps.DiscoverHome
+			deps.DiscoverHome = func(home string, limit int) (session.DiscoveryResult, error) {
+				discoveryLimit = limit
+				return originalDiscover(home, limit)
+			}
+			var got tui.Options
+			deps.RunTUIProgram = func(options tui.Options) error {
 				deps.tuiStarts++
-				got = cmd
+				got = options
 				return nil
 			}
 
@@ -196,8 +208,14 @@ func TestTUIDispatchForwardsPublicCLICommands(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("RunWithDeps(%v) exit code = %d, want 0; stderr=%q", tt.args, code, stderr.String())
 			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("command = %#v, want %#v", got, tt.want)
+			if got.StartMode != tt.wantMode || got.SelectedID != tt.wantSelect {
+				t.Fatalf("options mode=%q selected=%q, want mode=%q selected=%q", got.StartMode, got.SelectedID, tt.wantMode, tt.wantSelect)
+			}
+			if tt.wantLimit > 0 && discoveryLimit != tt.wantLimit {
+				t.Fatalf("discovery limit = %d, want %d", discoveryLimit, tt.wantLimit)
+			}
+			if tt.wantMode == tui.StartConfig && discoveryLimit != -1 {
+				t.Fatalf("config discovered sessions with limit %d", discoveryLimit)
 			}
 			if deps.tuiStarts != 1 {
 				t.Fatalf("tui starts = %d, want 1", deps.tuiStarts)
@@ -275,7 +293,6 @@ func TestTUIOptionsStartLiveRefreshForListAndWorkspaceOnly(t *testing.T) {
 func TestRunTUIClosesLiveRefresh(t *testing.T) {
 	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
 	deps := fakeDeps(t)
-	deps.StartTUI = nil
 	deps.Now = func() time.Time { return now }
 	closed := false
 	deps.NewLiveWatcher = func(projectsDir string) (tui.Watcher, func() error, error) {
@@ -358,22 +375,6 @@ func TestTUIStartupWithIDSelectsMatchingSession(t *testing.T) {
 	}
 	if len(options.Sessions) != 1 || options.Sessions[0].ShortID != "11111111" {
 		t.Fatalf("sessions = %#v, want selected session only", options.Sessions)
-	}
-}
-
-func TestTUISelectedDispatchPreservesID(t *testing.T) {
-	deps := testDepsWithTwoSessions(t)
-	var tuiCommand Command
-	deps.StartTUI = func(cmd Command) error {
-		tuiCommand = cmd
-		return nil
-	}
-
-	if code := RunWithDeps([]string{"--id", "2222"}, io.Discard, io.Discard, deps.Dependencies); code != 0 {
-		t.Fatalf("TUI selected run exit = %d, want 0", code)
-	}
-	if tuiCommand.ID != "2222" {
-		t.Fatalf("TUI command ID = %q, want 2222", tuiCommand.ID)
 	}
 }
 
@@ -820,7 +821,7 @@ func fakeDeps(t *testing.T) *fakeAppDeps {
 		t.Fatalf("ParseFile called unexpectedly with %q", path)
 		return session.Session{}, nil
 	}
-	deps.StartTUI = func(Command) error {
+	deps.RunTUIProgram = func(tui.Options) error {
 		deps.tuiStarts++
 		return nil
 	}

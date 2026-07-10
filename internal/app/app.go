@@ -27,7 +27,6 @@ type Dependencies struct {
 	Now                          func() time.Time
 	DiscoverHome                 func(home string, limit int) (session.DiscoveryResult, error)
 	ParseFile                    func(path string) (session.Session, error)
-	StartTUI                     func(Command) error
 	NewLiveWatcher               func(projectsDir string) (tui.Watcher, func() error, error)
 	RunTUIProgram                func(tui.Options) error
 	NotifyEvent                  func(notify.Event) notify.Result
@@ -68,28 +67,9 @@ func RunWithDeps(args []string, stdout io.Writer, stderr io.Writer, deps Depende
 	case ModeStatusline:
 		deps = fillDependencies(deps)
 		return runStatusline(cmd, deps, deps.Stdin, stdout, stderr)
-	case ModeConfig:
+	case ModeConfig, ModeTUI:
 		deps = fillDependencies(deps)
-		var err error
-		if deps.StartTUI != nil {
-			err = deps.StartTUI(cmd)
-		} else {
-			err = runTUI(cmd, deps)
-		}
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
-		return 0
-	case ModeTUI:
-		deps = fillDependencies(deps)
-		var err error
-		if deps.StartTUI != nil {
-			err = deps.StartTUI(cmd)
-		} else {
-			err = runTUI(cmd, deps)
-		}
-		if err != nil {
+		if err := runTUI(cmd, deps); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
