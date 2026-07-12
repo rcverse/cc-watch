@@ -173,10 +173,13 @@ func statuslineCommand(settings map[string]any) string {
 }
 
 func setStatuslineCommand(settings map[string]any, command string) {
-	settings["statusLine"] = map[string]any{
-		"type":    "command",
-		"command": command,
+	statusLine, ok := settings["statusLine"].(map[string]any)
+	if !ok {
+		statusLine = map[string]any{}
 	}
+	statusLine["type"] = "command"
+	statusLine["command"] = command
+	settings["statusLine"] = statusLine
 }
 
 func settingsPath(home string) string {

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/richardchen/cc-watch/internal/session"
+	"github.com/rcverse/cc-watch/internal/session"
 )
 
 func TestReminderRuntimeFiresEnabledSessionsOnly(t *testing.T) {

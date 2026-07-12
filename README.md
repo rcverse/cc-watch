@@ -28,14 +28,14 @@ That's it. Three jobs, done well, in a TUI that opens in milliseconds.
 Requires macOS and Go 1.23+.
 
 ```bash
-git clone <this-repo>
+git clone https://github.com/rcverse/cc-watch.git
 cd cc-watch
 ./install.sh --dry-run   # see what would happen, changes nothing
 ./install.sh --yes       # build and install to ~/.local/bin/cc-watch
 ```
 
-Make sure `~/.local/bin` is on your `PATH`. That's the whole install story —
-no Homebrew tap, no curl-pipe-bash, no releases page to check.
+Make sure `~/.local/bin` is on your `PATH`. This source-build installer is the
+supported path today. There is no Homebrew formula or prebuilt release yet.
 
 ## Quick start
 
@@ -187,9 +187,8 @@ to suppress the at-risk color.
 
 ## What this isn't
 
-Not a SaaS. Not a Chrome extension. Not a Homebrew formula (yet). Not
-something that phones home, phones anyone, or has opinions about your other
-tabs. It runs when you run it, and does nothing when you don't.
+Not a SaaS. Not a Chrome extension. It does not phone home or run when you
+are not using it.
 
 ## Development
 

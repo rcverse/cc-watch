@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/richardchen/cc-watch/internal/keepalive"
-	"github.com/richardchen/cc-watch/internal/session"
+	"github.com/rcverse/cc-watch/internal/keepalive"
+	"github.com/rcverse/cc-watch/internal/session"
 )
 
 const rewindWindowActiveLimit = 6

@@ -1,4 +1,4 @@
-module github.com/richardchen/cc-watch
+module github.com/rcverse/cc-watch
 
 go 1.23
 

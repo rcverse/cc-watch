@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/richardchen/cc-watch/internal/app"
+	"github.com/rcverse/cc-watch/internal/app"
 )
 
 func main() {

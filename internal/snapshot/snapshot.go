@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/richardchen/cc-watch/internal/config"
-	"github.com/richardchen/cc-watch/internal/session"
+	"github.com/rcverse/cc-watch/internal/config"
+	"github.com/rcverse/cc-watch/internal/session"
 )
 
 type Loaders struct {

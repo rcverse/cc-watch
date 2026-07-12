@@ -2,7 +2,7 @@ package tui
 
 import (
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/richardchen/cc-watch/internal/refresh"
+	"github.com/rcverse/cc-watch/internal/refresh"
 )
 
 type Watcher interface {

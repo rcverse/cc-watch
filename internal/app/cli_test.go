@@ -9,11 +9,11 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/richardchen/cc-watch/internal/config"
-	"github.com/richardchen/cc-watch/internal/notify"
-	"github.com/richardchen/cc-watch/internal/refresh"
-	"github.com/richardchen/cc-watch/internal/session"
-	"github.com/richardchen/cc-watch/internal/tui"
+	"github.com/rcverse/cc-watch/internal/config"
+	"github.com/rcverse/cc-watch/internal/notify"
+	"github.com/rcverse/cc-watch/internal/refresh"
+	"github.com/rcverse/cc-watch/internal/session"
+	"github.com/rcverse/cc-watch/internal/tui"
 )
 
 func TestHelpExitsSuccessfully(t *testing.T) {
@@ -71,8 +71,8 @@ func TestVersionExitsSuccessfully(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Run(--version) exit code = %d, want 0", code)
 	}
-	if !strings.Contains(stdout.String(), "cc-watch 2.0.0-dev") {
-		t.Fatalf("version output = %q, want dev version", stdout.String())
+	if !strings.Contains(stdout.String(), "cc-watch 1.0.0-beta.1") {
+		t.Fatalf("version output = %q, want beta version", stdout.String())
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
@@ -92,9 +92,6 @@ func TestRetiredWatchFlagIsUnknown(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "flag provided but not defined: -watch") {
 		t.Fatalf("stderr missing unknown-flag error:\n%s", stderr.String())
-	}
-	if strings.Contains(stderr.String(), "not part of cc-watch v2") {
-		t.Fatalf("stderr still treats watch as known retired mode:\n%s", stderr.String())
 	}
 }
 

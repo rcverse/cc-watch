@@ -48,6 +48,21 @@ func TestInstallExistingCommandPreservesItBehindCcWatch(t *testing.T) {
 	}
 }
 
+func TestInstallExistingCommandPreservesStatuslineOptions(t *testing.T) {
+	home := t.TempDir()
+	writeSettingsFile(t, home, `{"statusLine":{"type":"command","command":"~/.claude/statusline.sh","padding":2,"refreshInterval":5,"hideVimModeIndicator":true}}`)
+
+	if err := Install(home); err != nil {
+		t.Fatalf("Install returned error: %v", err)
+	}
+	settings := readSettingsFile(t, home)
+	for _, want := range []string{`"padding": 2`, `"refreshInterval": 5`, `"hideVimModeIndicator": true`} {
+		if !strings.Contains(settings, want) {
+			t.Fatalf("settings = %s, want existing statusline option %s preserved", settings, want)
+		}
+	}
+}
+
 func TestInstallExistingShellCommandKeepsShellSemantics(t *testing.T) {
 	home := t.TempDir()
 	writeSettingsFile(t, home, `{"statusLine":{"type":"command","command":"echo 'hi' | sed s/i/o/"}}`)
@@ -86,6 +101,21 @@ func TestUninstallInstalledCommandRestoresPreviousCommand(t *testing.T) {
 	settings := readSettingsFile(t, home)
 	if !strings.Contains(settings, `"command": "~/.claude/statusline.sh"`) {
 		t.Fatalf("settings = %s, want previous command restored", settings)
+	}
+}
+
+func TestUninstallInstalledCommandPreservesStatuslineOptions(t *testing.T) {
+	home := t.TempDir()
+	writeSettingsFile(t, home, `{"statusLine":{"type":"command","command":"cc-watch statusline -- ~/.claude/statusline.sh","padding":2,"refreshInterval":5}}`)
+
+	if err := Uninstall(home); err != nil {
+		t.Fatalf("Uninstall returned error: %v", err)
+	}
+	settings := readSettingsFile(t, home)
+	for _, want := range []string{`"command": "~/.claude/statusline.sh"`, `"padding": 2`, `"refreshInterval": 5`} {
+		if !strings.Contains(settings, want) {
+			t.Fatalf("settings = %s, want %s preserved", settings, want)
+		}
 	}
 }
 

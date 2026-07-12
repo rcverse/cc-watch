@@ -1,8 +1,8 @@
 package tui
 
 import (
-	"github.com/richardchen/cc-watch/internal/session"
-	"github.com/richardchen/cc-watch/internal/snapshot"
+	"github.com/rcverse/cc-watch/internal/session"
+	"github.com/rcverse/cc-watch/internal/snapshot"
 )
 
 type SnapshotOptionsInput struct {

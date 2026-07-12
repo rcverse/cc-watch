@@ -10,8 +10,8 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/richardchen/cc-watch/internal/ratelimit"
-	"github.com/richardchen/cc-watch/internal/statusline"
+	"github.com/rcverse/cc-watch/internal/ratelimit"
+	"github.com/rcverse/cc-watch/internal/statusline"
 )
 
 const (

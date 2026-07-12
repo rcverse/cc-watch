@@ -26,7 +26,7 @@ fi
 
 VERSION="$("$TARGET" --version)"
 case "$VERSION" in
-  "cc-watch 2.0.0-dev") ;;
+  "cc-watch 1.0.0-beta.1") ;;
   *)
     echo "unexpected installed version: $VERSION" >&2
     exit 1

@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/richardchen/cc-watch/internal/keepalive"
-	"github.com/richardchen/cc-watch/internal/session"
+	"github.com/rcverse/cc-watch/internal/keepalive"
+	"github.com/rcverse/cc-watch/internal/session"
 )
 
 func TestQuestionMarkDoesNotOpenInAppHelpOverlay(t *testing.T) {

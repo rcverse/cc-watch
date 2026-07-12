@@ -7,8 +7,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/richardchen/cc-watch/internal/config"
-	"github.com/richardchen/cc-watch/internal/statusline"
+	"github.com/rcverse/cc-watch/internal/config"
+	"github.com/rcverse/cc-watch/internal/statusline"
 )
 
 func TestConfigFocusCycleOnlyVisitsVisibleRows(t *testing.T) {

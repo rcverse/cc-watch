@@ -6,9 +6,9 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/richardchen/cc-watch/internal/keepalive"
-	"github.com/richardchen/cc-watch/internal/refresh"
-	"github.com/richardchen/cc-watch/internal/session"
+	"github.com/rcverse/cc-watch/internal/keepalive"
+	"github.com/rcverse/cc-watch/internal/refresh"
+	"github.com/rcverse/cc-watch/internal/session"
 )
 
 func TestWatcherEventsDebounceBeforeRefreshSnapshot(t *testing.T) {

@@ -5,7 +5,7 @@ usage() {
   cat <<'USAGE'
 Usage: ./install.sh [--yes] [--dry-run]
 
-Build and install the cc-watch v2 Go binary to:
+Build and install the cc-watch Go binary to:
   $HOME/.local/bin/cc-watch
 
 Options:
@@ -59,7 +59,7 @@ if [ "$BINARY" = "$TARGET" ]; then
   exit 2
 fi
 
-echo "cc-watch v2 local installer"
+echo "cc-watch local installer"
 echo "repo:    $SCRIPT_DIR"
 echo "binary:  $BINARY"
 echo "target:  $TARGET"
@@ -76,7 +76,7 @@ else
 fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
-  echo "dry run: would build and install cc-watch v2"
+  echo "dry run: would build and install cc-watch"
   exit 0
 fi
 

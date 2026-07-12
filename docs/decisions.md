@@ -7,7 +7,7 @@ behavior in one of these areas, read the relevant section first.
 
 ## Module & distribution
 
-- Module path: `github.com/richardchen/cc-watch`.
+- Module path: `github.com/rcverse/cc-watch`.
 - Local binary install (`install.sh`) is the only supported distribution
   path. No Homebrew tap, GitHub Releases, or goreleaser without explicit
   approval first.

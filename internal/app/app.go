@@ -8,14 +8,14 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/richardchen/cc-watch/internal/config"
-	"github.com/richardchen/cc-watch/internal/keepalive"
-	"github.com/richardchen/cc-watch/internal/notify"
-	"github.com/richardchen/cc-watch/internal/refresh"
-	"github.com/richardchen/cc-watch/internal/session"
-	"github.com/richardchen/cc-watch/internal/snapshot"
-	"github.com/richardchen/cc-watch/internal/statusline"
-	"github.com/richardchen/cc-watch/internal/tui"
+	"github.com/rcverse/cc-watch/internal/config"
+	"github.com/rcverse/cc-watch/internal/keepalive"
+	"github.com/rcverse/cc-watch/internal/notify"
+	"github.com/rcverse/cc-watch/internal/refresh"
+	"github.com/rcverse/cc-watch/internal/session"
+	"github.com/rcverse/cc-watch/internal/snapshot"
+	"github.com/rcverse/cc-watch/internal/statusline"
+	"github.com/rcverse/cc-watch/internal/tui"
 )
 
 func Run(args []string, stdout io.Writer, stderr io.Writer) int {

@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/richardchen/cc-watch/internal/ratelimit"
-	"github.com/richardchen/cc-watch/internal/session"
+	"github.com/rcverse/cc-watch/internal/ratelimit"
+	"github.com/rcverse/cc-watch/internal/session"
 )
 
 func statuslinePayloadJSON(usedPct float64, resetsAt time.Time, transcriptPath string) string {
