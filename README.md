@@ -20,8 +20,8 @@ brew install rcverse/cc-watch/cc-watch
 ### Prebuilt download
 
 Download the archive for your Mac from the
-[latest release](https://github.com/rcverse/cc-watch/releases/latest), then
-install it:
+[releases page](https://github.com/rcverse/cc-watch/releases), then install
+it:
 
 ```bash
 mkdir -p "$HOME/.local/bin"
