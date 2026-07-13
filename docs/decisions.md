@@ -104,9 +104,9 @@ while still refusing to send within seconds of expiry.
   a wrapped command may depend on stderr passthrough for its own
   progress/warnings. Only stdout is captured.
 - Exactly one trailing newline is trimmed from the wrapped command's
-  stdout before cc-watch's own segment is appended after ` | `;
-  everything else is handled as raw bytes, never string-normalized (could
-  mangle ANSI sequences the wrapped command emitted).
+  stdout before cc-watch's own segment is appended on the configured same line
+  or new line; everything else is handled as raw bytes, never string-normalized
+  (could mangle ANSI sequences the wrapped command emitted).
 - On a non-clean wrapped-command exit (nonzero, spawn error, or timeout),
   cc-watch relays whatever partial stdout it produced and appends
   **nothing** — never risk turning a truncated line into a garbled
@@ -123,8 +123,15 @@ while still refusing to send within seconds of expiry.
 - The config TUI may install or uninstall the Claude Code statusLine
   setting in `~/.claude/settings.json`. It only writes for unambiguous
   states, preserves existing non-statusLine settings, writes a timestamped
-  backup first, and refuses unclear commands with manual-review copy.
+  backup first, and refuses unclear commands with manual-review copy. The
+  installed command uses the current cc-watch executable path so Claude Code
+  does not need to inherit the user's shell `PATH`; reinstall repairs an older
+  path-dependent wrapper.
   `cc-watch statusline --check` remains read-only.
+- The cc-watch config stores only statusline display preferences: `layout`
+  (`same_line` or `new_line`) and `format` (`full` or `compact`). Install state
+  remains derived from Claude Code's settings, and CLI flags override these
+  preferences for one invocation.
 - Both Claude Code account windows matter for KeepAlive availability. The
   statusline displays both `five_hour` and `seven_day` when Claude provides
   them, and `KeepAlive at risk` means at least one account window may run

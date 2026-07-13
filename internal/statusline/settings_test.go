@@ -20,7 +20,7 @@ func TestInspectMissingSettingsIsNotInstalled(t *testing.T) {
 func TestInstallMissingSettingsAddsBareCommand(t *testing.T) {
 	home := t.TempDir()
 
-	if err := Install(home); err != nil {
+	if err := Install(home, "cc-watch"); err != nil {
 		t.Fatalf("Install returned error: %v", err)
 	}
 	settings := readSettingsFile(t, home)
@@ -29,11 +29,51 @@ func TestInstallMissingSettingsAddsBareCommand(t *testing.T) {
 	}
 }
 
+func TestInstallUsesProvidedBinaryPath(t *testing.T) {
+	home := t.TempDir()
+
+	if err := Install(home, "/Users/example/.local/bin/cc-watch"); err != nil {
+		t.Fatalf("Install returned error: %v", err)
+	}
+	settings := readSettingsFile(t, home)
+	if !strings.Contains(settings, `"command": "/Users/example/.local/bin/cc-watch statusline"`) {
+		t.Fatalf("settings = %s, want command to use the provided executable path", settings)
+	}
+}
+
+func TestInstallRepairsAnExistingWrapperWithAStaleBinaryPath(t *testing.T) {
+	home := t.TempDir()
+	writeSettingsFile(t, home, `{"statusLine":{"type":"command","command":"cc-watch statusline -- ccstatusline"}}`)
+
+	if err := Install(home, "/Users/example/.local/bin/cc-watch"); err != nil {
+		t.Fatalf("Install returned error: %v", err)
+	}
+	settings := readSettingsFile(t, home)
+	if !strings.Contains(settings, `"command": "/Users/example/.local/bin/cc-watch statusline -- ccstatusline"`) {
+		t.Fatalf("settings = %s, want existing wrapper repaired with the provided path", settings)
+	}
+}
+
+func TestUsesRuntimeCommandRecognizesBareAndWrappedCommands(t *testing.T) {
+	binary := "/Users/example/.local/bin/cc-watch"
+	for _, command := range []string{
+		"/Users/example/.local/bin/cc-watch statusline",
+		"/Users/example/.local/bin/cc-watch statusline -- ccstatusline",
+	} {
+		if !UsesRuntimeCommand(command, binary) {
+			t.Fatalf("UsesRuntimeCommand(%q, %q) = false, want true", command, binary)
+		}
+	}
+	if UsesRuntimeCommand("cc-watch statusline", binary) {
+		t.Fatal("UsesRuntimeCommand accepted a path-dependent command, want repair")
+	}
+}
+
 func TestInstallExistingCommandPreservesItBehindCcWatch(t *testing.T) {
 	home := t.TempDir()
 	writeSettingsFile(t, home, `{"theme":"dark","statusLine":{"type":"command","command":"~/.claude/statusline.sh"}}`)
 
-	if err := Install(home); err != nil {
+	if err := Install(home, "cc-watch"); err != nil {
 		t.Fatalf("Install returned error: %v", err)
 	}
 	settings := readSettingsFile(t, home)
@@ -52,7 +92,7 @@ func TestInstallExistingCommandPreservesStatuslineOptions(t *testing.T) {
 	home := t.TempDir()
 	writeSettingsFile(t, home, `{"statusLine":{"type":"command","command":"~/.claude/statusline.sh","padding":2,"refreshInterval":5,"hideVimModeIndicator":true}}`)
 
-	if err := Install(home); err != nil {
+	if err := Install(home, "cc-watch"); err != nil {
 		t.Fatalf("Install returned error: %v", err)
 	}
 	settings := readSettingsFile(t, home)
@@ -67,7 +107,7 @@ func TestInstallExistingShellCommandKeepsShellSemantics(t *testing.T) {
 	home := t.TempDir()
 	writeSettingsFile(t, home, `{"statusLine":{"type":"command","command":"echo 'hi' | sed s/i/o/"}}`)
 
-	if err := Install(home); err != nil {
+	if err := Install(home, "cc-watch"); err != nil {
 		t.Fatalf("Install returned error: %v", err)
 	}
 

@@ -10,10 +10,7 @@ import (
 	"time"
 )
 
-const (
-	commandBare = "cc-watch statusline"
-	wrapMarker  = " statusline -- "
-)
+const wrapMarker = " statusline -- "
 
 type State string
 
@@ -39,7 +36,7 @@ func Inspect(home string) (Status, error) {
 	return inspectCommand(current), nil
 }
 
-func Install(home string) error {
+func Install(home, binaryPath string) error {
 	settings, exists, err := readSettings(home)
 	if err != nil {
 		return err
@@ -47,20 +44,47 @@ func Install(home string) error {
 	status := inspectCommand(statuslineCommand(settings))
 	switch status.State {
 	case StateInstalled:
-		return nil
+		if UsesRuntimeCommand(status.Command, binaryPath) {
+			return nil
+		}
+		desired := RuntimeCommand(binaryPath)
+		command := desired
+		if status.PreviousCommand != "" {
+			command = desired + " -- " + status.PreviousCommand
+			if NeedsShell(status.PreviousCommand) {
+				command = desired + " -- sh -c " + ShellQuote(status.PreviousCommand)
+			}
+		}
+		setStatuslineCommand(settings, command)
+		return writeSettings(home, settings, exists)
 	case StateManualReview:
 		return errors.New("statusline settings need manual review")
 	}
 
-	command := commandBare
+	commandPrefix := RuntimeCommand(binaryPath)
+	command := commandPrefix
 	if status.State == StateExisting {
-		command = commandBare + " -- " + status.Command
+		command = commandPrefix + " -- " + status.Command
 		if NeedsShell(status.Command) {
-			command = commandBare + " -- sh -c " + ShellQuote(status.Command)
+			command = commandPrefix + " -- sh -c " + ShellQuote(status.Command)
 		}
 	}
 	setStatuslineCommand(settings, command)
 	return writeSettings(home, settings, exists)
+}
+
+func RuntimeCommand(binaryPath string) string {
+	binaryPath = strings.TrimSpace(binaryPath)
+	if binaryPath == "" {
+		binaryPath = "cc-watch"
+	}
+	return binaryPath + " statusline"
+}
+
+func UsesRuntimeCommand(command, binaryPath string) bool {
+	current := strings.TrimSpace(command)
+	prefix := RuntimeCommand(binaryPath)
+	return current == prefix || strings.HasPrefix(current, prefix+" -- ")
 }
 
 func Uninstall(home string) error {

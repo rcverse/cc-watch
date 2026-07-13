@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
+
+	"github.com/rcverse/cc-watch/internal/config"
 )
 
 type Mode string
@@ -21,14 +24,16 @@ const (
 	ModeStatuslineHelp Mode = "statusline_help"
 )
 
-const statuslineUsageError = "statusline: invalid arguments, expected one of: `cc-watch statusline`, `cc-watch statusline -- <command>`, `cc-watch statusline --check`, `cc-watch statusline --help`"
+const statuslineUsageError = "statusline: invalid arguments, expected layout/format flags, `-- <command>`, `--check`, or `--help`"
 
 type Command struct {
-	Mode           Mode
-	Limit          int
-	ID             string
-	WrappedCommand []string
-	CheckConfig    bool
+	Mode             Mode
+	Limit            int
+	ID               string
+	WrappedCommand   []string
+	CheckConfig      bool
+	StatuslineLayout string
+	StatuslineFormat string
 }
 
 func ParseArgs(args []string) (Command, error) {
@@ -63,15 +68,35 @@ func ParseArgs(args []string) (Command, error) {
 			}
 			cmd.Mode = ModeStatuslineHelp
 			return cmd, nil
-		case rest[0] == "--":
-			if len(rest) < 2 {
-				return cmd, fmt.Errorf("statusline: no command given after --")
+		}
+		separator := len(rest)
+		for i, arg := range rest {
+			if arg == "--" {
+				separator = i
+				break
 			}
-			cmd.WrappedCommand = append([]string(nil), rest[1:]...)
-			return cmd, nil
-		default:
+		}
+		fs := flag.NewFlagSet("statusline", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		fs.StringVar(&cmd.StatuslineLayout, "layout", "", "same-line or new-line")
+		fs.StringVar(&cmd.StatuslineFormat, "format", "", "full or compact")
+		if err := fs.Parse(rest[:separator]); err != nil {
 			return cmd, errors.New(statuslineUsageError)
 		}
+		if fs.NArg() > 0 {
+			return cmd, errors.New(statuslineUsageError)
+		}
+		cmd.StatuslineLayout = strings.ReplaceAll(cmd.StatuslineLayout, "-", "_")
+		if !validStatuslineLayout(cmd.StatuslineLayout) || !validStatuslineFormat(cmd.StatuslineFormat) {
+			return cmd, errors.New(statuslineUsageError)
+		}
+		if separator < len(rest) {
+			if separator == len(rest)-1 {
+				return cmd, fmt.Errorf("statusline: no command given after --")
+			}
+			cmd.WrappedCommand = append([]string(nil), rest[separator+1:]...)
+		}
+		return cmd, nil
 	}
 
 	fs := flag.NewFlagSet("cc-watch", flag.ContinueOnError)
@@ -109,11 +134,20 @@ func ParseArgs(args []string) (Command, error) {
 	return cmd, nil
 }
 
+func validStatuslineLayout(value string) bool {
+	return value == "" || value == config.StatuslineLayoutSameLine || value == config.StatuslineLayoutNewLine
+}
+
+func validStatuslineFormat(value string) bool {
+	return value == "" || value == config.StatuslineFormatFull || value == config.StatuslineFormatCompact
+}
+
 func WriteHelp(w io.Writer) {
 	fmt.Fprint(w, `Usage:
   cc-watch [--n N] [--id <partial-id>]
   cc-watch config
   cc-watch statusline
+  cc-watch statusline --layout=new-line --format=compact
   cc-watch statusline -- <command> [args...]
   cc-watch statusline --check
   cc-watch statusline --help
@@ -154,8 +188,15 @@ Modes:
       Read Claude Code statusline JSON from stdin and print cc-watch's segment,
       for example: ⏱ 34% (5h) / 41% (7d) used.
 
+  --layout=same-line|new-line
+      Override where cc-watch appends its segment.
+
+  --format=full|compact
+      Override the cc-watch segment format. Compact looks like: 95%/91% · ⚠ KA.
+
   cc-watch statusline -- <command> [args...]
-      Run an existing statusline command, then append cc-watch after " | ".
+      Run an existing statusline command, then append cc-watch using the
+      configured layout.
 
   cc-watch statusline --check
       Read ~/.claude/settings.json and print install/uninstall guidance.

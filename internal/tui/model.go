@@ -17,10 +17,11 @@ import (
 type Route string
 
 const (
-	RouteList      Route = "list"
-	RouteWorkspace Route = "workspace"
-	RouteAmbiguous Route = "ambiguous"
-	RouteConfig    Route = "config"
+	RouteList       Route = "list"
+	RouteWorkspace  Route = "workspace"
+	RouteAmbiguous  Route = "ambiguous"
+	RouteConfig     Route = "config"
+	RouteStatusline Route = "statusline"
 )
 
 type StartMode string
@@ -56,6 +57,7 @@ type Dependencies struct {
 	InspectStatusline            func() (statusline.Status, error)
 	InstallStatusline            func() error
 	UninstallStatusline          func() error
+	StatuslineCommand            string
 	NotifyEvent                  func(event notify.Event) notify.Result
 	ResetNotificationSuppression func()
 }
@@ -110,44 +112,47 @@ type Options struct {
 }
 
 type Model struct {
-	now                  time.Time
-	width                int
-	height               int
-	deps                 Dependencies
-	route                Route
-	sessions             []session.Session
-	countdowns           map[string]int
-	reminderEnabled      map[string]bool
-	reminderThresholds   []int
-	reminderFired        map[string]map[int]bool
-	keepAliveConfig      config.KeepAliveConfig
-	keepAliveManager     *keepalive.Manager
-	refreshGeneration    int
-	refreshCoordinator   *refresh.Coordinator
-	refreshTiming        RefreshTiming
-	refreshDebounceToken int
-	liveRefresh          tea.Cmd
-	lastNotification     *NotificationStatus
-	focusIndex           int
-	selectedIndex        int
-	selectedID           string
-	ambiguousID          string
-	notice               Notice
-	refresh              RefreshViewState
-	detailsOffset        int
-	sessionInfoExpanded  bool
-	gapSortNewest        bool
-	startDisplayTicker   bool
-	startRefreshTicker   bool
-	configReturnRoute    Route
-	configOriginal       config.Config
-	configDraft          config.Config
-	configEditing        bool
-	configEditingField   string
-	configInput          string
-	configInputFresh     bool
-	configFieldErrors    map[string]string
-	configResetConfirm   bool
+	now                     time.Time
+	width                   int
+	height                  int
+	deps                    Dependencies
+	route                   Route
+	sessions                []session.Session
+	countdowns              map[string]int
+	reminderEnabled         map[string]bool
+	reminderThresholds      []int
+	reminderFired           map[string]map[int]bool
+	keepAliveConfig         config.KeepAliveConfig
+	keepAliveManager        *keepalive.Manager
+	refreshGeneration       int
+	refreshCoordinator      *refresh.Coordinator
+	refreshTiming           RefreshTiming
+	refreshDebounceToken    int
+	liveRefresh             tea.Cmd
+	lastNotification        *NotificationStatus
+	focusIndex              int
+	selectedIndex           int
+	selectedID              string
+	ambiguousID             string
+	notice                  Notice
+	refresh                 RefreshViewState
+	detailsOffset           int
+	sessionInfoExpanded     bool
+	gapSortNewest           bool
+	startDisplayTicker      bool
+	startRefreshTicker      bool
+	configReturnRoute       Route
+	configOriginal          config.Config
+	configDraft             config.Config
+	configEditing           bool
+	configEditingField      string
+	configInput             string
+	configInputFresh        bool
+	configChoiceField       string
+	configChoiceIndex       int
+	configFieldErrors       map[string]string
+	configResetConfirm      bool
+	configStatuslineConfirm bool
 }
 
 type focusItem struct {
@@ -199,6 +204,9 @@ func NewModel(options Options) Model {
 		deps.InspectStatusline = func() (statusline.Status, error) {
 			return statusline.Status{State: statusline.StateNotInstalled}, nil
 		}
+	}
+	if deps.StatuslineCommand == "" {
+		deps.StatuslineCommand = "cc-watch"
 	}
 	model := Model{
 		width:              width,
@@ -326,6 +334,12 @@ func normalizeConfig(cfg config.Config) config.Config {
 		cfg.ReminderThresholds = append([]int(nil), cfg.ReminderThresholds...)
 	}
 	cfg.KeepAlive = normalizeKeepAliveConfig(cfg.KeepAlive)
+	if cfg.Statusline.Layout == "" {
+		cfg.Statusline.Layout = defaults.Statusline.Layout
+	}
+	if cfg.Statusline.Format == "" {
+		cfg.Statusline.Format = defaults.Statusline.Format
+	}
 	return cfg
 }
 

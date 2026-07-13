@@ -228,14 +228,23 @@ func tuiDependencies(cmd Command, deps Dependencies, home string) tui.Dependenci
 			return statusline.Inspect(home)
 		},
 		InstallStatusline: func() error {
-			return statusline.Install(home)
+			return statusline.Install(home, ccWatchCommand())
 		},
 		UninstallStatusline: func() error {
 			return statusline.Uninstall(home)
 		},
+		StatuslineCommand:            ccWatchCommand(),
 		NotifyEvent:                  notifyEvent,
 		ResetNotificationSuppression: resetNotificationSuppression,
 	}
+}
+
+func ccWatchCommand() string {
+	executable, err := os.Executable()
+	if err == nil && filepath.Base(executable) == "cc-watch" {
+		return executable
+	}
+	return "cc-watch"
 }
 
 func fillDependencies(deps Dependencies) Dependencies {

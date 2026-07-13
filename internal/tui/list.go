@@ -419,6 +419,8 @@ func (m Model) focusItems() []focusItem {
 		return focusItemsFromActions(m.workspaceFocusActions())
 	case RouteConfig:
 		return focusItemsFromActions(configFocusActions)
+	case RouteStatusline:
+		return focusItemsFromActions(statuslineFocusActions)
 	case RouteList, RouteAmbiguous:
 		if m.isEmptyListState() {
 			return focusItemsFromActions(emptyFocusActions)

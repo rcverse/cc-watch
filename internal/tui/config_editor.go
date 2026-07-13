@@ -17,10 +17,18 @@ var configFocusActions = []string{
 	"config_countdown",
 	"config_message",
 	"config_max_sends",
-	"config_statusline_action",
+	"config_statusline",
 	"config_save",
 	"config_reset",
 	"config_cancel",
+}
+
+var statuslineFocusActions = []string{
+	"config_statusline_layout",
+	"config_statusline_format",
+	"config_statusline_action",
+	"config_save",
+	"config_statusline_back",
 }
 
 func (m Model) configView() string {
@@ -54,16 +62,9 @@ func (m Model) configView() string {
 	if message := m.configFieldError("config_max_sends"); message != "" {
 		fmt.Fprintf(&settings, "    %s\n", styles.Render(RoleDanger, "Error: "+message))
 	}
+	state, detail, _, _ := m.statuslineConfigCopy()
+	fmt.Fprintf(&settings, "%s\n", m.configRow("config_statusline", "Statusline", state, detail))
 	b.WriteString(m.renderConfigPanel("Settings", settings.String()))
-
-	var statuslinePanel strings.Builder
-	state, detail, action := m.statuslineConfigCopy()
-	fmt.Fprintf(&statuslinePanel, "  %-20s %s\n", "State", state)
-	if detail != "" {
-		fmt.Fprintf(&statuslinePanel, "  %-20s %s\n", "", styles.Render(RoleMuted, detail))
-	}
-	fmt.Fprintf(&statuslinePanel, "%s\n", m.configRow("config_statusline_action", "Action", "", action))
-	b.WriteString(m.renderConfigPanel("Statusline", statuslinePanel.String()))
 
 	if m.configEditing {
 		var edit strings.Builder
@@ -102,6 +103,76 @@ func (m Model) configView() string {
 	return b.String()
 }
 
+func (m Model) statuslineView() string {
+	var b strings.Builder
+	styles := DefaultStyles()
+	b.WriteString("\n")
+	b.WriteString(styles.Render(RoleIdentity, "Claude Code Watch / statusline"))
+	b.WriteString("\n")
+	b.WriteString(styles.Render(RoleSeparator, strings.Repeat("─", 46)))
+	b.WriteString("\n")
+
+	state, detail, actionLabel, actionDetail := m.statuslineConfigCopy()
+	var statuslinePanel strings.Builder
+	fmt.Fprintf(&statuslinePanel, "  %s\n", styles.Render(RoleMuted, "Status"))
+	fmt.Fprintf(&statuslinePanel, "    %s\n", styles.Render(statuslineStateRole(state), "● "+state))
+	fmt.Fprintf(&statuslinePanel, "      %s\n", styles.Render(RoleMuted, detail))
+	fmt.Fprintf(&statuslinePanel, "%s\n", m.configRow("config_statusline_layout", "Layout", statuslineLayoutLabel(m.configDraft.Statusline.Layout), "how the segment is placed"))
+	if message := m.configFieldError("config_statusline_layout"); message != "" {
+		fmt.Fprintf(&statuslinePanel, "    %s\n", styles.Render(RoleDanger, "Error: "+message))
+	}
+	fmt.Fprintf(&statuslinePanel, "%s\n", m.configRow("config_statusline_format", "Format", statuslineFormatLabel(m.configDraft.Statusline.Format), "full details or compact"))
+	if message := m.configFieldError("config_statusline_format"); message != "" {
+		fmt.Fprintf(&statuslinePanel, "    %s\n", styles.Render(RoleDanger, "Error: "+message))
+	}
+	fmt.Fprintf(&statuslinePanel, "%s\n", m.configRow("config_statusline_action", actionLabel, "", actionDetail))
+	if m.configStatuslineConfirm {
+		fmt.Fprintf(&statuslinePanel, "    %s\n", styles.Render(RoleWarning, "Press Enter again to "+strings.ToLower(actionLabel)+"; Esc cancels"))
+	}
+	b.WriteString(m.renderConfigPanel("Statusline", statuslinePanel.String()))
+	if m.configChoiceField != "" {
+		b.WriteString(m.renderConfigPanel("Choose "+configFieldLabel(m.configChoiceField), m.statuslineChoiceView()))
+	}
+
+	if m.configEditing {
+		var edit strings.Builder
+		fmt.Fprintf(&edit, "%s %s\n", styles.Render(RoleInfo, configFieldLabel(m.configEditingField)), styles.Render(RoleMuted, "is active"))
+		fmt.Fprintf(&edit, "%s  %s%s\n", styles.Render(RoleMuted, "Current input"), m.configInput, styles.Render(RoleIdentity, "▌"))
+		fmt.Fprintf(&edit, "%s\n", styles.Render(RoleMuted, "↵ save field  ⎋ cancel edit"))
+		b.WriteString(m.renderConfigPanel("Editing", edit.String()))
+	}
+
+	var actions strings.Builder
+	fmt.Fprintf(&actions, "%s\n", m.configRow("config_save", "Save", "", "write config"))
+	fmt.Fprintf(&actions, "%s\n", m.configRow("config_statusline_back", "Back", "", "return to Settings"))
+	b.WriteString(m.renderConfigPanel("Actions", actions.String()))
+	if m.notice.Message != "" {
+		b.WriteString(m.renderConfigPanel("Notice", styles.Render(m.notice.Role, m.notice.Message)))
+	}
+	cue := "↑↓ move  ↵ edit  s save  ⎋ back"
+	if m.configChoiceField != "" {
+		cue = "↑↓ choose  ↵ select  ⎋ cancel"
+	}
+	b.WriteString(cueLine(cue))
+	return b.String()
+}
+
+func (m Model) statuslineChoiceView() string {
+	styles := DefaultStyles()
+	values := statuslineChoiceValues(m.configChoiceField)
+	var b strings.Builder
+	for index, value := range values {
+		marker := " "
+		role := RoleMuted
+		if index == m.configChoiceIndex {
+			marker = styles.Render(RoleIdentity, "›")
+			role = RoleIdentity
+		}
+		fmt.Fprintf(&b, "  %s %s\n", marker, styles.Render(role, statuslineChoiceLabel(m.configChoiceField, value)))
+	}
+	return b.String()
+}
+
 func (m Model) configRow(action string, label string, value string, detail string) string {
 	styles := DefaultStyles()
 	marker := " "
@@ -125,33 +196,85 @@ func (m Model) renderConfigPanel(title string, body string) string {
 	return RenderPanelWidth(DefaultStyles().Render(RoleIdentity, title), truncateBodyLines(body, width), width)
 }
 
-func (m Model) statuslineConfigCopy() (state string, detail string, action string) {
+func (m Model) statuslineConfigCopy() (state string, detail string, actionLabel string, actionDetail string) {
 	status, err := m.deps.InspectStatusline()
 	if err != nil {
-		return "Needs manual review", "Run cc-watch statusline --check", "Show instructions"
+		return "Needs manual review", "Run cc-watch statusline --check", "Review", "show manual instructions"
 	}
 	switch status.State {
 	case statusline.StateInstalled:
-		return "Installed in Claude Code", "shows 5h/7d usage and KeepAlive risk", "Uninstall from Claude Code"
-	case statusline.StateExisting:
-		if status.Command != "" {
-			return "Existing Claude statusline found", "existing command: " + status.Command, "Install in Claude Code"
+		if m.statuslineNeedsReinstall(status) {
+			return "Needs reinstall", "current command path may be stale or unavailable", "Reinstall", "repair cc-watch integration"
 		}
-		return "Existing Claude statusline found", "installing keeps it and adds cc-watch", "Install in Claude Code"
+		return "Installed", "appears after Claude Code's next message", "Uninstall", "remove cc-watch integration"
+	case statusline.StateExisting:
+		return "Not installed", "Claude Code statusline is not using cc-watch", "Install", "keep the current statusline and add cc-watch"
 	case statusline.StateManualReview:
-		return "Needs manual review", "Run cc-watch statusline --check", "Show instructions"
+		return "Needs manual review", "Run cc-watch statusline --check", "Review", "show manual instructions"
 	default:
-		return "Not installed", "Claude Code is not showing cc-watch usage", "Install in Claude Code"
+		return "Not installed", "Claude Code statusline is not using cc-watch", "Install", "add cc-watch integration"
 	}
+}
+
+func statuslineStateRole(state string) StyleRole {
+	switch state {
+	case "Not installed":
+		return RoleIdentity
+	case "Installed":
+		return RoleSuccess
+	case "Needs reinstall":
+		return RoleWarning
+	default:
+		return RoleDegraded
+	}
+}
+
+func statuslineChoiceValues(field string) []string {
+	switch field {
+	case "config_statusline_layout":
+		return []string{config.StatuslineLayoutSameLine, config.StatuslineLayoutNewLine}
+	case "config_statusline_format":
+		return []string{config.StatuslineFormatFull, config.StatuslineFormatCompact}
+	default:
+		return nil
+	}
+}
+
+func statuslineChoiceLabel(field, value string) string {
+	if field == "config_statusline_layout" {
+		return statuslineLayoutLabel(value)
+	}
+	return statuslineFormatLabel(value)
+}
+
+func statuslineLayoutLabel(value string) string {
+	if value == config.StatuslineLayoutNewLine {
+		return "New line"
+	}
+	return "Same line"
+}
+
+func statuslineFormatLabel(value string) string {
+	if value == config.StatuslineFormatCompact {
+		return "Compact"
+	}
+	return "Full"
 }
 
 func (m Model) activateStatuslineConfigAction() (tea.Model, tea.Cmd) {
 	status, err := m.deps.InspectStatusline()
 	if err != nil || status.State == statusline.StateManualReview {
+		m.configStatuslineConfirm = false
 		m.setNotice("Run cc-watch statusline --check for manual instructions", RoleWarning, 5*time.Second)
 		return m, nil
 	}
-	if status.State == statusline.StateInstalled {
+	if !m.configStatuslineConfirm {
+		m.configStatuslineConfirm = true
+		return m, nil
+	}
+	reinstall := m.statuslineNeedsReinstall(status)
+	m.configStatuslineConfirm = false
+	if status.State == statusline.StateInstalled && !reinstall {
 		if err := m.deps.UninstallStatusline(); err != nil {
 			m.setNotice("✕ Could not uninstall statusline", RoleDanger, 3*time.Second)
 			return m, nil
@@ -163,8 +286,16 @@ func (m Model) activateStatuslineConfigAction() (tea.Model, tea.Cmd) {
 		m.setNotice("✕ Could not install statusline", RoleDanger, 3*time.Second)
 		return m, nil
 	}
-	m.setNotice("✓ Statusline installed in Claude Code", RoleSuccess, 3*time.Second)
+	if reinstall {
+		m.setNotice("✓ Statusline command repaired", RoleSuccess, 3*time.Second)
+	} else {
+		m.setNotice("✓ Statusline installed in Claude Code", RoleSuccess, 3*time.Second)
+	}
 	return m, nil
+}
+
+func (m Model) statuslineNeedsReinstall(status statusline.Status) bool {
+	return status.State == statusline.StateInstalled && !statusline.UsesRuntimeCommand(status.Command, m.deps.StatuslineCommand)
 }
 
 func (m Model) configPanelBodyWidth() int {
@@ -216,10 +347,60 @@ func (m Model) updateConfigEditing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *Model) startConfigEdit(field string) {
 	m.configEditing = true
 	m.configEditingField = field
+	m.configChoiceField = ""
+	m.configChoiceIndex = 0
 	m.configResetConfirm = false
+	m.configStatuslineConfirm = false
 	m.configInput = m.configFieldValue(field)
 	m.configInputFresh = true
 	m.clearConfigFieldError(field)
+}
+
+func (m *Model) startConfigChoice(field string) {
+	values := statuslineChoiceValues(field)
+	m.configChoiceField = field
+	m.configChoiceIndex = 0
+	for index, value := range values {
+		if value == m.configFieldValue(field) {
+			m.configChoiceIndex = index
+			break
+		}
+	}
+	m.configEditing = false
+	m.configEditingField = ""
+	m.configInput = ""
+	m.configInputFresh = false
+	m.configResetConfirm = false
+	m.configStatuslineConfirm = false
+	m.clearConfigFieldError(field)
+}
+
+func (m Model) updateConfigChoice(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	values := statuslineChoiceValues(m.configChoiceField)
+	if len(values) == 0 {
+		m.configChoiceField = ""
+		m.configChoiceIndex = 0
+		return m, nil
+	}
+	switch msg.String() {
+	case "up", "left":
+		m.configChoiceIndex = (m.configChoiceIndex + len(values) - 1) % len(values)
+	case "down", "right":
+		m.configChoiceIndex = (m.configChoiceIndex + 1) % len(values)
+	case "enter":
+		if m.configChoiceField == "config_statusline_layout" {
+			m.configDraft.Statusline.Layout = values[m.configChoiceIndex]
+		} else {
+			m.configDraft.Statusline.Format = values[m.configChoiceIndex]
+		}
+		m.clearConfigFieldError(m.configChoiceField)
+		m.configChoiceField = ""
+		m.configChoiceIndex = 0
+	case "esc":
+		m.configChoiceField = ""
+		m.configChoiceIndex = 0
+	}
+	return m, nil
 }
 
 func (m Model) configFieldValue(field string) string {
@@ -234,6 +415,10 @@ func (m Model) configFieldValue(field string) string {
 		return m.configDraft.KeepAlive.Message
 	case "config_max_sends":
 		return strconv.Itoa(m.configDraft.KeepAlive.Scope.MaxSends)
+	case "config_statusline_layout":
+		return m.configDraft.Statusline.Layout
+	case "config_statusline_format":
+		return m.configDraft.Statusline.Format
 	default:
 		return ""
 	}
@@ -251,6 +436,10 @@ func configFieldLabel(field string) string {
 		return "Message"
 	case "config_max_sends":
 		return "Max sends"
+	case "config_statusline_layout":
+		return "Layout"
+	case "config_statusline_format":
+		return "Format"
 	default:
 		return field
 	}
@@ -298,6 +487,20 @@ func (m *Model) commitConfigInput() {
 			m.configDraft.KeepAlive.Scope.MaxSends = value
 			m.clearConfigFieldError("config_max_sends")
 		}
+	case "config_statusline_layout":
+		if input != config.StatuslineLayoutSameLine && input != config.StatuslineLayoutNewLine {
+			m.setConfigFieldError("config_statusline_layout", "layout must be same_line or new_line.")
+		} else {
+			m.configDraft.Statusline.Layout = input
+			m.clearConfigFieldError("config_statusline_layout")
+		}
+	case "config_statusline_format":
+		if input != config.StatuslineFormatFull && input != config.StatuslineFormatCompact {
+			m.setConfigFieldError("config_statusline_format", "format must be full or compact.")
+		} else {
+			m.configDraft.Statusline.Format = input
+			m.clearConfigFieldError("config_statusline_format")
+		}
 	}
 	m.configEditing = false
 	m.configEditingField = ""
@@ -307,6 +510,7 @@ func (m *Model) commitConfigInput() {
 }
 
 func (m Model) saveConfig() (tea.Model, tea.Cmd) {
+	m.configStatuslineConfirm = false
 	if err := m.configEditorValidation(); err != nil {
 		m.setNotice("✕ Cannot save", RoleDanger, 3*time.Second)
 		return m, nil
@@ -324,6 +528,7 @@ func (m Model) saveConfig() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) resetConfigDefaults() (tea.Model, tea.Cmd) {
+	m.configStatuslineConfirm = false
 	if !m.configResetConfirm {
 		m.configResetConfirm = true
 		return m, nil
@@ -343,6 +548,8 @@ func (m Model) resetConfigDefaults() (tea.Model, tea.Cmd) {
 	m.configEditingField = ""
 	m.configInput = ""
 	m.configInputFresh = false
+	m.configChoiceField = ""
+	m.configChoiceIndex = 0
 	m.setNotice("✓ Saved", RoleSuccess, 3*time.Second)
 	return m, nil
 }
@@ -353,8 +560,11 @@ func (m Model) cancelConfig() (tea.Model, tea.Cmd) {
 	m.configEditingField = ""
 	m.configInput = ""
 	m.configInputFresh = false
+	m.configChoiceField = ""
+	m.configChoiceIndex = 0
 	m.configFieldErrors = map[string]string{}
 	m.configResetConfirm = false
+	m.configStatuslineConfirm = false
 	if m.configReturnRoute != "" {
 		m.route = m.configReturnRoute
 		m.configReturnRoute = ""
@@ -455,6 +665,14 @@ func (m Model) configFieldError(field string) string {
 	case "config_max_sends":
 		if cfg.KeepAlive.Scope.MaxSends <= 0 {
 			return "max sends must be positive."
+		}
+	case "config_statusline_layout":
+		if cfg.Statusline.Layout != config.StatuslineLayoutSameLine && cfg.Statusline.Layout != config.StatuslineLayoutNewLine {
+			return "layout must be same_line or new_line."
+		}
+	case "config_statusline_format":
+		if cfg.Statusline.Format != config.StatuslineFormatFull && cfg.Statusline.Format != config.StatuslineFormatCompact {
+			return "format must be full or compact."
 		}
 	}
 	return ""

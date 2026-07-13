@@ -14,6 +14,8 @@ func (m Model) activateFocusedAction(action string) (tea.Model, tea.Cmd) {
 		return m.activateWorkspaceAction(action)
 	case RouteConfig:
 		return m.activateConfigAction(action)
+	case RouteStatusline:
+		return m.activateStatuslineAction(action)
 	default:
 		return m.activateSharedAction(action)
 	}
@@ -72,14 +74,36 @@ func (m Model) activateConfigAction(action string) (tea.Model, tea.Cmd) {
 	case "config_reminder_thresholds", "config_trigger", "config_countdown", "config_message", "config_max_sends":
 		m.startConfigEdit(action)
 		return m, nil
-	case "config_statusline_action":
-		return m.activateStatuslineConfigAction()
+	case "config_statusline":
+		m.route = RouteStatusline
+		m.configStatuslineConfirm = false
+		m.focusIndex = m.defaultFocusIndex()
+		return m, nil
 	case "config_save":
 		return m.saveConfig()
 	case "config_reset":
 		return m.resetConfigDefaults()
 	case "config_cancel":
 		return m.cancelConfig()
+	default:
+		return m.activateSharedAction(action)
+	}
+}
+
+func (m Model) activateStatuslineAction(action string) (tea.Model, tea.Cmd) {
+	switch action {
+	case "config_statusline_layout", "config_statusline_format":
+		m.startConfigChoice(action)
+		return m, nil
+	case "config_statusline_action":
+		return m.activateStatuslineConfigAction()
+	case "config_save":
+		return m.saveConfig()
+	case "config_statusline_back":
+		m.route = RouteConfig
+		m.configStatuslineConfirm = false
+		m.focusIndex = m.defaultFocusIndex()
+		return m, nil
 	default:
 		return m.activateSharedAction(action)
 	}

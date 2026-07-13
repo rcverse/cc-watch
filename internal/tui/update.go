@@ -289,7 +289,10 @@ func mergeSelectedRefresh(existing []session.Session, refreshed []session.Sessio
 }
 
 func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.route == RouteConfig && m.configEditing {
+	if m.configChoiceField != "" {
+		return m.updateConfigChoice(msg)
+	}
+	if (m.route == RouteConfig || m.route == RouteStatusline) && m.configEditing {
 		return m.updateConfigEditing(msg)
 	}
 	switch msg.String() {
@@ -314,6 +317,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if m.route == RouteConfig || m.route == RouteStatusline {
+			m.configStatuslineConfirm = false
+		}
 		m.moveFocus(1)
 		return m, nil
 	case "up":
@@ -322,6 +328,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.detailsOffset--
 			}
 			return m, nil
+		}
+		if m.route == RouteConfig || m.route == RouteStatusline {
+			m.configStatuslineConfirm = false
 		}
 		m.moveFocus(-1)
 		return m, nil
@@ -368,13 +377,17 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.route = RouteList
 		} else if m.route == RouteAmbiguous {
 			m.route = RouteList
+		} else if m.route == RouteStatusline {
+			m.route = RouteConfig
+			m.configStatuslineConfirm = false
+			m.focusIndex = m.defaultFocusIndex()
 		} else if m.route == RouteConfig {
 			return m.cancelConfig()
 		}
 		return m, nil
 	case "s":
 		switch {
-		case m.route == RouteConfig:
+		case m.route == RouteConfig || m.route == RouteStatusline:
 			return m.saveConfig()
 		case m.route == RouteWorkspace && m.sessionInfoExpanded:
 			m.gapSortNewest = !m.gapSortNewest
@@ -389,7 +402,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "d":
-		if m.route == RouteConfig {
+		if m.route == RouteConfig || m.route == RouteStatusline {
 			return m.resetConfigDefaults()
 		}
 		return m, nil

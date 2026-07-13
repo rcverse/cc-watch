@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rcverse/cc-watch/internal/config"
 	"github.com/rcverse/cc-watch/internal/ratelimit"
 	"github.com/rcverse/cc-watch/internal/session"
 )
@@ -231,6 +232,46 @@ func TestRunStatuslineWrappedCommandSuccessTrimsNewlineAndAppendsSuffix(t *testi
 	}
 	if stderr.String() != "warn: from wrapped\n" {
 		t.Fatalf("stderr = %q, want wrapped command's stderr relayed verbatim", stderr.String())
+	}
+}
+
+func TestRunStatuslineUsesSavedLayoutAndCompactFormat(t *testing.T) {
+	deps := fakeDeps(t)
+	home := t.TempDir()
+	deps.HomeDir = func() (string, error) { return home, nil }
+	cfg := config.Default()
+	cfg.Statusline.Layout = config.StatuslineLayoutNewLine
+	cfg.Statusline.Format = config.StatuslineFormatCompact
+	if err := config.Save(home, cfg); err != nil {
+		t.Fatalf("Save config: %v", err)
+	}
+	deps.RunStatuslineCommand = func(ctx context.Context, stdin []byte, stderr io.Writer, name string, args []string) ([]byte, error) {
+		return []byte("base output\n"), nil
+	}
+	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	deps.Now = func() time.Time { return now }
+	var stdout bytes.Buffer
+	runStatusline(Command{Mode: ModeStatusline, WrappedCommand: []string{"ccstatusline"}}, deps.Dependencies, strings.NewReader(statuslinePayloadJSON(34, now.Add(3*time.Hour), "")), &stdout, io.Discard)
+
+	if stdout.String() != "base output\n34%" {
+		t.Fatalf("stdout = %q, want saved new-line compact output", stdout.String())
+	}
+}
+
+func TestRunStatuslineFlagsOverrideSavedConfig(t *testing.T) {
+	deps := fakeDeps(t)
+	home := t.TempDir()
+	deps.HomeDir = func() (string, error) { return home, nil }
+	deps.RunStatuslineCommand = func(ctx context.Context, stdin []byte, stderr io.Writer, name string, args []string) ([]byte, error) {
+		return []byte("base output\n"), nil
+	}
+	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	deps.Now = func() time.Time { return now }
+	var stdout bytes.Buffer
+	runStatusline(Command{Mode: ModeStatusline, WrappedCommand: []string{"ccstatusline"}, StatuslineLayout: config.StatuslineLayoutNewLine, StatuslineFormat: config.StatuslineFormatCompact}, deps.Dependencies, strings.NewReader(statuslinePayloadJSON(34, now.Add(3*time.Hour), "")), &stdout, io.Discard)
+
+	if stdout.String() != "base output\n34%" {
+		t.Fatalf("stdout = %q, want CLI override output", stdout.String())
 	}
 }
 

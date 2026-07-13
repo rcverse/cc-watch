@@ -22,6 +22,10 @@ func TestDefaultConfigMatchesProductDefaults(t *testing.T) {
 				MaxSends: 5,
 			},
 		},
+		Statusline: StatuslineConfig{
+			Layout: StatuslineLayoutSameLine,
+			Format: StatuslineFormatFull,
+		},
 	}
 
 	if !reflect.DeepEqual(cfg, want) {
@@ -81,6 +85,9 @@ func TestLoadMergesPartialConfigWithDefaults(t *testing.T) {
 	}
 	if len(result.ReminderThresholds) != len(Default().ReminderThresholds) {
 		t.Fatalf("reminder thresholds = %#v, want defaults", result.ReminderThresholds)
+	}
+	if result.Statusline != Default().Statusline {
+		t.Fatalf("statusline = %#v, want defaults", result.Statusline)
 	}
 }
 

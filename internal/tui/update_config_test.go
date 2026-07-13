@@ -39,10 +39,105 @@ func TestConfigEditorShowsStatuslineInstallState(t *testing.T) {
 	model := NewModel(Options{StartMode: StartConfig, Config: config.Default()})
 	view := model.View()
 
-	for _, want := range []string{"Statusline", "State", "Not installed", "Install in Claude Code"} {
+	for _, want := range []string{"Statusline", "Not installed"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("config view missing %q:\n%s", want, view)
 		}
+	}
+	model = openStatuslineSettings(t, model)
+	for _, want := range []string{"Claude Code Watch / statusline", "Status", "Layout", "Format", "Install"} {
+		if !strings.Contains(model.View(), want) {
+			t.Fatalf("statusline view missing %q:\n%s", want, model.View())
+		}
+	}
+}
+
+func TestConfigStatuslineStatusIsInformationalAndDistinct(t *testing.T) {
+	model := NewModel(Options{StartMode: StartConfig, Config: config.Default(), Width: 160})
+	model = openStatuslineSettings(t, model)
+	view := stripANSI(model.View())
+	for _, want := range []string{"Status", "● Not installed", "Claude Code statusline is not using cc-watch"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("statusline view missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestConfigStatuslineChoicesUseArrowSelection(t *testing.T) {
+	model := openStatuslineSettings(t, NewModel(Options{StartMode: StartConfig, Config: config.Default()}))
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+	if !strings.Contains(model.View(), "Choose Layout") || strings.Contains(model.View(), "Current input") {
+		t.Fatalf("layout did not open as a choice menu:\n%s", model.View())
+	}
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	model = updated.(Model)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+	if model.configDraft.Statusline.Layout != config.StatuslineLayoutNewLine {
+		t.Fatalf("layout = %q, want %q", model.configDraft.Statusline.Layout, config.StatuslineLayoutNewLine)
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	model = updated.(Model)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	model = updated.(Model)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+	if model.configDraft.Statusline.Format != config.StatuslineFormatCompact {
+		t.Fatalf("format = %q, want %q", model.configDraft.Statusline.Format, config.StatuslineFormatCompact)
+	}
+}
+
+func TestStatuslineStatusRoles(t *testing.T) {
+	tests := map[string]StyleRole{
+		"Not installed":       RoleIdentity,
+		"Installed":           RoleSuccess,
+		"Needs reinstall":     RoleWarning,
+		"Needs manual review": RoleDegraded,
+	}
+	for state, want := range tests {
+		if got := statuslineStateRole(state); got != want {
+			t.Fatalf("statuslineStateRole(%q) = %q, want %q", state, got, want)
+		}
+	}
+}
+
+func TestConfigEditorRequiresSecondConfirmationForStatuslineInstall(t *testing.T) {
+	status := statusline.Status{State: statusline.StateNotInstalled}
+	installs := 0
+	model := NewModel(Options{
+		StartMode: StartConfig,
+		Config:    config.Default(),
+		Dependencies: Dependencies{
+			InspectStatusline: func() (statusline.Status, error) {
+				return status, nil
+			},
+			InstallStatusline: func() error {
+				installs++
+				status = statusline.Status{State: statusline.StateInstalled, Command: "cc-watch statusline"}
+				return nil
+			},
+		},
+	})
+
+	model = openStatuslineSettings(t, model)
+	model = moveConfigFocusTo(t, model, "config_statusline_action")
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+	if installs != 0 {
+		t.Fatalf("installs = %d after first Enter, want 0", installs)
+	}
+	if !strings.Contains(model.View(), "Press Enter again to install") {
+		t.Fatalf("confirmation guidance missing after first Enter:\n%s", model.View())
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+	if installs != 1 {
+		t.Fatalf("installs = %d after second Enter, want 1", installs)
 	}
 }
 
@@ -64,14 +159,17 @@ func TestConfigEditorCanInstallStatusline(t *testing.T) {
 		},
 	})
 
+	model = openStatuslineSettings(t, model)
 	model = moveConfigFocusTo(t, model, "config_statusline_action")
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated.(Model)
 
 	if installs != 1 {
 		t.Fatalf("installs = %d, want 1", installs)
 	}
-	if !strings.Contains(model.View(), "Installed in Claude Code") || !strings.Contains(model.View(), "Uninstall from Claude Code") {
+	if !strings.Contains(model.View(), "Installed") || !strings.Contains(model.View(), "Uninstall") {
 		t.Fatalf("installed statusline state missing:\n%s", model.View())
 	}
 }
@@ -94,15 +192,54 @@ func TestConfigEditorCanUninstallStatusline(t *testing.T) {
 		},
 	})
 
+	model = openStatuslineSettings(t, model)
 	model = moveConfigFocusTo(t, model, "config_statusline_action")
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated.(Model)
 
 	if uninstalls != 1 {
 		t.Fatalf("uninstalls = %d, want 1", uninstalls)
 	}
-	if !strings.Contains(model.View(), "Not installed") || !strings.Contains(model.View(), "Install in Claude Code") {
+	if !strings.Contains(model.View(), "Not installed") || !strings.Contains(model.View(), "Install") {
 		t.Fatalf("uninstalled statusline state missing:\n%s", model.View())
+	}
+}
+
+func TestConfigEditorOffersReinstallForPathDependentStatusline(t *testing.T) {
+	status := statusline.Status{State: statusline.StateInstalled, Command: "cc-watch statusline -- ccstatusline"}
+	installs := 0
+	model := NewModel(Options{
+		StartMode: StartConfig,
+		Config:    config.Default(),
+		Dependencies: Dependencies{
+			InspectStatusline: func() (statusline.Status, error) {
+				return status, nil
+			},
+			InstallStatusline: func() error {
+				installs++
+				status.Command = "/Users/example/.local/bin/cc-watch statusline -- ccstatusline"
+				return nil
+			},
+			StatuslineCommand: "/Users/example/.local/bin/cc-watch",
+		},
+	})
+
+	model = openStatuslineSettings(t, model)
+	model = moveConfigFocusTo(t, model, "config_statusline_action")
+	if !strings.Contains(model.View(), "Reinstall") {
+		t.Fatalf("path-dependent statusline did not offer reinstall:\n%s", model.View())
+	}
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+	if installs != 0 {
+		t.Fatalf("installs = %d after first Enter, want 0", installs)
+	}
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+	if installs != 1 {
+		t.Fatalf("installs = %d after second Enter, want 1", installs)
 	}
 }
 
@@ -126,6 +263,7 @@ func TestConfigEditorStatuslineManualReviewDoesNotWrite(t *testing.T) {
 		},
 	})
 
+	model = openStatuslineSettings(t, model)
 	model = moveConfigFocusTo(t, model, "config_statusline_action")
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated.(Model)
@@ -160,6 +298,13 @@ func TestListConfigShortcutOpensConfigEditor(t *testing.T) {
 	if model.route != RouteList {
 		t.Fatalf("route = %q, want list", model.route)
 	}
+}
+
+func openStatuslineSettings(t *testing.T, model Model) Model {
+	t.Helper()
+	model = moveConfigFocusTo(t, model, "config_statusline")
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	return updated.(Model)
 }
 
 func TestConfigEditorPrefillsCurrentValueAndPreservesMessageOnEmptyEdit(t *testing.T) {

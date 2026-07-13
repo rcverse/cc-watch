@@ -39,6 +39,12 @@ func Validate(cfg Config) error {
 	if cfg.KeepAlive.Scope.MaxSends <= 0 {
 		messages = append(messages, "scope.max_sends must be positive")
 	}
+	if cfg.Statusline.Layout != StatuslineLayoutSameLine && cfg.Statusline.Layout != StatuslineLayoutNewLine {
+		messages = append(messages, "statusline.layout must be same_line or new_line")
+	}
+	if cfg.Statusline.Format != StatuslineFormatFull && cfg.Statusline.Format != StatuslineFormatCompact {
+		messages = append(messages, "statusline.format must be full or compact")
+	}
 	if len(messages) > 0 {
 		return ValidationError{Messages: messages}
 	}

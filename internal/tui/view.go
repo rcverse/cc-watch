@@ -15,6 +15,9 @@ func (m Model) View() string {
 	if m.route == RouteConfig {
 		return m.configView()
 	}
+	if m.route == RouteStatusline {
+		return m.statuslineView()
+	}
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "cc-watch %s\n", m.route)

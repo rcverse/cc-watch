@@ -24,6 +24,12 @@ func Load(home string) (Config, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return Default(), nil
 	}
+	if cfg.Statusline.Layout == "" {
+		cfg.Statusline.Layout = StatuslineLayoutSameLine
+	}
+	if cfg.Statusline.Format == "" {
+		cfg.Statusline.Format = StatuslineFormatFull
+	}
 	if err := Validate(cfg); err != nil {
 		return Default(), nil
 	}

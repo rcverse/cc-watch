@@ -71,7 +71,7 @@ func TestVersionExitsSuccessfully(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Run(--version) exit code = %d, want 0", code)
 	}
-	if !strings.Contains(stdout.String(), "cc-watch 1.0.0-beta.1") {
+	if !strings.Contains(stdout.String(), "cc-watch 1.0.0-beta.2") {
 		t.Fatalf("version output = %q, want beta version", stdout.String())
 	}
 	if stderr.Len() != 0 {
@@ -765,6 +765,16 @@ func TestParseStatuslineArgsGrammar(t *testing.T) {
 			want: Command{Mode: ModeStatusline, Limit: DefaultLimit, WrappedCommand: []string{"ccstatusline", "--flag"}},
 		},
 		{
+			name: "layout and format overrides",
+			args: []string{"statusline", "--layout=new-line", "--format=compact", "--", "ccstatusline"},
+			want: Command{Mode: ModeStatusline, Limit: DefaultLimit, WrappedCommand: []string{"ccstatusline"}, StatuslineLayout: config.StatuslineLayoutNewLine, StatuslineFormat: config.StatuslineFormatCompact},
+		},
+		{
+			name: "format override without wrapped command",
+			args: []string{"statusline", "--format=compact"},
+			want: Command{Mode: ModeStatusline, Limit: DefaultLimit, StatuslineFormat: config.StatuslineFormatCompact},
+		},
+		{
 			name:    "dash-dash with no command",
 			args:    []string{"statusline", "--"},
 			wantErr: "statusline: no command given after --",
@@ -777,6 +787,11 @@ func TestParseStatuslineArgsGrammar(t *testing.T) {
 		{
 			name:    "unrecognized flag",
 			args:    []string{"statusline", "--bogus"},
+			wantErr: statuslineUsageError,
+		},
+		{
+			name:    "invalid format",
+			args:    []string{"statusline", "--format=verbose"},
 			wantErr: statuslineUsageError,
 		},
 	}
@@ -793,7 +808,7 @@ func TestParseStatuslineArgsGrammar(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ParseArgs returned error: %v", err)
 			}
-			if cmd.Mode != tt.want.Mode || cmd.CheckConfig != tt.want.CheckConfig ||
+			if cmd.Mode != tt.want.Mode || cmd.CheckConfig != tt.want.CheckConfig || cmd.StatuslineLayout != tt.want.StatuslineLayout || cmd.StatuslineFormat != tt.want.StatuslineFormat ||
 				!reflect.DeepEqual(cmd.WrappedCommand, tt.want.WrappedCommand) {
 				t.Fatalf("cmd = %#v, want %#v", cmd, tt.want)
 			}

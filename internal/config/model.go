@@ -1,8 +1,21 @@
 package config
 
 type Config struct {
-	ReminderThresholds []int           `json:"reminder_thresholds"`
-	KeepAlive          KeepAliveConfig `json:"keep_alive"`
+	ReminderThresholds []int            `json:"reminder_thresholds"`
+	KeepAlive          KeepAliveConfig  `json:"keep_alive"`
+	Statusline         StatuslineConfig `json:"statusline"`
+}
+
+const (
+	StatuslineLayoutSameLine = "same_line"
+	StatuslineLayoutNewLine  = "new_line"
+	StatuslineFormatFull     = "full"
+	StatuslineFormatCompact  = "compact"
+)
+
+type StatuslineConfig struct {
+	Layout string `json:"layout"`
+	Format string `json:"format"`
 }
 
 type KeepAliveConfig struct {
@@ -26,6 +39,10 @@ func Default() Config {
 			Scope: ScopeConfig{
 				MaxSends: 5,
 			},
+		},
+		Statusline: StatuslineConfig{
+			Layout: StatuslineLayoutSameLine,
+			Format: StatuslineFormatFull,
 		},
 	}
 }
