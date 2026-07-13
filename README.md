@@ -11,8 +11,27 @@ connection.
 
 ## Install
 
-For this beta, installation builds the program locally. You need macOS and Go
-1.23 or newer.
+### Homebrew (recommended)
+
+```bash
+brew install rcverse/cc-watch/cc-watch
+```
+
+### Prebuilt download
+
+Download the archive for your Mac from the
+[latest release](https://github.com/rcverse/cc-watch/releases/latest), then
+install it:
+
+```bash
+mkdir -p "$HOME/.local/bin"
+tar -xzf cc-watch_*.tar.gz
+install -m 0755 cc-watch "$HOME/.local/bin/cc-watch"
+```
+
+### Build from source
+
+This option requires macOS and Go 1.23 or newer.
 
 ```bash
 git clone https://github.com/rcverse/cc-watch.git
@@ -27,8 +46,6 @@ on your `PATH`, then check it:
 ```bash
 cc-watch --version
 ```
-
-Prebuilt downloads and Homebrew are not available yet.
 
 ## Start
 

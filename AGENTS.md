@@ -112,6 +112,12 @@ separate actions. Publishing the GitHub Release requires explicit user approval.
    gh release edit "$TAG" --repo rcverse/cc-watch --draft=false
    ```
 
+6. After the release is public, update the separate
+   `rcverse/homebrew-cc-watch` tap: change `Formula/cc-watch.rb` to the new
+   release URLs and SHA256 values, run the formula checks, then commit and push
+   the tap. Test the user path with `brew install rcverse/cc-watch/cc-watch`,
+   `cc-watch --version`, and `brew test cc-watch`.
+
 Never force-move a published tag. Use the next beta or patch version for
 subsequent changes. Keep `dist/releases/` untracked and remove it after the
 release if local disk space matters.
@@ -145,10 +151,10 @@ release if local disk space matters.
   exits 0. The runtime hook and `--check` never write
   `~/.claude/settings.json`; config TUI install/uninstall may edit it only
   for unambiguous statusLine states, with a timestamped backup first.
-- Don't add Linux/Windows support, a daemon, a public watch/interval flag,
-  Homebrew/GitHub Release packaging, or direct Anthropic API calls without
-  the user asking first — these are deliberate non-goals, not oversights.
-- This tool is unreleased and local-first. Do not preserve compatibility for
+- Don't add Linux/Windows support, a daemon, a public watch/interval flag, or
+  direct Anthropic API calls without the user asking first — these are
+  deliberate non-goals, not oversights.
+- This tool is beta and local-first. Do not preserve compatibility for
   removed or stale internal surfaces unless the user explicitly asks for a
   migration path; prefer deleting old flags, config knobs, tests, and docs.
 - `cc-watch` (the Go binary) is the live installed command
