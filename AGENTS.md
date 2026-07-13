@@ -76,9 +76,12 @@ separate actions. Publishing the GitHub Release requires explicit user approval.
    git push origin "$TAG"
    ```
 
-3. Build macOS release archives from the tagged commit. Go selects the target
-   with `GOOS` and `GOARCH`; this project ships `darwin/arm64` and
-   `darwin/amd64` only:
+3. Build macOS release archives from the tagged commit, not from a newer
+   `main`. On a clean checkout at the tag, verify
+   `git rev-parse "$TAG^{}"` equals `git rev-parse HEAD`. If `main` has moved,
+   use a temporary clean checkout at the tag first. Go selects the target with
+   `GOOS` and `GOARCH`; this project ships `darwin/arm64` and `darwin/amd64`
+   only:
 
    ```bash
    TAG=v1.0.0-beta.2
