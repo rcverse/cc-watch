@@ -58,6 +58,61 @@ go test -tags demo ./... # include build-tagged UI demo tests
 scripts/test-install.sh # exercises install.sh against a temp HOME, safe to run
 ```
 
+## Tagged release protocol
+
+Use this process for every `v*` release tag. A Git tag and a GitHub Release are
+separate actions. Publishing the GitHub Release requires explicit user approval.
+
+1. Update `internal/app/version.go`, `README.md`, and version assertions
+   together. Keep the worktree clean and run the normal tests, vet, build,
+   demo tests, and `scripts/test-install.sh` checks.
+2. Create and verify the annotated tag, then push the commit and tag:
+
+   ```bash
+   TAG=v1.0.0-beta.2
+   git tag -a "$TAG" -m "$TAG"
+   git show --no-patch "$TAG"
+   git push origin main
+   git push origin "$TAG"
+   ```
+
+3. Build macOS release archives from the tagged commit. Go selects the target
+   with `GOOS` and `GOARCH`; this project ships `darwin/arm64` and
+   `darwin/amd64` only:
+
+   ```bash
+   TAG=v1.0.0-beta.2
+   VERSION="${TAG#v}"
+   RELEASE_DIR="dist/releases/$TAG"
+   mkdir -p "$RELEASE_DIR/arm64" "$RELEASE_DIR/amd64"
+   test "$(go run ./cmd/cc-watch --version)" = "cc-watch $VERSION"
+   CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -o "$RELEASE_DIR/arm64/cc-watch" ./cmd/cc-watch
+   CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -o "$RELEASE_DIR/amd64/cc-watch" ./cmd/cc-watch
+   tar -czf "$RELEASE_DIR/cc-watch_${TAG}_darwin_arm64.tar.gz" -C "$RELEASE_DIR/arm64" cc-watch
+   tar -czf "$RELEASE_DIR/cc-watch_${TAG}_darwin_amd64.tar.gz" -C "$RELEASE_DIR/amd64" cc-watch
+   (cd "$RELEASE_DIR" && shasum -a 256 cc-watch_*.tar.gz > SHA256SUMS && shasum -a 256 -c SHA256SUMS)
+   ```
+
+4. Create a draft prerelease with generated notes and the two archives plus
+   `SHA256SUMS`, then inspect the assets and notes:
+
+   ```bash
+   gh release create "$TAG" "$RELEASE_DIR"/cc-watch_*.tar.gz "$RELEASE_DIR"/SHA256SUMS \
+     --repo rcverse/cc-watch --title "cc-watch $TAG" --prerelease --draft \
+     --verify-tag --generate-notes
+   gh release view "$TAG" --repo rcverse/cc-watch
+   ```
+
+5. Publish only after review:
+
+   ```bash
+   gh release edit "$TAG" --repo rcverse/cc-watch --draft=false
+   ```
+
+Never force-move a published tag. Use the next beta or patch version for
+subsequent changes. Keep `dist/releases/` untracked and remove it after the
+release if local disk space matters.
+
 ## Glossary
 
 - **Session Snapshot** — the parsed view of sessions plus config-derived
