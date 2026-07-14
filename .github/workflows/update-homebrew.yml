@@ -87,7 +87,7 @@ jobs:
         run: |
           set -euo pipefail
           git diff --check
-          brew audit --formula Formula/cc-watch.rb
+          brew audit --changed
           brew install --formula Formula/cc-watch.rb
           brew test cc-watch
 
