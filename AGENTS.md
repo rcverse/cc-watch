@@ -60,63 +60,51 @@ scripts/test-install.sh # exercises install.sh against a temp HOME, safe to run
 
 ## Tagged release protocol
 
-Use this process for every `v*` release tag. A Git tag and a GitHub Release are
-separate actions. Publishing the GitHub Release requires explicit user approval.
+Use `scripts/release.sh` for every `v*` release tag. The script checks the
+clean, versioned `main` branch, runs the release checks, creates an annotated
+tag, and pushes it. The tag triggers `.github/workflows/release.yml`, which
+builds the archives and creates a draft prerelease. Publishing the GitHub
+Release still requires explicit user approval.
 
 1. Update `internal/app/version.go`, `README.md`, and version assertions
-   together. Keep the worktree clean and run the normal tests, vet, build,
-   demo tests, and `scripts/test-install.sh` checks.
-2. Create and verify the annotated tag, then push the commit and tag:
+   together. Commit and push those changes to `main`, then run:
 
    ```bash
-   TAG=v1.0.0-beta.2
-   git tag -a "$TAG" -m "$TAG"
-   git show --no-patch "$TAG"
-   git push origin main
-   git push origin "$TAG"
+   scripts/release.sh v1.0.0-beta.4
    ```
 
-3. Build macOS release archives from the tagged commit, not from a newer
-   `main`. On a clean checkout at the tag, verify
-   `git rev-parse "$TAG^{}"` equals `git rev-parse HEAD`. If `main` has moved,
-   use a temporary clean checkout at the tag first. Go selects the target with
-   `GOOS` and `GOARCH`; this project ships `darwin/arm64` and `darwin/amd64`
-   only:
+   The script refuses a dirty worktree, mismatched version, or existing tag. It
+   runs the local release checks before pushing the tag.
+
+2. The tag workflow checks out the tagged commit, runs the same checks again,
+   builds `darwin/arm64` and `darwin/amd64` archives with `CGO_ENABLED=0`,
+   writes `SHA256SUMS`, and creates a draft prerelease with generated notes.
+
+3. Review the draft and its assets:
 
    ```bash
-   TAG=v1.0.0-beta.2
-   VERSION="${TAG#v}"
-   RELEASE_DIR="dist/releases/$TAG"
-   mkdir -p "$RELEASE_DIR/arm64" "$RELEASE_DIR/amd64"
-   test "$(go run ./cmd/cc-watch --version)" = "cc-watch $VERSION"
-   CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -o "$RELEASE_DIR/arm64/cc-watch" ./cmd/cc-watch
-   CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -o "$RELEASE_DIR/amd64/cc-watch" ./cmd/cc-watch
-   tar -czf "$RELEASE_DIR/cc-watch_${TAG}_darwin_arm64.tar.gz" -C "$RELEASE_DIR/arm64" cc-watch
-   tar -czf "$RELEASE_DIR/cc-watch_${TAG}_darwin_amd64.tar.gz" -C "$RELEASE_DIR/amd64" cc-watch
-   (cd "$RELEASE_DIR" && shasum -a 256 cc-watch_*.tar.gz > SHA256SUMS && shasum -a 256 -c SHA256SUMS)
-   ```
-
-4. Create a draft prerelease with generated notes and the two archives plus
-   `SHA256SUMS`, then inspect the assets and notes:
-
-   ```bash
-   gh release create "$TAG" "$RELEASE_DIR"/cc-watch_*.tar.gz "$RELEASE_DIR"/SHA256SUMS \
-     --repo rcverse/cc-watch --title "cc-watch $TAG" --prerelease --draft \
-     --verify-tag --generate-notes
+   TAG=v1.0.0-beta.4
    gh release view "$TAG" --repo rcverse/cc-watch
    ```
 
-5. Publish only after review:
+4. Publish only after review:
 
    ```bash
    gh release edit "$TAG" --repo rcverse/cc-watch --draft=false
    ```
 
-6. After the release is public, update the separate
-   `rcverse/homebrew-cc-watch` tap: change `Formula/cc-watch.rb` to the new
-   release URLs and SHA256 values, run the formula checks, then commit and push
-   the tap. Test the user path with `brew install rcverse/cc-watch/cc-watch`,
-   `cc-watch --version`, and `brew test cc-watch`.
+5. After the release is public, `.github/workflows/update-homebrew.yml`
+   downloads `SHA256SUMS`, updates the separate
+   `rcverse/homebrew-cc-watch` tap, runs the formula checks, and commits the
+   formula update to the tap's `main` branch.
+
+   Before using this workflow, create a fine-grained GitHub token scoped only to
+   `rcverse/homebrew-cc-watch` with **Contents: Read and write**, then save it
+   in `rcverse/cc-watch` as the Actions secret `HOMEBREW_TAP_TOKEN`.
+   The workflow runs when the draft prerelease is published, including beta
+   releases. Test the resulting user path with
+   `brew install rcverse/cc-watch/cc-watch`, `cc-watch --version`, and
+   `brew test cc-watch`.
 
 Never force-move a published tag. Use the next beta or patch version for
 subsequent changes. Keep `dist/releases/` untracked and remove it after the

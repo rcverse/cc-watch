@@ -25,7 +25,7 @@ The interface is organized around four places:
 - the [Claude Code statusline](#claude-code-statusline), an optional hook for
   usage, KeepAlive warnings, and cache timing.
 
-> **Beta:** `v1.0.0-beta.3`. Claude Code's transcript format and statusline hook
+> **Beta:** `v1.0.0-beta.4`. Claude Code's transcript format and statusline hook
 > may change. [`KeepAlive`](#keepalive) and the [statusline integration](#claude-code-statusline)
 > are beta features.
 
@@ -35,58 +35,53 @@ The interface is organized around four places:
 
 ### Homebrew
 
-Homebrew uses the fully qualified form `user/tap/formula` here:
+Homebrew is the recommended way to install `cc-watch`:
 
 ```bash
 brew install rcverse/cc-watch/cc-watch
 cc-watch
 ```
 
-Here `rcverse/cc-watch` selects the tap, backed by the GitHub repository
-`rcverse/homebrew-cc-watch`, and the final `cc-watch` selects the formula. You
-do **not** need to run `brew tap` first. Homebrew adds the tap automatically
-when installing a fully qualified formula. See [Homebrew's tap installation documentation](https://docs.brew.sh/How-to-Create-and-Maintain-a-Tap#installing).
+The formula lives in the separate `rcverse/homebrew-cc-watch` tap, not
+Homebrew Core. The fully qualified command adds that tap automatically. After
+a GitHub release is published, the tap updates its formula for the new
+version.
 
-### Prebuilt binary
+## Uninstall
 
-Download the archive for your Mac from the
-[releases page](https://github.com/rcverse/cc-watch/releases), then install
-the binary:
-
-```bash
-mkdir -p "$HOME/.local/bin"
-tar -xzf cc-watch_*.tar.gz
-install -m 0755 cc-watch "$HOME/.local/bin/cc-watch"
-cc-watch
-```
-
-### Build from source
-
-You need macOS and Go 1.23 or newer.
+If you installed the Claude Code statusline integration, remove it before
+removing the `cc-watch` command:
 
 ```bash
-git clone https://github.com/rcverse/cc-watch.git
-cd cc-watch
-./install.sh --yes
-cc-watch
+cc-watch config
 ```
 
-The installer puts the command at `~/.local/bin/cc-watch`. If your shell does
-not find it, add that directory to your `PATH`:
+Open **Statusline**, choose **Uninstall**, and confirm. Then remove the
+Homebrew formula:
 
 ```bash
-export PATH="$HOME/.local/bin:$PATH"
+brew uninstall cc-watch
 ```
+
+This leaves the tap and `~/.config/cc-watch/` in place. Remove the tap only if
+you no longer need it:
+
+```bash
+brew untap rcverse/cc-watch
+```
+
+To remove saved preferences and local logs as well, delete
+`~/.config/cc-watch/` manually. This does not touch Claude Code transcripts
+under `~/.claude/projects/`.
 
 ## Usage
 
-The default command opens the [Main page](#main-page) with the 25 most recent
-sessions.
+The default command opens the [Main page](#main-page) with the 10 most recent
+sessions. Change this in [Config](#config).
 
 | Command | Purpose |
 | --- | --- |
-| `cc-watch` | Open the TUI with 25 recent sessions. |
-| `cc-watch --n <count>` | Choose how many recent sessions to load. |
+| `cc-watch` | Open the TUI with the configured number of recent sessions. |
 | `cc-watch --id <partial-id>` | Open a session by partial ID. If more than one session matches, choose from the matches. |
 | `cc-watch config` | Open [Config](#config) directly. |
 | `cc-watch statusline` | Run the [Claude Code statusline](#claude-code-statusline) hook. |
@@ -247,6 +242,7 @@ value:
 
 | Setting | Behavior |
 | --- | --- |
+| **Recent sessions** | How many recent sessions the Main page loads. The default is 10. |
 | **Reminder thresholds** | Percentages of cache time remaining that trigger local notifications. The defaults are `20%` and `10%`, in descending order. |
 | **KeepAlive trigger** | How early [KeepAlive](#keepalive) may begin preparing a send. The default is five minutes before expiry, with a tighter limit for a five-minute cache. |
 | **Countdown** | The visible wait before an automatic KeepAlive send. The default is 30 seconds. If the countdown cannot fit safely, the send pauses. |
@@ -367,9 +363,10 @@ Run `cc-watch statusline --check`. If the integration was just installed, send
 one Claude Code message first. Claude Code runs the hook during a turn, so an
 idle terminal may have no fresh output yet.
 
-### `cc-watch` is not found after installation
+### `cc-watch` is not found after a source install
 
-Add `~/.local/bin` to your shell `PATH`:
+The source installer puts the command in `~/.local/bin`. Add that directory to
+your shell `PATH`:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
@@ -377,7 +374,29 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ## For contributors
 
-The project is a macOS-only Go application. The quick checks are:
+The project is a macOS-only Go application.
+
+### Build from source
+
+You need macOS and Go 1.23 or newer.
+
+```bash
+git clone https://github.com/rcverse/cc-watch.git
+cd cc-watch
+./install.sh --yes
+cc-watch
+```
+
+The installer puts the command at `~/.local/bin/cc-watch`. If your shell does
+not find it, add that directory to your `PATH`:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+### Run checks
+
+The quick checks are:
 
 ```bash
 go build ./...

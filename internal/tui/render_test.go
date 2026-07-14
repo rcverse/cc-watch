@@ -443,7 +443,7 @@ func TestWorkspaceAndConfigUseAdaptiveTerminalLayout(t *testing.T) {
 
 	configView := NewModel(Options{StartMode: StartConfig, Config: config.Default()}).View()
 	assertMaxLineWidth(t, configView, 80)
-	for _, want := range []string{"Claude Code Watch / config", "Settings", "Preview", "Status", "Actions", "› Reminder thresholds", "KeepAlive trigger", "Max sends"} {
+	for _, want := range []string{"Claude Code Watch / config", "Settings", "Preview", "Status", "Actions", "› Recent sessions", "Reminder thresholds", "KeepAlive trigger", "Max sends"} {
 		if !strings.Contains(configView, want) {
 			t.Fatalf("config view missing %q:\n%s", want, configView)
 		}

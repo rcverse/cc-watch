@@ -12,6 +12,7 @@ import (
 )
 
 var configFocusActions = []string{
+	"config_recent_sessions",
 	"config_reminder_thresholds",
 	"config_trigger",
 	"config_countdown",
@@ -44,6 +45,10 @@ func (m Model) configView() string {
 	b.WriteString("\n")
 
 	var settings strings.Builder
+	fmt.Fprintf(&settings, "%s\n", m.configRow("config_recent_sessions", "Recent sessions", fmt.Sprintf("%d", cfg.RecentSessions), "load this many sessions on the Main page"))
+	if message := m.configFieldError("config_recent_sessions"); message != "" {
+		fmt.Fprintf(&settings, "    %s\n", styles.Render(RoleDanger, "Error: "+message))
+	}
 	fmt.Fprintf(&settings, "%s\n", m.configRow("config_reminder_thresholds", "Reminder thresholds", thresholdsText(cfg.ReminderThresholds)+"%", "notify when cache is fading"))
 	if message := m.configFieldError("config_reminder_thresholds"); message != "" {
 		fmt.Fprintf(&settings, "    %s\n", styles.Render(RoleDanger, "Error: "+message))
@@ -583,6 +588,8 @@ func (m Model) configFieldValue(field string) string {
 	switch field {
 	case "config_reminder_thresholds":
 		return thresholdsText(m.configDraft.ReminderThresholds)
+	case "config_recent_sessions":
+		return strconv.Itoa(m.configDraft.RecentSessions)
 	case "config_trigger":
 		return strconv.Itoa(m.configDraft.KeepAlive.TriggerBeforeExpiryMinutes)
 	case "config_countdown":
@@ -608,6 +615,8 @@ func configFieldLabel(field string) string {
 	switch field {
 	case "config_reminder_thresholds":
 		return "Reminder thresholds"
+	case "config_recent_sessions":
+		return "Recent sessions"
 	case "config_trigger":
 		return "KeepAlive trigger"
 	case "config_countdown":
@@ -632,6 +641,14 @@ func configFieldLabel(field string) string {
 func (m *Model) commitConfigInput() {
 	input := strings.TrimSpace(m.configInput)
 	switch m.configEditingField {
+	case "config_recent_sessions":
+		value, err := strconv.Atoi(input)
+		if err != nil {
+			m.setConfigFieldError("config_recent_sessions", "recent sessions must be positive.")
+		} else {
+			m.configDraft.RecentSessions = value
+			m.clearConfigFieldError("config_recent_sessions")
+		}
 	case "config_reminder_thresholds":
 		thresholds, err := parseThresholds(input)
 		if err != nil {
@@ -817,6 +834,10 @@ func (m Model) configFieldError(field string) string {
 	}
 	cfg := m.configDraft
 	switch field {
+	case "config_recent_sessions":
+		if cfg.RecentSessions <= 0 {
+			return "recent sessions must be positive."
+		}
 	case "config_reminder_thresholds":
 		err := config.Validate(config.Config{ReminderThresholds: cfg.ReminderThresholds, KeepAlive: config.Default().KeepAlive})
 		if err != nil && strings.Contains(err.Error(), "reminder thresholds") {

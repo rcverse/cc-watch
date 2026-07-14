@@ -71,7 +71,7 @@ func (m Model) activateWorkspaceAction(action string) (tea.Model, tea.Cmd) {
 
 func (m Model) activateConfigAction(action string) (tea.Model, tea.Cmd) {
 	switch action {
-	case "config_reminder_thresholds", "config_trigger", "config_countdown", "config_message", "config_max_sends":
+	case "config_recent_sessions", "config_reminder_thresholds", "config_trigger", "config_countdown", "config_message", "config_max_sends":
 		m.startConfigEdit(action)
 		return m, nil
 	case "config_statusline":

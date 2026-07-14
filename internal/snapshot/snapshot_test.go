@@ -12,17 +12,18 @@ import (
 func TestBuildListSnapshotLoadsConfigDiscoversAndParsesSessions(t *testing.T) {
 	now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 	loaders := fakeLoaders(t)
+	loaders.cfg.RecentSessions = 3
 	loaders.files = []session.SessionFile{
 		{SessionID: "11111111-1111-1111-1111-111111111111", ShortID: "11111111", Project: "alpha", Path: "/tmp/alpha.jsonl", ModTime: now},
 		{SessionID: "22222222-2222-2222-2222-222222222222", ShortID: "22222222", Project: "beta", Path: "/tmp/beta.jsonl", ModTime: now},
 	}
 
-	result, err := Build(Request{Home: "/home/me", Now: now, Limit: 5}, loaders.Loaders())
+	result, err := Build(Request{Home: "/home/me", Now: now}, loaders.Loaders())
 	if err != nil {
 		t.Fatalf("Build returned error: %v", err)
 	}
-	if loaders.discoveryLimit != 5 {
-		t.Fatalf("discovery limit = %d, want 5", loaders.discoveryLimit)
+	if loaders.discoveryLimit != 3 {
+		t.Fatalf("discovery limit = %d, want 3", loaders.discoveryLimit)
 	}
 	if len(result.Sessions) != 2 {
 		t.Fatalf("sessions = %d, want 2", len(result.Sessions))
@@ -43,7 +44,7 @@ func TestBuildSelectedSnapshotResolvesPartialIDAndParsesOnlySelected(t *testing.
 		{SessionID: "22222222-2222-2222-2222-222222222222", ShortID: "22222222", Project: "beta", Path: "/tmp/beta.jsonl", ModTime: now},
 	}
 
-	result, err := Build(Request{Home: "/home/me", Now: now, Limit: 5, ID: "2222"}, loaders.Loaders())
+	result, err := Build(Request{Home: "/home/me", Now: now, ID: "2222"}, loaders.Loaders())
 	if err != nil {
 		t.Fatalf("Build returned error: %v", err)
 	}
@@ -66,7 +67,7 @@ func TestBuildAmbiguousAndNoMatchAreResultErrorsNotReturnedErrors(t *testing.T) 
 		{SessionID: "11112222-2222-2222-2222-222222222222", ShortID: "11112222", Project: "beta", Path: "/tmp/beta.jsonl", ModTime: now},
 	}
 
-	ambiguous, err := Build(Request{Home: "/home/me", Now: now, ID: "1111", Limit: 5}, loaders.Loaders())
+	ambiguous, err := Build(Request{Home: "/home/me", Now: now, ID: "1111"}, loaders.Loaders())
 	if err != nil {
 		t.Fatalf("ambiguous Build returned Go error: %v", err)
 	}
@@ -77,7 +78,7 @@ func TestBuildAmbiguousAndNoMatchAreResultErrorsNotReturnedErrors(t *testing.T) 
 		t.Fatalf("candidate count = %d, want 2", len(ambiguous.Candidates))
 	}
 
-	missing, err := Build(Request{Home: "/home/me", Now: now, ID: "9999", Limit: 5}, loaders.Loaders())
+	missing, err := Build(Request{Home: "/home/me", Now: now, ID: "9999"}, loaders.Loaders())
 	if err != nil {
 		t.Fatalf("missing Build returned Go error: %v", err)
 	}
@@ -106,7 +107,7 @@ func TestConfigOnlyDoesNotDiscoverOrParse(t *testing.T) {
 func TestBuildMapsProjectsDirMissingToEmptyState(t *testing.T) {
 	loaders := fakeLoaders(t)
 	loaders.discovery = session.DiscoveryResult{ProjectsDir: "/home/me/.claude/projects", ErrorCode: "projects_dir_missing"}
-	result, err := Build(Request{Home: "/home/me", Limit: 5}, loaders.Loaders())
+	result, err := Build(Request{Home: "/home/me"}, loaders.Loaders())
 	if err != nil {
 		t.Fatalf("Build returned error: %v", err)
 	}
@@ -121,7 +122,7 @@ func TestBuildMapsProjectsDirMissingToEmptyState(t *testing.T) {
 func TestBuildReturnsOperationalErrors(t *testing.T) {
 	loaders := fakeLoaders(t)
 	loaders.discoverErr = errors.New("disk unavailable")
-	_, err := Build(Request{Home: "/home/me", Limit: 5}, loaders.Loaders())
+	_, err := Build(Request{Home: "/home/me"}, loaders.Loaders())
 	var buildErr *BuildError
 	if !errors.As(err, &buildErr) {
 		t.Fatalf("error = %T %v, want *BuildError", err, err)
@@ -142,7 +143,7 @@ func TestBuildSelectedParseFailureReturnsParseBuildError(t *testing.T) {
 		ModTime:   now,
 	}}
 	loaders.parseErr = errors.New("read failed")
-	_, err := Build(Request{Home: "/home/me", Now: now, ID: "1111", Limit: 5}, loaders.Loaders())
+	_, err := Build(Request{Home: "/home/me", Now: now, ID: "1111"}, loaders.Loaders())
 	var buildErr *BuildError
 	if !errors.As(err, &buildErr) {
 		t.Fatalf("error = %T %v, want *BuildError", err, err)
@@ -154,6 +155,7 @@ func TestBuildSelectedParseFailureReturnsParseBuildError(t *testing.T) {
 
 type snapshotFakeLoaders struct {
 	t              *testing.T
+	cfg            config.Config
 	files          []session.SessionFile
 	discovery      session.DiscoveryResult
 	discoverErr    error
@@ -165,7 +167,7 @@ type snapshotFakeLoaders struct {
 
 func fakeLoaders(t *testing.T) *snapshotFakeLoaders {
 	t.Helper()
-	return &snapshotFakeLoaders{t: t}
+	return &snapshotFakeLoaders{t: t, cfg: config.Default()}
 }
 
 func (f *snapshotFakeLoaders) Loaders() Loaders {
@@ -174,7 +176,7 @@ func (f *snapshotFakeLoaders) Loaders() Loaders {
 			if home != "/home/me" {
 				f.t.Fatalf("home = %q, want /home/me", home)
 			}
-			return config.Default(), nil
+			return f.cfg, nil
 		},
 		DiscoverHome: func(home string, limit int) (session.DiscoveryResult, error) {
 			f.discoverCalled = true

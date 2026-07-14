@@ -104,7 +104,7 @@ func buildTUIOptions(cmd Command, deps Dependencies) (tui.Options, error) {
 		return tui.Options{}, err
 	}
 	if cmd.Mode == ModeConfig {
-		result, err := snapshot.ConfigOnly(snapshot.Request{Home: home, Now: now, Limit: cmd.Limit}, snapshot.Loaders{
+		result, err := snapshot.ConfigOnly(snapshot.Request{Home: home, Now: now}, snapshot.Loaders{
 			LoadConfig: config.Load,
 		})
 		if err != nil {
@@ -114,10 +114,9 @@ func buildTUIOptions(cmd Command, deps Dependencies) (tui.Options, error) {
 	}
 
 	result, err := snapshot.Build(snapshot.Request{
-		Home:  home,
-		Now:   now,
-		Limit: cmd.Limit,
-		ID:    cmd.ID,
+		Home: home,
+		Now:  now,
+		ID:   cmd.ID,
 	}, snapshot.Loaders{
 		LoadConfig:   config.Load,
 		DiscoverHome: deps.DiscoverHome,
@@ -199,10 +198,9 @@ func tuiDependencies(cmd Command, deps Dependencies, home string) tui.Dependenci
 				}
 			}
 			result, err := snapshot.Build(snapshot.Request{
-				Home:  home,
-				Now:   deps.Now(),
-				Limit: cmd.Limit,
-				ID:    cmd.ID,
+				Home: home,
+				Now:  deps.Now(),
+				ID:   cmd.ID,
 			}, snapshot.Loaders{
 				LoadConfig:   config.Load,
 				DiscoverHome: deps.DiscoverHome,

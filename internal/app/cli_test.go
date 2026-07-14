@@ -24,7 +24,7 @@ func TestHelpExitsSuccessfully(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Run(--help) exit code = %d, want 0", code)
 	}
-	if !strings.Contains(stdout.String(), "Usage:") || !strings.Contains(stdout.String(), "cc-watch [--n N] [--id <partial-id>]") {
+	if !strings.Contains(stdout.String(), "Usage:") || !strings.Contains(stdout.String(), "cc-watch [--id <partial-id>]") {
 		t.Fatalf("help output missing usage:\n%s", stdout.String())
 	}
 	for _, notWant := range []string{"--watch", "Unsupported:"} {
@@ -71,7 +71,7 @@ func TestVersionExitsSuccessfully(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Run(--version) exit code = %d, want 0", code)
 	}
-	if !strings.Contains(stdout.String(), "cc-watch 1.0.0-beta.3") {
+	if !strings.Contains(stdout.String(), "cc-watch 1.0.0-beta.4") {
 		t.Fatalf("version output = %q, want beta version", stdout.String())
 	}
 	if stderr.Len() != 0 {
@@ -107,6 +107,22 @@ func TestRetiredRemindFlagIsUnknown(t *testing.T) {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
 	if !strings.Contains(stderr.String(), "flag provided but not defined: -remind") {
+		t.Fatalf("stderr missing unknown-flag error:\n%s", stderr.String())
+	}
+}
+
+func TestRetiredSessionLimitFlagIsUnknown(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	code := Run([]string{"--n", "2"}, &stdout, &stderr)
+
+	if code == 0 {
+		t.Fatal("Run(--n 2) exit code = 0, want non-zero")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "flag provided but not defined: -n") {
 		t.Fatalf("stderr missing unknown-flag error:\n%s", stderr.String())
 	}
 }
@@ -150,22 +166,16 @@ func TestTUIDispatchStartsListWithoutKeepAliveSideEffects(t *testing.T) {
 
 func TestTUIDispatchBuildsOptionsForPublicCLICommands(t *testing.T) {
 	tests := []struct {
-		name       string
-		args       []string
-		wantLimit  int
-		wantMode   tui.StartMode
-		wantSelect string
+		name               string
+		args               []string
+		wantDiscoveryLimit int
+		wantMode           tui.StartMode
+		wantSelect         string
 	}{
 		{
-			name:      "default cc-watch",
-			wantLimit: 25,
-			wantMode:  tui.StartList,
-		},
-		{
-			name:      "--n N",
-			args:      []string{"--n", "2"},
-			wantLimit: 2,
-			wantMode:  tui.StartList,
+			name:               "default cc-watch",
+			wantDiscoveryLimit: 10,
+			wantMode:           tui.StartList,
 		},
 		{
 			name:       "--id partial",
@@ -208,8 +218,8 @@ func TestTUIDispatchBuildsOptionsForPublicCLICommands(t *testing.T) {
 			if got.StartMode != tt.wantMode || got.SelectedID != tt.wantSelect {
 				t.Fatalf("options mode=%q selected=%q, want mode=%q selected=%q", got.StartMode, got.SelectedID, tt.wantMode, tt.wantSelect)
 			}
-			if tt.wantLimit > 0 && discoveryLimit != tt.wantLimit {
-				t.Fatalf("discovery limit = %d, want %d", discoveryLimit, tt.wantLimit)
+			if tt.wantDiscoveryLimit > 0 && discoveryLimit != tt.wantDiscoveryLimit {
+				t.Fatalf("discovery limit = %d, want %d", discoveryLimit, tt.wantDiscoveryLimit)
 			}
 			if tt.wantMode == tui.StartConfig && discoveryLimit != -1 {
 				t.Fatalf("config discovered sessions with limit %d", discoveryLimit)
@@ -253,7 +263,7 @@ func TestTUIOptionsStartLiveRefreshForListAndWorkspaceOnly(t *testing.T) {
 		return session.Session{SessionID: "session-id", ShortID: "session", JSONLPath: path, Project: "tmp"}, nil
 	}
 
-	list, err := buildTUIOptions(Command{Mode: ModeTUI, Limit: 5}, deps.Dependencies)
+	list, err := buildTUIOptions(Command{Mode: ModeTUI}, deps.Dependencies)
 	if err != nil {
 		t.Fatalf("buildTUIOptions list returned error: %v", err)
 	}
@@ -264,7 +274,7 @@ func TestTUIOptionsStartLiveRefreshForListAndWorkspaceOnly(t *testing.T) {
 		t.Fatal("list CloseLiveRefresh = nil, want watcher cleanup")
 	}
 
-	workspace, err := buildTUIOptions(Command{Mode: ModeTUI, Limit: 5, ID: "session"}, deps.Dependencies)
+	workspace, err := buildTUIOptions(Command{Mode: ModeTUI, ID: "session"}, deps.Dependencies)
 	if err != nil {
 		t.Fatalf("buildTUIOptions workspace returned error: %v", err)
 	}
@@ -275,7 +285,7 @@ func TestTUIOptionsStartLiveRefreshForListAndWorkspaceOnly(t *testing.T) {
 		t.Fatal("workspace CloseLiveRefresh = nil, want watcher cleanup")
 	}
 
-	configOptions, err := buildTUIOptions(Command{Mode: ModeConfig, Limit: 5}, deps.Dependencies)
+	configOptions, err := buildTUIOptions(Command{Mode: ModeConfig}, deps.Dependencies)
 	if err != nil {
 		t.Fatalf("buildTUIOptions config returned error: %v", err)
 	}
@@ -320,7 +330,7 @@ func TestRunTUIClosesLiveRefresh(t *testing.T) {
 		return session.Session{SessionID: "session-id", ShortID: "session", JSONLPath: path, Project: "tmp"}, nil
 	}
 
-	if err := runTUI(Command{Mode: ModeTUI, Limit: 5}, deps.Dependencies); err != nil {
+	if err := runTUI(Command{Mode: ModeTUI}, deps.Dependencies); err != nil {
 		t.Fatalf("runTUI returned error: %v", err)
 	}
 	if !closed {
@@ -362,7 +372,7 @@ func TestTUIStartupWithIDSelectsMatchingSession(t *testing.T) {
 		}, nil
 	}
 
-	options, err := buildTUIOptions(Command{Mode: ModeTUI, Limit: 5, ID: "11111111"}, deps.Dependencies)
+	options, err := buildTUIOptions(Command{Mode: ModeTUI, ID: "11111111"}, deps.Dependencies)
 	if err != nil {
 		t.Fatalf("buildTUIOptions returned error: %v", err)
 	}
@@ -405,7 +415,7 @@ func TestTUIIDNoMatchMapsToCurrentEmptyStateBehavior(t *testing.T) {
 		}}}, nil
 	}
 
-	options, err := buildTUIOptions(Command{Mode: ModeTUI, Limit: 5, ID: "zzz"}, deps.Dependencies)
+	options, err := buildTUIOptions(Command{Mode: ModeTUI, ID: "zzz"}, deps.Dependencies)
 	if err != nil {
 		t.Fatalf("buildTUIOptions returned error: %v", err)
 	}
@@ -426,7 +436,7 @@ func TestTUIAmbiguousIDMapsToAmbiguousRouteCandidates(t *testing.T) {
 		}}, nil
 	}
 
-	options, err := buildTUIOptions(Command{Mode: ModeTUI, Limit: 5, ID: "1111"}, deps.Dependencies)
+	options, err := buildTUIOptions(Command{Mode: ModeTUI, ID: "1111"}, deps.Dependencies)
 	if err != nil {
 		t.Fatalf("buildTUIOptions returned error: %v", err)
 	}
@@ -466,7 +476,7 @@ func TestWorkspaceManualRefreshParsesSelectedJSONLPathOnly(t *testing.T) {
 		}, nil
 	}
 
-	options, err := buildTUIOptions(Command{Mode: ModeTUI, Limit: 5, ID: "11111111"}, deps.Dependencies)
+	options, err := buildTUIOptions(Command{Mode: ModeTUI, ID: "11111111"}, deps.Dependencies)
 	if err != nil {
 		t.Fatalf("buildTUIOptions: %v", err)
 	}
@@ -510,7 +520,7 @@ func TestWorkspaceManualRefreshParseFailurePreservesSelectedRefreshScope(t *test
 		}, nil
 	}
 
-	options, err := buildTUIOptions(Command{Mode: ModeTUI, Limit: 5, ID: "11111111"}, deps.Dependencies)
+	options, err := buildTUIOptions(Command{Mode: ModeTUI, ID: "11111111"}, deps.Dependencies)
 	if err != nil {
 		t.Fatalf("buildTUIOptions: %v", err)
 	}
@@ -553,7 +563,7 @@ func TestTUIStartupWiresManualRefreshLoader(t *testing.T) {
 		}, nil
 	}
 
-	options, err := buildTUIOptions(Command{Mode: ModeTUI, Limit: 5}, deps.Dependencies)
+	options, err := buildTUIOptions(Command{Mode: ModeTUI}, deps.Dependencies)
 	if err != nil {
 		t.Fatalf("buildTUIOptions returned error: %v", err)
 	}
@@ -609,7 +619,7 @@ func TestWorkspaceManualRefreshParsesOnlySelectedSessionPath(t *testing.T) {
 		}, nil
 	}
 
-	options, err := buildTUIOptions(Command{Mode: ModeTUI, Limit: 5}, deps.Dependencies)
+	options, err := buildTUIOptions(Command{Mode: ModeTUI}, deps.Dependencies)
 	if err != nil {
 		t.Fatalf("buildTUIOptions returned error: %v", err)
 	}
@@ -652,7 +662,7 @@ func TestTUIStartupWiresNotificationCallbacks(t *testing.T) {
 	}
 	deps.ResetNotificationSuppression = func() { resetCalls++ }
 
-	options, err := buildTUIOptions(Command{Mode: ModeTUI, Limit: 5}, deps.Dependencies)
+	options, err := buildTUIOptions(Command{Mode: ModeTUI}, deps.Dependencies)
 	if err != nil {
 		t.Fatalf("buildTUIOptions returned error: %v", err)
 	}
@@ -720,23 +730,6 @@ func TestConfigEditorStartupDoesNotDiscoverOrParseSessions(t *testing.T) {
 	}
 }
 
-func TestParseListFlags(t *testing.T) {
-	cmd, err := ParseArgs([]string{"--n", "7", "--id", "abc"})
-	if err != nil {
-		t.Fatalf("ParseArgs returned error: %v", err)
-	}
-
-	if cmd.Mode != ModeTUI {
-		t.Fatalf("Mode = %q, want %q", cmd.Mode, ModeTUI)
-	}
-	if cmd.Limit != 7 {
-		t.Fatalf("Limit = %d, want 7", cmd.Limit)
-	}
-	if cmd.ID != "abc" {
-		t.Fatalf("ID = %q, want abc", cmd.ID)
-	}
-}
-
 func TestParseStatuslineArgsGrammar(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -747,32 +740,32 @@ func TestParseStatuslineArgsGrammar(t *testing.T) {
 		{
 			name: "bare",
 			args: []string{"statusline"},
-			want: Command{Mode: ModeStatusline, Limit: DefaultLimit},
+			want: Command{Mode: ModeStatusline},
 		},
 		{
 			name: "check",
 			args: []string{"statusline", "--check"},
-			want: Command{Mode: ModeStatusline, Limit: DefaultLimit, CheckConfig: true},
+			want: Command{Mode: ModeStatusline, CheckConfig: true},
 		},
 		{
 			name: "help",
 			args: []string{"statusline", "--help"},
-			want: Command{Mode: ModeStatuslineHelp, Limit: DefaultLimit},
+			want: Command{Mode: ModeStatuslineHelp},
 		},
 		{
 			name: "wrapped command",
 			args: []string{"statusline", "--", "ccstatusline", "--flag"},
-			want: Command{Mode: ModeStatusline, Limit: DefaultLimit, WrappedCommand: []string{"ccstatusline", "--flag"}},
+			want: Command{Mode: ModeStatusline, WrappedCommand: []string{"ccstatusline", "--flag"}},
 		},
 		{
 			name: "layout and format overrides",
 			args: []string{"statusline", "--layout=new-line", "--format=compact", "--", "ccstatusline"},
-			want: Command{Mode: ModeStatusline, Limit: DefaultLimit, WrappedCommand: []string{"ccstatusline"}, StatuslineLayout: config.StatuslineLayoutNewLine, StatuslineFormat: config.StatuslineFormatCompact},
+			want: Command{Mode: ModeStatusline, WrappedCommand: []string{"ccstatusline"}, StatuslineLayout: config.StatuslineLayoutNewLine, StatuslineFormat: config.StatuslineFormatCompact},
 		},
 		{
 			name: "format override without wrapped command",
 			args: []string{"statusline", "--format=compact"},
-			want: Command{Mode: ModeStatusline, Limit: DefaultLimit, StatuslineFormat: config.StatuslineFormatCompact},
+			want: Command{Mode: ModeStatusline, StatuslineFormat: config.StatuslineFormatCompact},
 		},
 		{
 			name:    "dash-dash with no command",

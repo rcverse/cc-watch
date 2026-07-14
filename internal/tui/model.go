@@ -334,6 +334,9 @@ func normalizeConfig(cfg config.Config) config.Config {
 	} else {
 		cfg.ReminderThresholds = append([]int(nil), cfg.ReminderThresholds...)
 	}
+	if cfg.RecentSessions <= 0 {
+		cfg.RecentSessions = defaults.RecentSessions
+	}
 	cfg.KeepAlive = normalizeKeepAliveConfig(cfg.KeepAlive)
 	cfg.Statusline = config.NormalizeStatusline(cfg.Statusline)
 	return cfg

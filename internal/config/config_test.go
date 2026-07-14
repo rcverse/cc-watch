@@ -13,6 +13,7 @@ func TestDefaultConfigMatchesProductDefaults(t *testing.T) {
 	cfg := Default()
 
 	want := Config{
+		RecentSessions:     10,
 		ReminderThresholds: []int{20, 10},
 		KeepAlive: KeepAliveConfig{
 			TriggerBeforeExpiryMinutes: 5,
@@ -56,6 +57,7 @@ func TestLoadReadsConfigFromHome(t *testing.T) {
 	home := t.TempDir()
 	path := ConfigPath(home)
 	writeConfigFile(t, path, Config{
+		RecentSessions:     10,
 		ReminderThresholds: []int{30, 15, 5},
 		KeepAlive: KeepAliveConfig{
 			TriggerBeforeExpiryMinutes: 7,
@@ -76,6 +78,9 @@ func TestLoadReadsConfigFromHome(t *testing.T) {
 	}
 	if result.KeepAlive.Scope.MaxSends != 3 {
 		t.Fatalf("MaxSends = %d, want 3", result.KeepAlive.Scope.MaxSends)
+	}
+	if result.RecentSessions != 10 {
+		t.Fatalf("RecentSessions = %d, want default 10", result.RecentSessions)
 	}
 }
 
@@ -162,6 +167,7 @@ func TestSaveWritesOnlyValidConfig(t *testing.T) {
 func TestValidateRejectsUnsafeValuesAndSummarizesAffectedAutosend(t *testing.T) {
 	cfg := Default()
 	cfg.ReminderThresholds = []int{10, 20}
+	cfg.RecentSessions = 0
 	cfg.KeepAlive.TriggerBeforeExpiryMinutes = 0
 	cfg.KeepAlive.CountdownSeconds = 0
 	cfg.KeepAlive.Scope.MaxSends = 0

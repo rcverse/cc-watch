@@ -27,6 +27,9 @@ type KeepAliveSummary struct {
 
 func Validate(cfg Config) error {
 	var messages []string
+	if cfg.RecentSessions <= 0 {
+		messages = append(messages, "recent_sessions must be positive")
+	}
 	if err := validateThresholds(cfg.ReminderThresholds); err != nil {
 		messages = append(messages, err.Error())
 	}

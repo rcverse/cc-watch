@@ -8,9 +8,11 @@ behavior in one of these areas, read the relevant section first.
 ## Module & distribution
 
 - Module path: `github.com/rcverse/cc-watch`.
-- Supported distribution paths are `install.sh`, GitHub Release archives, and
-  the `rcverse/homebrew-cc-watch` tap. Release binaries target macOS `arm64`
-  and `amd64`. The project does not use goreleaser.
+- The supported user-facing distribution path is the
+  `rcverse/homebrew-cc-watch` tap. GitHub Release archives are the artifacts
+  consumed by the tap and remain available for manual recovery.
+  `install.sh` is a contributor-only source-build installer. Release binaries
+  target macOS `arm64` and `amd64`. The project does not use goreleaser.
 - macOS only. No Linux/Windows target unless separately approved.
 - cc-watch is beta and local-first. Removed internal surfaces do not
   need compatibility shims by default. Delete stale flags, config knobs,

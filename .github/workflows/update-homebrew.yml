@@ -1,0 +1,103 @@
+name: Update Homebrew tap
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    runs-on: macos-14
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+
+    steps:
+      - name: Check tap token
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
+          test -n "$TAP_TOKEN"
+
+      - name: Check out the Homebrew tap
+        uses: actions/checkout@v4
+        with:
+          repository: rcverse/homebrew-cc-watch
+          ref: main
+          path: homebrew-cc-watch
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Download checksums and update formula
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          gh release download "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern SHA256SUMS \
+            --dir release-assets
+
+          arm64_name="cc-watch_${TAG}_darwin_arm64.tar.gz"
+          amd64_name="cc-watch_${TAG}_darwin_amd64.tar.gz"
+          arm64_sha="$(awk -v name="$arm64_name" '$2 == name { print $1 }' release-assets/SHA256SUMS)"
+          amd64_sha="$(awk -v name="$amd64_name" '$2 == name { print $1 }' release-assets/SHA256SUMS)"
+
+          [[ "$arm64_sha" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$amd64_sha" =~ ^[0-9a-f]{64}$ ]]
+
+          ruby - "$TAG" "$arm64_sha" "$amd64_sha" \
+            homebrew-cc-watch/Formula/cc-watch.rb <<'RUBY'
+          tag, arm64_sha, amd64_sha, path = ARGV
+          version = tag.delete_prefix("v")
+          arm64_url = "https://github.com/rcverse/cc-watch/releases/download/#{tag}/cc-watch_#{tag}_darwin_arm64.tar.gz"
+          amd64_url = "https://github.com/rcverse/cc-watch/releases/download/#{tag}/cc-watch_#{tag}_darwin_amd64.tar.gz"
+
+          def replace_once(text, pattern, replacement, label)
+            count = text.scan(pattern).length
+            abort "expected one #{label}, found #{count}" unless count == 1
+            text.sub(pattern, replacement)
+          end
+
+          formula = File.read(path)
+          formula = replace_once(formula, /version "[^"]+"/, %(version "#{version}"), "version")
+          formula = replace_once(
+            formula,
+            /on_arm do\s+url "[^"]+"\s+sha256 "[^"]+"/m,
+            %(on_arm do\n    url "#{arm64_url}"\n    sha256 "#{arm64_sha}"),
+            "arm64 block"
+          )
+          formula = replace_once(
+            formula,
+            /on_intel do\s+url "[^"]+"\s+sha256 "[^"]+"/m,
+            %(on_intel do\n    url "#{amd64_url}"\n    sha256 "#{amd64_sha}"),
+            "amd64 block"
+          )
+          File.write(path, formula)
+          RUBY
+
+      - name: Test and publish formula update
+        working-directory: homebrew-cc-watch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          brew audit --formula Formula/cc-watch.rb
+          brew install --formula Formula/cc-watch.rb
+          brew test cc-watch
+
+          if git diff --quiet -- Formula/cc-watch.rb; then
+            echo "Homebrew formula is already current"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/cc-watch.rb
+          git commit -m "cc-watch ${TAG}"
+          git push origin HEAD:main

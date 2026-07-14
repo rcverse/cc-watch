@@ -1,6 +1,7 @@
 package config
 
 type Config struct {
+	RecentSessions     int              `json:"recent_sessions"`
 	ReminderThresholds []int            `json:"reminder_thresholds"`
 	KeepAlive          KeepAliveConfig  `json:"keep_alive"`
 	Statusline         StatuslineConfig `json:"statusline"`
@@ -45,6 +46,7 @@ type ScopeConfig struct {
 
 func Default() Config {
 	return Config{
+		RecentSessions:     10,
 		ReminderThresholds: []int{20, 10},
 		KeepAlive: KeepAliveConfig{
 			TriggerBeforeExpiryMinutes: 5,

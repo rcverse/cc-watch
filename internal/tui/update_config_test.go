@@ -558,6 +558,7 @@ func TestConfigEditorEditsTriggerMessageAndMaxSends(t *testing.T) {
 		action string
 		keys   []tea.KeyMsg
 	}{
+		{action: "config_recent_sessions", keys: []tea.KeyMsg{keyRunes("12"), {Type: tea.KeyEnter}}},
 		{action: "config_trigger", keys: []tea.KeyMsg{keyRunes("4"), {Type: tea.KeyEnter}}},
 		{action: "config_message", keys: []tea.KeyMsg{keyRunes("still here?"), {Type: tea.KeyEnter}}},
 		{action: "config_max_sends", keys: []tea.KeyMsg{keyRunes("2"), {Type: tea.KeyEnter}}},
@@ -573,7 +574,7 @@ func TestConfigEditorEditsTriggerMessageAndMaxSends(t *testing.T) {
 	updated, _ := model.Update(keyRunes("s"))
 	model = updated.(Model)
 
-	if saved.KeepAlive.TriggerBeforeExpiryMinutes != 4 || saved.KeepAlive.Message != "still here?" || saved.KeepAlive.Scope.MaxSends != 2 {
+	if saved.RecentSessions != 12 || saved.KeepAlive.TriggerBeforeExpiryMinutes != 4 || saved.KeepAlive.Message != "still here?" || saved.KeepAlive.Scope.MaxSends != 2 {
 		t.Fatalf("saved config = %#v", saved)
 	}
 }

@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"strconv"
 	"strings"
 
 	"github.com/rcverse/cc-watch/internal/config"
@@ -14,8 +13,6 @@ import (
 type Mode string
 
 const (
-	DefaultLimit = 25
-
 	ModeTUI            Mode = "tui"
 	ModeHelp           Mode = "help"
 	ModeVersion        Mode = "version"
@@ -28,7 +25,6 @@ const statuslineUsageError = "statusline: invalid arguments, expected layout/for
 
 type Command struct {
 	Mode             Mode
-	Limit            int
 	ID               string
 	WrappedCommand   []string
 	CheckConfig      bool
@@ -38,8 +34,7 @@ type Command struct {
 
 func ParseArgs(args []string) (Command, error) {
 	cmd := Command{
-		Mode:  ModeTUI,
-		Limit: DefaultLimit,
+		Mode: ModeTUI,
 	}
 
 	if len(args) > 0 && args[0] == "config" {
@@ -107,7 +102,6 @@ func ParseArgs(args []string) (Command, error) {
 	fs.BoolVar(&help, "help", false, "show help")
 	fs.BoolVar(&help, "h", false, "show help")
 	fs.BoolVar(&version, "version", false, "show version")
-	fs.IntVar(&cmd.Limit, "n", cmd.Limit, "number of recent sessions")
 	fs.StringVar(&cmd.ID, "id", "", "session id")
 
 	if err := fs.Parse(args); err != nil {
@@ -128,9 +122,6 @@ func ParseArgs(args []string) (Command, error) {
 		cmd.Mode = ModeVersion
 		return cmd, nil
 	}
-	if cmd.Limit < 1 {
-		return cmd, fmt.Errorf("--n must be positive, got %s", strconv.Itoa(cmd.Limit))
-	}
 	return cmd, nil
 }
 
@@ -144,7 +135,7 @@ func validStatuslineFormat(value string) bool {
 
 func WriteHelp(w io.Writer) {
 	fmt.Fprint(w, `Usage:
-  cc-watch [--n N] [--id <partial-id>]
+  cc-watch [--id <partial-id>]
   cc-watch config
   cc-watch statusline
   cc-watch statusline --layout=new-line --format=compact
@@ -156,7 +147,6 @@ func WriteHelp(w io.Writer) {
 
 TUI:
   cc-watch                  Open recent Claude Code sessions.
-  cc-watch --n 10           Load 10 recent sessions.
   cc-watch --id <partial-id>  Open a matching session.
   cc-watch config           Edit Reminder, KeepAlive, and Statusline settings.
 

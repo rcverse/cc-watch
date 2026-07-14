@@ -15,10 +15,9 @@ type Loaders struct {
 }
 
 type Request struct {
-	Home  string
-	Now   time.Time
-	Limit int
-	ID    string
+	Home string
+	Now  time.Time
+	ID   string
 }
 
 type EmptyState string
@@ -74,14 +73,11 @@ func (e *BuildError) Unwrap() error {
 }
 
 func Build(req Request, loaders Loaders) (Result, error) {
-	if req.Limit <= 0 {
-		req.Limit = 5
-	}
 	result, err := loadBase(req, loaders)
 	if err != nil {
 		return Result{}, &BuildError{Stage: StageConfig, Code: "config_error", Err: err}
 	}
-	discoveryLimit := req.Limit
+	discoveryLimit := result.Config.RecentSessions
 	if req.ID != "" {
 		discoveryLimit = 0
 	}

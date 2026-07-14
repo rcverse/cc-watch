@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-14
+    env:
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify tag and version
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
+          test "$(git rev-parse "$TAG^{}")" = "$(git rev-parse HEAD)"
+          test "$(go run ./cmd/cc-watch --version)" = "cc-watch ${TAG#v}"
+
+      - name: Run release checks
+        run: |
+          go build ./...
+          go vet ./...
+          go test ./...
+          go test ./... -race
+          go test -tags demo ./...
+          scripts/test-install.sh
+
+      - name: Build macOS archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_dir="dist/releases/$TAG"
+          mkdir -p "$release_dir/arm64" "$release_dir/amd64"
+
+          for arch in arm64 amd64; do
+            CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" \
+              go build -trimpath -o "$release_dir/$arch/cc-watch" ./cmd/cc-watch
+            tar -czf "$release_dir/cc-watch_${TAG}_darwin_${arch}.tar.gz" \
+              -C "$release_dir/$arch" cc-watch
+          done
+
+          (
+            cd "$release_dir"
+            shasum -a 256 cc-watch_*.tar.gz > SHA256SUMS
+            shasum -a 256 -c SHA256SUMS
+          )
+
+      - name: Create draft prerelease
+        run: |
+          set -euo pipefail
+          release_dir="dist/releases/$TAG"
+          gh release create "$TAG" \
+            "$release_dir"/cc-watch_*.tar.gz \
+            "$release_dir/SHA256SUMS" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "cc-watch $TAG" \
+            --draft \
+            --prerelease \
+            --verify-tag \
+            --generate-notes \
+            --fail-on-no-commits

@@ -25,13 +25,11 @@ if [ -L "$TARGET" ]; then
 fi
 
 VERSION="$("$TARGET" --version)"
-case "$VERSION" in
-	"cc-watch 1.0.0-beta.3") ;;
-  *)
-    echo "unexpected installed version: $VERSION" >&2
-    exit 1
-    ;;
-esac
+EXPECTED_VERSION="$(go run ./cmd/cc-watch --version)"
+if [ "$VERSION" != "$EXPECTED_VERSION" ]; then
+  echo "unexpected installed version: $VERSION (want $EXPECTED_VERSION)" >&2
+  exit 1
+fi
 
 HELP_OUTPUT="$("$TARGET" --help)"
 case "$HELP_OUTPUT" in
