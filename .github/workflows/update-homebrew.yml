@@ -37,6 +37,15 @@ jobs:
           path: homebrew-cc-watch
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
+      - name: Register tap with Homebrew
+        shell: bash
+        run: |
+          set -euo pipefail
+          tap_dir="$(brew --repository)/Library/Taps/rcverse/homebrew-cc-watch"
+          mkdir -p "$(dirname "$tap_dir")"
+          mv "$GITHUB_WORKSPACE/homebrew-cc-watch" "$tap_dir"
+          echo "TAP_DIR=$tap_dir" >> "$GITHUB_ENV"
+
       - name: Download checksums and update formula
         env:
           GH_TOKEN: ${{ github.token }}
@@ -58,7 +67,7 @@ jobs:
           [[ "$amd64_sha" =~ ^[0-9a-f]{64}$ ]]
 
           ruby - "$TAG" "$arm64_sha" "$amd64_sha" \
-            homebrew-cc-watch/Formula/cc-watch.rb <<'RUBY'
+            "$TAP_DIR/Formula/cc-watch.rb" <<'RUBY'
           tag, arm64_sha, amd64_sha, path = ARGV
           version = tag.delete_prefix("v")
           arm64_url = "https://github.com/rcverse/cc-watch/releases/download/#{tag}/cc-watch_#{tag}_darwin_arm64.tar.gz"
@@ -88,10 +97,10 @@ jobs:
           RUBY
 
       - name: Test and publish formula update
-        working-directory: homebrew-cc-watch
         shell: bash
         run: |
           set -euo pipefail
+          cd "$TAP_DIR"
           git diff --check
           brew audit --changed
           brew install --formula Formula/cc-watch.rb
