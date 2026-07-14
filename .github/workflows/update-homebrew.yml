@@ -72,7 +72,6 @@ jobs:
           ruby - "$TAG" "$arm64_sha" "$amd64_sha" \
             "$TAP_DIR/Formula/cc-watch.rb" <<'RUBY'
           tag, arm64_sha, amd64_sha, path = ARGV
-          version = tag.delete_prefix("v")
           arm64_url = "https://github.com/rcverse/cc-watch/releases/download/#{tag}/cc-watch_#{tag}_darwin_arm64.tar.gz"
           amd64_url = "https://github.com/rcverse/cc-watch/releases/download/#{tag}/cc-watch_#{tag}_darwin_amd64.tar.gz"
 
@@ -83,7 +82,7 @@ jobs:
           end
 
           formula = File.read(path)
-          formula = replace_once(formula, /version "[^"]+"/, %(version "#{version}"), "version")
+          formula = replace_once(formula, /^  version "[^"]+"\n/, "", "version declaration")
           formula = replace_once(
             formula,
             /on_arm do\s+url "[^"]+"\s+sha256 "[^"]+"/m,
