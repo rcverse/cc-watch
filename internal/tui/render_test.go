@@ -1308,10 +1308,19 @@ func TestRewindWindowRowsAlignStatusColumns(t *testing.T) {
 	active = stripANSI(active)
 	expired = stripANSI(expired)
 
-	if strings.Index(active, "12:00:00") != strings.Index(expired, "11:00:00") {
+	activeTimeText := now.Local().Format("15:04:05")
+	expiredTimeText := now.Add(-time.Hour).Local().Format("15:04:05")
+	activeTime := strings.Index(active, activeTimeText)
+	expiredTime := strings.Index(expired, expiredTimeText)
+	if activeTime < 0 || expiredTime < 0 {
+		t.Fatalf("rewind rows missing local time columns:\nactive:  %q\nexpired: %q", active, expired)
+	}
+	if visibleWidth(active[:activeTime]) != visibleWidth(expired[:expiredTime]) {
 		t.Fatalf("rewind rows do not align time columns:\nactive:  %q\nexpired: %q", active, expired)
 	}
-	if strings.Index(active, "active message") != strings.Index(expired, "expired message") {
+	activeExcerpt := strings.Index(active, "active message")
+	expiredExcerpt := strings.Index(expired, "expired message")
+	if visibleWidth(active[:activeExcerpt]) != visibleWidth(expired[:expiredExcerpt]) {
 		t.Fatalf("rewind rows do not align excerpt columns:\nactive:  %q\nexpired: %q", active, expired)
 	}
 }

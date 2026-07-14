@@ -11,7 +11,10 @@ import (
 	"github.com/rcverse/cc-watch/internal/session"
 )
 
-const rewindWindowActiveLimit = 6
+const (
+	rewindWindowActiveLimit = 6
+	rewindStatusWidth       = 15
+)
 
 type rewindWindowRow struct {
 	message session.MessageWindow
@@ -188,9 +191,9 @@ func formatRewindWindowRow(row rewindWindowRow, width int) string {
 		status = "expired " + formatStatusDuration(row.seconds)
 	}
 	chip = padANSI(styles.Render(role, chip), visibleWidth("× EXPIRED"))
-	prefixWidth := visibleWidth("× EXPIRED") + 2 + len("15:04:05") + 2 + 13 + 2
+	prefixWidth := visibleWidth("× EXPIRED") + 2 + len("15:04:05") + 2 + rewindStatusWidth + 2
 	excerpt := truncateEnd(displayExcerpt(row.message.Excerpt), max(width-prefixWidth, 8))
-	return fmt.Sprintf("%s  %s  %-13s  %s", chip, row.message.At.Local().Format("15:04:05"), status, messageText(excerpt))
+	return fmt.Sprintf("%s  %s  %-*s  %s", chip, row.message.At.Local().Format("15:04:05"), rewindStatusWidth, status, messageText(excerpt))
 }
 
 func (m Model) renderWorkspacePanel(title string, body string) string {
