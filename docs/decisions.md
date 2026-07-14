@@ -8,11 +8,11 @@ behavior in one of these areas, read the relevant section first.
 ## Module & distribution
 
 - Module path: `github.com/rcverse/cc-watch`.
-- Local binary install (`install.sh`) is the only supported distribution
-  path. No Homebrew tap, GitHub Releases, or goreleaser without explicit
-  approval first.
+- Supported distribution paths are `install.sh`, GitHub Release archives, and
+  the `rcverse/homebrew-cc-watch` tap. Release binaries target macOS `arm64`
+  and `amd64`. The project does not use goreleaser.
 - macOS only. No Linux/Windows target unless separately approved.
-- cc-watch is unreleased and local-first. Removed internal surfaces do not
+- cc-watch is beta and local-first. Removed internal surfaces do not
   need compatibility shims by default. Delete stale flags, config knobs,
   tests, and docs unless the user explicitly asks for a migration path.
 
@@ -52,7 +52,7 @@ behavior in one of these areas, read the relevant section first.
 ```
 effective_trigger_s   = min(trigger_before_expiry_m * 60, ttl_seconds * 0.20)
 effective_countdown_s = min(countdown_s, effective_trigger_s - 30)   # 30s countdown-sizing margin
-latest_safe_send_at   = last_message_at + ttl_seconds - 10           # 10s hard-stop margin
+latest_safe_send_at   = cache_anchor_at + ttl_seconds - 10           # 10s hard-stop margin
 ```
 
 If the countdown-sizing margin can't be preserved, the KeepAlive instance is
@@ -65,8 +65,8 @@ deadline (`latest_safe_send_at`) uses a **smaller** 10s margin on purpose. The
 countdown is tick-counted, so it always elapses a beat after its nominal
 duration; if the deadline used the same 30s margin it would coincide with the
 countdown's own end and any drift would silently pause sending — which made
-KeepAlive effectively never fire for 5-minute and unknown-tier caches (their
-countdown ends right at the 30s mark). The 10s hard-stop absorbs normal drift
+KeepAlive effectively never fire for 5-minute caches (their countdown ends
+right at the 30s mark). The 10s hard-stop absorbs normal drift
 while still refusing to send within seconds of expiry.
 
 ## Refresh architecture
@@ -128,10 +128,16 @@ while still refusing to send within seconds of expiry.
   does not need to inherit the user's shell `PATH`; reinstall repairs an older
   path-dependent wrapper.
   `cc-watch statusline --check` remains read-only.
-- The cc-watch config stores only statusline display preferences: `layout`
-  (`same_line` or `new_line`) and `format` (`full` or `compact`). Install state
-  remains derived from Claude Code's settings, and CLI flags override these
-  preferences for one invocation.
+- The cc-watch config stores three independent statusline elements — `usage`,
+  `warning`, and `cache` — each with `enabled`, `layout`, and `format`, plus an
+  explicit `order`. Usage and cache support `full`/`compact`; the warning uses
+  `alert_only`/`verbose`. Install state remains derived from Claude Code's
+  settings, and the legacy CLI flags override the Usage element for one
+  invocation.
+- When the cache element is enabled, installation adds Claude Code's
+  `refreshInterval: 1` only when the user has not already chosen an interval.
+  The hook reuses parsed cache timing while the transcript mtime is unchanged,
+  so a one-second countdown does not trigger a full JSONL scan every second.
 - Both Claude Code account windows matter for KeepAlive availability. The
   statusline displays both `five_hour` and `seven_day` when Claude provides
   them, and `KeepAlive at risk` means at least one account window may run
@@ -149,18 +155,25 @@ while still refusing to send within seconds of expiry.
 - On a rate-limit window rollover (a new `resets_at` differs from the
   last stored reading), the reading history is cleared — momentum across
   a reset boundary is meaningless.
-- The session's cache-tier TTL is looked up via the existing
-  `session.ParseFile` whole-transcript-sum logic and then **cached per
-  `transcript_path`** in `ratelimit.json` — re-running a whole-file scan
-  on every single hook invocation would add real per-turn latency on a
-  long session. Only the first hook invocation for a session pays the
-  scan cost.
+- Cache timing is anchored only by a timestamped assistant response with
+  positive output usage and cache-token evidence. User messages, local
+  commands, tool-only events, and explicit error events do not advance the
+  anchor. The latest accepted response determines the 1h/5m tier; a cache
+  read/write without new tier evidence retains the previous tier until an
+  invalidation is observed. `/compact` starts a new cache lineage;
+  `/model` and `/reload-plugins` may change the cached prefix, so they clear the
+  anchor conservatively. `/effort` changes the cache key, so it also clears the
+  anchor conservatively. Unknown timing is never treated as an active cache for
+  KeepAlive or reminders.
+- Statusline snapshots, including unknown timing, are cached per
+  `transcript_path` while the transcript mtime is unchanged. This avoids
+  re-scanning a long JSONL file on every one-second statusline refresh.
 
 ## Parser rules (don't casually change)
 
-- `ephemeral_1h_input_tokens > 0` → 1h tier; else
-  `ephemeral_5m_input_tokens > 0` → 5m tier; else unknown (treated as 5m
-  for gap analysis).
+- `ephemeral_1h_input_tokens > 0` on an accepted response → 1h tier; else
+  `ephemeral_5m_input_tokens > 0` → 5m tier; else retain the last known tier
+  for the same cache sequence or remain unknown.
 - Hit rate = `cache_read / (cache_read + cache_create)`.
 - A gap is only recorded above 60s between consecutive timestamps; it's a
   "reset" if the gap exceeds the effective TTL.

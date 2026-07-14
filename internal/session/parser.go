@@ -66,6 +66,8 @@ func ParseReader(r io.Reader, path string, fileModifiedAt time.Time) (Session, e
 type lineParser struct {
 	session        Session
 	totals         map[string]int
+	cacheWindow    CacheWindow
+	cacheAnchorAt  *time.Time
 	timestamps     []time.Time
 	recentMessages []MessageWindow
 	userTexts      []string
@@ -84,6 +86,8 @@ func (p *lineParser) parseLine(raw string) {
 
 	ts, hasTimestamp := p.parseTimestamp(obj)
 	p.parseUsage(obj)
+	p.parseCacheInvalidation(obj)
+	p.parseCacheEvent(obj, ts, hasTimestamp)
 	p.parseMessageWindow(obj, ts, hasTimestamp)
 	p.parseUserMessage(obj)
 	p.parseCwd(obj)
@@ -114,28 +118,94 @@ func (p *lineParser) parseTimestamp(obj map[string]any) (time.Time, bool) {
 }
 
 func (p *lineParser) parseUsage(obj map[string]any) {
+	for key, value := range usageValues(obj) {
+		p.totals[key] += value
+	}
+}
+
+func usageValues(obj map[string]any) map[string]int {
 	usage := mapValue(obj["usage"])
 	if len(usage) == 0 {
 		if message := mapValue(obj["message"]); message != nil {
 			usage = mapValue(message["usage"])
 		}
 	}
-	if usage == nil {
-		return
-	}
-
+	values := map[string]int{}
 	for key, value := range usage {
 		switch typed := value.(type) {
 		case float64:
-			p.totals[key] += int(typed)
+			values[key] += int(typed)
 		case map[string]any:
 			for nestedKey, nestedValue := range typed {
 				if number, ok := nestedValue.(float64); ok {
-					p.totals[nestedKey] += int(number)
+					values[nestedKey] += int(number)
 				}
 			}
 		}
 	}
+	return values
+}
+
+func (p *lineParser) parseCacheEvent(obj map[string]any, ts time.Time, hasTimestamp bool) {
+	if !hasTimestamp {
+		return
+	}
+	message := mapValue(obj["message"])
+	if message == nil || message["role"] != "assistant" || cacheEventHasError(obj, message) {
+		return
+	}
+	usage := usageValues(obj)
+	if usage["output_tokens"] <= 0 || !hasCacheEvidence(usage) {
+		return
+	}
+	if window := cacheWindowForUsage(usage); window.Known {
+		p.cacheWindow = window
+	}
+	if !p.cacheWindow.Known {
+		return
+	}
+	p.cacheAnchorAt = &ts
+}
+
+func (p *lineParser) parseCacheInvalidation(obj map[string]any) {
+	message := mapValue(obj["message"])
+	if message == nil || message["role"] != "user" {
+		return
+	}
+	text := contentText(message["content"])
+	for _, command := range []string{"/compact", "/model", "/reload-plugins", "/effort"} {
+		if strings.Contains(text, "<command-name>"+command+"</command-name>") {
+			p.cacheWindow = unknownCacheWindow()
+			p.cacheAnchorAt = nil
+			return
+		}
+	}
+}
+
+func cacheEventHasError(obj, message map[string]any) bool {
+	for _, value := range []map[string]any{obj, message} {
+		for _, key := range []string{"error", "error_message", "is_error"} {
+			raw, ok := value[key]
+			if !ok || raw == nil {
+				continue
+			}
+			if key == "is_error" {
+				flag, _ := raw.(bool)
+				if !flag {
+					continue
+				}
+			}
+			return true
+		}
+	}
+	return false
+}
+
+func hasCacheEvidence(usage map[string]int) bool {
+	return usage["cache_creation_input_tokens"] > 0 ||
+		usage["cache_read_input_tokens"] > 0 ||
+		usage["ephemeral_1h_input_tokens"] > 0 ||
+		usage["ephemeral_5m_input_tokens"] > 0
 }
 
 func (p *lineParser) parseUserMessage(obj map[string]any) {
@@ -193,10 +263,13 @@ func (p *lineParser) finish() {
 		last := p.timestamps[len(p.timestamps)-1]
 		duration := int(last.Sub(started).Seconds())
 		p.session.DurationSeconds = &duration
-		p.session.LastMessageAt = &last
 	}
 
-	p.session.CacheWindow = cacheWindow(p.totals)
+	if p.cacheWindow.Tier == "" {
+		p.cacheWindow = unknownCacheWindow()
+	}
+	p.session.CacheWindow = p.cacheWindow
+	p.session.CacheAnchorAt = p.cacheAnchorAt
 	p.session.TokenStats = tokenStats(p.totals)
 	p.session.Gaps, p.session.ResetCount = gaps(p.timestamps, p.session.CacheWindow.TTLSeconds)
 
@@ -210,8 +283,8 @@ func (p *lineParser) warn() {
 	p.session.WarningCount++
 }
 
-func cacheWindow(totals map[string]int) CacheWindow {
-	if totals["ephemeral_1h_input_tokens"] > 0 {
+func cacheWindowForUsage(usage map[string]int) CacheWindow {
+	if usage["ephemeral_1h_input_tokens"] > 0 && usage["ephemeral_5m_input_tokens"] == 0 {
 		return CacheWindow{
 			Tier:       Tier1Hour,
 			Label:      "1h",
@@ -219,7 +292,7 @@ func cacheWindow(totals map[string]int) CacheWindow {
 			Known:      true,
 		}
 	}
-	if totals["ephemeral_5m_input_tokens"] > 0 {
+	if usage["ephemeral_5m_input_tokens"] > 0 && usage["ephemeral_1h_input_tokens"] == 0 {
 		return CacheWindow{
 			Tier:       Tier5Minute,
 			Label:      "5m",
@@ -227,6 +300,10 @@ func cacheWindow(totals map[string]int) CacheWindow {
 			Known:      true,
 		}
 	}
+	return unknownCacheWindow()
+}
+
+func unknownCacheWindow() CacheWindow {
 	return CacheWindow{
 		Tier:       TierUnknown,
 		Label:      "TTL ?",

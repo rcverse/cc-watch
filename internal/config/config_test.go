@@ -22,14 +22,33 @@ func TestDefaultConfigMatchesProductDefaults(t *testing.T) {
 				MaxSends: 5,
 			},
 		},
-		Statusline: StatuslineConfig{
-			Layout: StatuslineLayoutSameLine,
-			Format: StatuslineFormatFull,
-		},
+		Statusline: DefaultStatusline(),
 	}
 
 	if !reflect.DeepEqual(cfg, want) {
 		t.Fatalf("Default() = %#v, want %#v", cfg, want)
+	}
+}
+
+func TestLoadMigratesLegacyStatuslineSettingsToUsage(t *testing.T) {
+	home := t.TempDir()
+	path := ConfigPath(home)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(`{"statusline":{"layout":"new_line","format":"compact"}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	result, err := Load(home)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if result.Statusline.Usage.Layout != StatuslineLayoutNewLine || result.Statusline.Usage.Format != StatuslineFormatCompact {
+		t.Fatalf("usage = %#v, want migrated legacy layout and format", result.Statusline.Usage)
+	}
+	if result.Statusline.Cache != DefaultStatusline().Cache {
+		t.Fatalf("cache = %#v, want new default cache element", result.Statusline.Cache)
 	}
 }
 
@@ -86,7 +105,7 @@ func TestLoadMergesPartialConfigWithDefaults(t *testing.T) {
 	if len(result.ReminderThresholds) != len(Default().ReminderThresholds) {
 		t.Fatalf("reminder thresholds = %#v, want defaults", result.ReminderThresholds)
 	}
-	if result.Statusline != Default().Statusline {
+	if !reflect.DeepEqual(result.Statusline, Default().Statusline) {
 		t.Fatalf("statusline = %#v, want defaults", result.Statusline)
 	}
 }

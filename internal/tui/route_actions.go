@@ -92,7 +92,10 @@ func (m Model) activateConfigAction(action string) (tea.Model, tea.Cmd) {
 
 func (m Model) activateStatuslineAction(action string) (tea.Model, tea.Cmd) {
 	switch action {
-	case "config_statusline_layout", "config_statusline_format":
+	case "config_statusline_usage", "config_statusline_warning", "config_statusline_cache":
+		m.startConfigChoice(action + "_format")
+		return m, nil
+	case "config_statusline_sequence":
 		m.startConfigChoice(action)
 		return m, nil
 	case "config_statusline_action":

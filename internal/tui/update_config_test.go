@@ -23,7 +23,7 @@ func TestConfigFocusCycleOnlyVisitsVisibleRows(t *testing.T) {
 		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyDown})
 		model = updated.(Model)
 	}
-	for _, hidden := range []string{"help", "quit"} {
+	for _, hidden := range []string{"quit"} {
 		if seen[hidden] {
 			t.Fatalf("config focus reached hidden action %q; saw %#v", hidden, seen)
 		}
@@ -45,7 +45,7 @@ func TestConfigEditorShowsStatuslineInstallState(t *testing.T) {
 		}
 	}
 	model = openStatuslineSettings(t, model)
-	for _, want := range []string{"Claude Code Watch / statusline", "Status", "Layout", "Format", "Install"} {
+	for _, want := range []string{"Claude Code Watch / statusline", "Usage", "KA warning", "Cache timing", "Sequence", "Install"} {
 		if !strings.Contains(model.View(), want) {
 			t.Fatalf("statusline view missing %q:\n%s", want, model.View())
 		}
@@ -56,38 +56,110 @@ func TestConfigStatuslineStatusIsInformationalAndDistinct(t *testing.T) {
 	model := NewModel(Options{StartMode: StartConfig, Config: config.Default(), Width: 160})
 	model = openStatuslineSettings(t, model)
 	view := stripANSI(model.View())
-	for _, want := range []string{"Status", "● Not installed", "Claude Code statusline is not using cc-watch"} {
+	for _, want := range []string{"● Not installed", "Claude Code statusline is not using cc-watch"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("statusline view missing %q:\n%s", want, view)
 		}
 	}
+	for _, want := range []string{"│  ● Not installed", "│  Claude Code statusline is not using cc-watch"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("statusline content is not aligned with its panel title column for %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "│   Status ") {
+		t.Fatalf("statusline view still renders the redundant Status label:\n%s", view)
+	}
 }
 
-func TestConfigStatuslineChoicesUseArrowSelection(t *testing.T) {
+func TestConfigCuesUseTextualKeysAndStatuslineListsReset(t *testing.T) {
+	model := NewModel(Options{StartMode: StartConfig})
+	view := stripANSI(model.View())
+	for _, want := range []string{"Enter edit/act", "s save", "d reset", "Esc cancel"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("config view missing cue %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "⎋") || strings.Contains(view, "space toggle") {
+		t.Fatalf("config view contains an unclear or inactive cue:\n%s", view)
+	}
+
+	model = openStatuslineSettings(t, model)
+	view = stripANSI(model.View())
+	for _, want := range []string{"Enter choose", "Space toggle", "d reset", "Esc back"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("statusline view missing cue %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "⎋") || strings.Contains(view, "↵ edit") {
+		t.Fatalf("statusline view contains an unclear cue:\n%s", view)
+	}
+
+	model = moveConfigFocusTo(t, model, "config_statusline_sequence")
+	view = stripANSI(model.View())
+	if strings.Contains(view, "Space toggle") || !strings.Contains(view, "Enter choose/act") {
+		t.Fatalf("statusline sequence row advertises the wrong key actions:\n%s", view)
+	}
+}
+
+func TestConfigStatuslineElementsAndSequenceAreIndependentlyEditable(t *testing.T) {
 	model := openStatuslineSettings(t, NewModel(Options{StartMode: StartConfig, Config: config.Default()}))
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated.(Model)
-	if !strings.Contains(model.View(), "Choose Layout") || strings.Contains(model.View(), "Current input") {
-		t.Fatalf("layout did not open as a choice menu:\n%s", model.View())
+	if !strings.Contains(model.View(), "Choose Usage format") ||
+		!strings.Contains(model.View(), "Full · Same line") ||
+		!strings.Contains(model.View(), "Compact · New line") ||
+		strings.Contains(model.View(), "Current input") {
+		t.Fatalf("usage format did not open as a choice menu:\n%s", model.View())
 	}
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	model = updated.(Model)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	model = updated.(Model)
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
 	model = updated.(Model)
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated.(Model)
-	if model.configDraft.Statusline.Layout != config.StatuslineLayoutNewLine {
-		t.Fatalf("layout = %q, want %q", model.configDraft.Statusline.Layout, config.StatuslineLayoutNewLine)
+	if model.configDraft.Statusline.Usage.Format != config.StatuslineFormatCompact {
+		t.Fatalf("usage format = %q, want %q", model.configDraft.Statusline.Usage.Format, config.StatuslineFormatCompact)
+	}
+	if model.configDraft.Statusline.Usage.Layout != config.StatuslineLayoutNewLine {
+		t.Fatalf("usage layout = %q, want %q", model.configDraft.Statusline.Usage.Layout, config.StatuslineLayoutNewLine)
 	}
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	model = moveConfigFocusTo(t, model, "config_statusline_warning")
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeySpace})
 	model = updated.(Model)
+	if model.configDraft.Statusline.Warning.Enabled {
+		t.Fatal("warning remained enabled after space toggle")
+	}
+
+	model = moveConfigFocusTo(t, model, "config_statusline_sequence")
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated.(Model)
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
 	model = updated.(Model)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	model = updated.(Model)
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated.(Model)
-	if model.configDraft.Statusline.Format != config.StatuslineFormatCompact {
-		t.Fatalf("format = %q, want %q", model.configDraft.Statusline.Format, config.StatuslineFormatCompact)
+	if model.configDraft.Statusline.Order[0] != config.StatuslineElementWarning {
+		t.Fatalf("statusline order = %#v, want warning moved to first", model.configDraft.Statusline.Order)
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	model = updated.(Model)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	model = updated.(Model)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	model = updated.(Model)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	model = updated.(Model)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+	if model.configDraft.Statusline.Order[0] != config.StatuslineElementCache {
+		t.Fatalf("statusline order = %#v, want cache moved to first", model.configDraft.Statusline.Order)
 	}
 }
 
@@ -115,7 +187,7 @@ func TestConfigEditorRequiresSecondConfirmationForStatuslineInstall(t *testing.T
 			InspectStatusline: func() (statusline.Status, error) {
 				return status, nil
 			},
-			InstallStatusline: func() error {
+			InstallStatusline: func(_ config.Config) error {
 				installs++
 				status = statusline.Status{State: statusline.StateInstalled, Command: "cc-watch statusline"}
 				return nil
@@ -151,7 +223,7 @@ func TestConfigEditorCanInstallStatusline(t *testing.T) {
 			InspectStatusline: func() (statusline.Status, error) {
 				return status, nil
 			},
-			InstallStatusline: func() error {
+			InstallStatusline: func(_ config.Config) error {
 				installs++
 				status = statusline.Status{State: statusline.StateInstalled, Command: "cc-watch statusline"}
 				return nil
@@ -217,7 +289,7 @@ func TestConfigEditorOffersReinstallForPathDependentStatusline(t *testing.T) {
 			InspectStatusline: func() (statusline.Status, error) {
 				return status, nil
 			},
-			InstallStatusline: func() error {
+			InstallStatusline: func(_ config.Config) error {
 				installs++
 				status.Command = "/Users/example/.local/bin/cc-watch statusline -- ccstatusline"
 				return nil
@@ -252,7 +324,7 @@ func TestConfigEditorStatuslineManualReviewDoesNotWrite(t *testing.T) {
 			InspectStatusline: func() (statusline.Status, error) {
 				return statusline.Status{State: statusline.StateManualReview}, nil
 			},
-			InstallStatusline: func() error {
+			InstallStatusline: func(_ config.Config) error {
 				writes++
 				return errors.New("must not write")
 			},
@@ -326,7 +398,7 @@ func TestConfigEditorPrefillsCurrentValueAndPreservesMessageOnEmptyEdit(t *testi
 	model = moveConfigFocusTo(t, model, "config_message")
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated.(Model)
-	if !strings.Contains(model.View(), cfg.KeepAlive.Message) || !strings.Contains(model.View(), "↵ save field") {
+	if !strings.Contains(model.View(), cfg.KeepAlive.Message) || !strings.Contains(model.View(), "Enter save field") {
 		t.Fatalf("message edit did not prefill current value with guidance:\n%s", model.View())
 	}
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})

@@ -34,17 +34,17 @@ func TestTimingDefaultsAllowConfiguredCountdown(t *testing.T) {
 	}
 }
 
-func TestUnknownTTLUsesConservativeFiveMinuteWindow(t *testing.T) {
+func TestUnknownTTLDoesNotAllowKeepAlive(t *testing.T) {
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 	last := now.Add(-4 * time.Minute)
 	s := session.Session{
 		SessionID:     "unknown",
-		LastMessageAt: &last,
+		CacheAnchorAt: &last,
 		CacheWindow:   session.CacheWindow{Tier: session.TierUnknown},
 	}
 	actions := NewManager(config.Default().KeepAlive).Enable(s, now)
-	if len(actions) != 1 || actions[0].Kind != ActionCountdownStarted || actions[0].CountdownSeconds != 30 {
-		t.Fatalf("unknown TTL actions = %#v, want conservative 30s countdown", actions)
+	if len(actions) != 0 {
+		t.Fatalf("unknown TTL actions = %#v, want no action", actions)
 	}
 }
 
@@ -70,7 +70,7 @@ func TestTimingPausesSendWhenSafetyMarginCannotBePreserved(t *testing.T) {
 	last := now.Add(-4*time.Minute - 40*time.Second)
 	s := session.Session{
 		SessionID:     "unsafe",
-		LastMessageAt: &last,
+		CacheAnchorAt: &last,
 		CacheWindow: session.CacheWindow{
 			Tier:       session.Tier5Minute,
 			TTLSeconds: 300,
@@ -571,7 +571,7 @@ func sessionWithTTL(now time.Time, tier session.CacheTier, ttlSeconds int, known
 	}
 	return session.Session{
 		SessionID:     string(tier),
-		LastMessageAt: &last,
+		CacheAnchorAt: &last,
 		CacheWindow: session.CacheWindow{
 			Tier:       tier,
 			TTLSeconds: ttlSeconds,
@@ -586,7 +586,7 @@ func activeSession(id string, now time.Time, ttl time.Duration, remaining time.D
 		SessionID:     id,
 		ShortID:       id,
 		Project:       "project-" + id,
-		LastMessageAt: &last,
+		CacheAnchorAt: &last,
 		CacheWindow: session.CacheWindow{
 			Tier:       session.Tier1Hour,
 			TTLSeconds: int(ttl.Seconds()),

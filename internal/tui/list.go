@@ -159,7 +159,7 @@ func (m Model) ambiguousListView() string {
 	for i, s := range m.sessions {
 		b.WriteString(m.renderListRow(i, s))
 	}
-	b.WriteString(cueLine("↑↓ move  ↵ open selected  ⎋ list  q quit"))
+	b.WriteString(cueLine("↑↓ move  Enter open selected  c config  Esc list  q quit"))
 	return b.String()
 }
 
@@ -296,8 +296,8 @@ func sessionStatusText(status session.Status, now time.Time) string {
 	case session.StatusActive:
 		return padANSI(styles.Render(RoleSuccess, "● Active"), 12) + when + " left"
 	case session.StatusExpired:
-		if status.LastMessageAt != nil {
-			when = formatStatusDuration(int(now.Sub(*status.LastMessageAt).Seconds())) + " ago"
+		if status.CacheAnchorAt != nil {
+			when = formatStatusDuration(int(now.Sub(*status.CacheAnchorAt).Seconds())) + " ago"
 		}
 		return padANSI(styles.Render(RoleDanger, "× Expired"), 12) + when
 	case session.StatusUnknown:
@@ -331,9 +331,9 @@ func reminderChip(m Model, s session.Session) string {
 		return styles.Render(RoleDisabled, "remind N/A")
 	}
 	if m.reminderEnabled[s.SessionID] {
-		return styles.Render(RoleReminder, "remind") + " " + styles.Render(RoleSuccess, "ON")
+		return styles.Render(RoleReminder, "remind") + " " + onOffText(true, false)
 	}
-	return styles.Render(RoleReminder, "remind") + " " + styles.Render(RoleMuted, "off")
+	return styles.Render(RoleReminder, "remind") + " " + offText()
 }
 
 func keepAliveChip(m Model, s session.Session) string {
@@ -353,10 +353,12 @@ func keepAliveChip(m Model, s session.Session) string {
 		return styles.Render(RoleKeepAlive, "KeepAlive") + " " + styles.Render(RoleWarning, "confirming")
 	case keepalive.StateErrorNoClaude, keepalive.StateErrorSubprocess, keepalive.StateErrorTimeout:
 		return styles.Render(RoleKeepAlive, "KeepAlive") + " " + styles.Render(RoleDanger, "failed")
-	case keepalive.StateMonitoringIdle, keepalive.StateScopeComplete:
-		return styles.Render(RoleKeepAlive, "KeepAlive") + " " + styles.Render(RoleSuccess, "ON")
+	case keepalive.StateMonitoringIdle:
+		return styles.Render(RoleKeepAlive, "KeepAlive") + " " + onOffText(true, false)
+	case keepalive.StateScopeComplete:
+		return styles.Render(RoleKeepAlive, "KeepAlive") + " " + styles.Render(RoleWarning, "limit")
 	default:
-		return styles.Render(RoleKeepAlive, "KeepAlive") + " " + styles.Render(RoleMuted, "off")
+		return styles.Render(RoleKeepAlive, "KeepAlive") + " " + offText()
 	}
 }
 
@@ -388,13 +390,13 @@ func truncateANSI(value string, max int) string {
 
 func (m Model) listFooter() string {
 	if m.isEmptyListState() {
-		return cueLine("↵ act  u update  q quit")
+		return cueLine("Enter act  u update  c config  q quit")
 	}
 	pageCue := ""
 	if len(m.sessions) > listPageSize {
 		pageCue = "  ←/→ page"
 	}
-	return cueLine("↑↓ select" + pageCue + "  ↵ open  r remind  k KeepAlive  u update  c config  q quit")
+	return cueLine("↑↓ select" + pageCue + "  Enter open  r remind  k KeepAlive  u update  c config  q quit")
 }
 
 func cueLine(text string) string {
@@ -591,7 +593,7 @@ func formatStatusTime(status session.Status) string {
 		return formatStatusDuration(*status.RemainingSeconds)
 	case status.ExpiredSeconds != nil:
 		return formatStatusDuration(*status.ExpiredSeconds) + " ago"
-	case status.LastMessageAt == nil:
+	case status.CacheAnchorAt == nil:
 		return "no timestamp"
 	default:
 		return "no TTL"

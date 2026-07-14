@@ -144,7 +144,7 @@ func TestRunStatuslineMomentumAtRiskAppendsWarningAndColor(t *testing.T) {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
 	// pctPerMessage=5, messagesLeft=17; fallback TTL 300s, pingsNeeded=ceil(35940/300)=120; at risk.
-	want := "\x1b[1;31m⏱ 15% (5h) used · ⚠ KeepAlive at risk\x1b[0m"
+	want := "⏱ 15% (5h) used | \x1b[1;31m⚠ KeepAlive at risk\x1b[0m"
 	if stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
@@ -193,7 +193,7 @@ func TestRunStatuslineWeeklyLimitCanPutKeepAliveAtRisk(t *testing.T) {
 	var stdout bytes.Buffer
 	runStatusline(Command{Mode: ModeStatusline}, deps.Dependencies, strings.NewReader(statuslinePayloadJSONWithWeek(15, resetsAt, &weekUsed2, &weekResetsAt, "")), &stdout, io.Discard)
 
-	want := "\x1b[1;31m⏱ 15% (5h) / 95% (7d) used · ⚠ KeepAlive at risk\x1b[0m"
+	want := "⏱ 15% (5h) / 95% (7d) used | \x1b[1;31m⚠ KeepAlive at risk\x1b[0m"
 	if stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
@@ -240,8 +240,10 @@ func TestRunStatuslineUsesSavedLayoutAndCompactFormat(t *testing.T) {
 	home := t.TempDir()
 	deps.HomeDir = func() (string, error) { return home, nil }
 	cfg := config.Default()
-	cfg.Statusline.Layout = config.StatuslineLayoutNewLine
-	cfg.Statusline.Format = config.StatuslineFormatCompact
+	cfg.Statusline.Usage.Layout = config.StatuslineLayoutNewLine
+	cfg.Statusline.Usage.Format = config.StatuslineFormatCompact
+	cfg.Statusline.Warning.Enabled = false
+	cfg.Statusline.Cache.Enabled = false
 	if err := config.Save(home, cfg); err != nil {
 		t.Fatalf("Save config: %v", err)
 	}
@@ -492,30 +494,83 @@ func TestStatuslineDispatchReadsStdinAndExitsZero(t *testing.T) {
 	}
 }
 
-func TestStatuslineTTLRetriesAfterUnknownTier(t *testing.T) {
+func TestStatuslineCachesUnknownTimingUntilTranscriptChanges(t *testing.T) {
 	deps := fakeDeps(t)
 	home := t.TempDir()
 	deps.HomeDir = func() (string, error) { return home, nil }
 	calls := 0
 	deps.ParseFile = func(path string) (session.Session, error) {
 		calls++
-		if calls == 1 {
-			return session.Session{CacheWindow: session.CacheWindow{TTLSeconds: 300, Known: false}}, nil
-		}
-		return session.Session{CacheWindow: session.CacheWindow{TTLSeconds: 3600, Known: true}}, nil
+		return session.Session{CacheWindow: session.CacheWindow{TTLSeconds: 300, Known: false}}, nil
 	}
 	state, err := ratelimit.Load(home)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if got := statuslineTTLSeconds(deps.Dependencies, &state, "/tmp/session.jsonl"); got != 300 {
-		t.Fatalf("first TTL = %d, want fallback 300", got)
+	if got := statuslineCacheSnapshot(deps.Dependencies, &state, "/tmp/session.jsonl").Known; got {
+		t.Fatal("first snapshot Known = true, want unknown")
 	}
-	if got := statuslineTTLSeconds(deps.Dependencies, &state, "/tmp/session.jsonl"); got != 3600 {
-		t.Fatalf("second TTL = %d, want known parsed TTL 3600", got)
+	if got := statuslineCacheSnapshot(deps.Dependencies, &state, "/tmp/session.jsonl").Known; got {
+		t.Fatal("cached snapshot Known = true, want unknown")
 	}
-	if calls != 2 {
-		t.Fatalf("ParseFile calls = %d, want retry after unknown tier", calls)
+	if calls != 1 {
+		t.Fatalf("ParseFile calls = %d, want one parse for unchanged unknown timing", calls)
+	}
+}
+
+func TestRunStatuslineShowsRealtimeCacheCountdownAndReusesSnapshot(t *testing.T) {
+	deps := fakeDeps(t)
+	home := t.TempDir()
+	deps.HomeDir = func() (string, error) { return home, nil }
+	first := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	last := first.Add(-20 * time.Minute)
+	calls := 0
+	deps.ParseFile = func(path string) (session.Session, error) {
+		calls++
+		return session.Session{
+			CacheWindow:    session.CacheWindow{TTLSeconds: 3600, Known: true},
+			CacheAnchorAt:  &last,
+			FileModifiedAt: first,
+		}, nil
+	}
+	deps.Now = func() time.Time { return first }
+	transcriptPath := filepath.Join(t.TempDir(), "session.jsonl")
+	payload := statuslinePayloadJSON(34, first.Add(3*time.Hour), transcriptPath)
+	var firstOutput bytes.Buffer
+	runStatusline(Command{Mode: ModeStatusline}, deps.Dependencies, strings.NewReader(payload), &firstOutput, io.Discard)
+	if !strings.Contains(firstOutput.String(), "⌛ 40m00s left · 1h cache") {
+		t.Fatalf("first output = %q, want cache countdown", firstOutput.String())
+	}
+
+	deps.Now = func() time.Time { return first.Add(10 * time.Second) }
+	var secondOutput bytes.Buffer
+	runStatusline(Command{Mode: ModeStatusline}, deps.Dependencies, strings.NewReader(payload), &secondOutput, io.Discard)
+	if !strings.Contains(secondOutput.String(), "⌛ 39m50s left · 1h cache") {
+		t.Fatalf("second output = %q, want realtime countdown", secondOutput.String())
+	}
+	if calls != 1 {
+		t.Fatalf("ParseFile calls = %d, want one parse while transcript mtime is unchanged", calls)
+	}
+}
+
+func TestRunStatuslineCacheElementIsIndependentOfUsagePayload(t *testing.T) {
+	deps := fakeDeps(t)
+	home := t.TempDir()
+	deps.HomeDir = func() (string, error) { return home, nil }
+	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	last := now.Add(-5 * time.Minute)
+	deps.Now = func() time.Time { return now }
+	deps.ParseFile = func(path string) (session.Session, error) {
+		return session.Session{
+			CacheWindow:   session.CacheWindow{TTLSeconds: 3600, Known: true},
+			CacheAnchorAt: &last,
+		}, nil
+	}
+	transcriptPath := filepath.Join(t.TempDir(), "session.jsonl")
+	var stdout bytes.Buffer
+	runStatusline(Command{Mode: ModeStatusline}, deps.Dependencies, strings.NewReader(`{"transcript_path":"`+transcriptPath+`"}`), &stdout, io.Discard)
+	if stdout.String() != "⌛ 55m00s left · 1h cache" {
+		t.Fatalf("stdout = %q, want cache-only output without rate-limit readings", stdout.String())
 	}
 }

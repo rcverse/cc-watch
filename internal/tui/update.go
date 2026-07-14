@@ -289,6 +289,9 @@ func mergeSelectedRefresh(existing []session.Session, refreshed []session.Sessio
 }
 
 func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "ctrl+c" {
+		return m, tea.Quit
+	}
 	if m.configChoiceField != "" {
 		return m.updateConfigChoice(msg)
 	}
@@ -296,20 +299,21 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.updateConfigEditing(msg)
 	}
 	switch msg.String() {
-	case "?":
-		return m, nil
-	case "n", "right", "pagedown":
+	case "right", "pagedown":
 		if m.route == RouteList {
 			m.moveListPage(1)
 		}
 		return m, nil
-	case "p", "left", "pageup":
+	case "left", "pageup":
 		if m.route == RouteList {
 			m.moveListPage(-1)
 		}
 		return m, nil
-	case "q", "ctrl+c":
-		return m, tea.Quit
+	case "q":
+		if m.route == RouteList || m.route == RouteAmbiguous || m.route == RouteWorkspace {
+			return m, tea.Quit
+		}
+		return m, nil
 	case "down":
 		if m.route == RouteWorkspace && m.FocusedAction() == "details_scroll" {
 			if m.detailsCanScroll(1) {
@@ -337,8 +341,13 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		return m.activateFocused()
 	case " ":
-		if m.FocusedAction() == "reminder" || m.FocusedAction() == "keepalive" {
+		if m.route == RouteWorkspace && m.FocusedAction() != "" {
 			return m.activateFocused()
+		}
+		if m.route == RouteStatusline {
+			if element := statuslineElementName(m.FocusedAction()); element != "" {
+				m.toggleStatuslineElement(element)
+			}
 		}
 		return m, nil
 	case "r":
@@ -361,8 +370,6 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.configReturnRoute = m.route
 			m.route = RouteConfig
 			m.focusIndex = m.defaultFocusIndex()
-		} else if m.route == RouteWorkspace {
-			return m, nil
 		}
 		return m, nil
 	case "v":
@@ -372,7 +379,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.focusIndex = m.defaultFocusIndex()
 		}
 		return m, nil
-	case "b", "esc":
+	case "esc":
 		if m.route == RouteWorkspace {
 			m.route = RouteList
 		} else if m.route == RouteAmbiguous {

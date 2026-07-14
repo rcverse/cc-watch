@@ -55,7 +55,7 @@ type Dependencies struct {
 	ConfirmKeepAlive             func(context.Context, keepalive.ConfirmationTarget) (keepalive.ConfirmationResult, error)
 	SaveConfig                   func(config.Config) error
 	InspectStatusline            func() (statusline.Status, error)
-	InstallStatusline            func() error
+	InstallStatusline            func(config.Config) error
 	UninstallStatusline          func() error
 	StatuslineCommand            string
 	NotifyEvent                  func(event notify.Event) notify.Result
@@ -150,6 +150,7 @@ type Model struct {
 	configInputFresh        bool
 	configChoiceField       string
 	configChoiceIndex       int
+	configChoiceOrder       []string
 	configFieldErrors       map[string]string
 	configResetConfirm      bool
 	configStatuslineConfirm bool
@@ -334,12 +335,7 @@ func normalizeConfig(cfg config.Config) config.Config {
 		cfg.ReminderThresholds = append([]int(nil), cfg.ReminderThresholds...)
 	}
 	cfg.KeepAlive = normalizeKeepAliveConfig(cfg.KeepAlive)
-	if cfg.Statusline.Layout == "" {
-		cfg.Statusline.Layout = defaults.Statusline.Layout
-	}
-	if cfg.Statusline.Format == "" {
-		cfg.Statusline.Format = defaults.Statusline.Format
-	}
+	cfg.Statusline = config.NormalizeStatusline(cfg.Statusline)
 	return cfg
 }
 

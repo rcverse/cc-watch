@@ -116,6 +116,10 @@ func ProgressBar(percent float64, width int) string {
 	return progressBarWithRole(percent, width, ttlPercentRole(percent))
 }
 
+func CountdownProgressBar(percent float64, width int) string {
+	return progressBarWithRole(percent, width, countdownPercentRole(percent))
+}
+
 func HitRateProgressBar(percent float64, width int) string {
 	return progressBarWithRole(percent, width, hitRatePercentRole(percent))
 }
@@ -146,6 +150,16 @@ func ttlPercentRole(percent float64) StyleRole {
 		return RoleWarning
 	}
 	return RoleSuccess
+}
+
+func countdownPercentRole(percent float64) StyleRole {
+	if percent >= 80 {
+		return RoleSuccess
+	}
+	if percent >= 50 {
+		return RoleWarning
+	}
+	return RoleDanger
 }
 
 func hitRatePercentRole(percent float64) StyleRole {

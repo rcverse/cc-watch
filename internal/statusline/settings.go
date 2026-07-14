@@ -36,7 +36,10 @@ func Inspect(home string) (Status, error) {
 	return inspectCommand(current), nil
 }
 
-func Install(home, binaryPath string) error {
+// InstallWithRefresh installs the runtime wrapper and enables Claude Code's
+// time-based refresh when the cache timing element is enabled. Existing
+// statusLine options, including a user-selected refresh interval, win.
+func InstallWithRefresh(home, binaryPath string, refreshEnabled bool) error {
 	settings, exists, err := readSettings(home)
 	if err != nil {
 		return err
@@ -45,6 +48,10 @@ func Install(home, binaryPath string) error {
 	switch status.State {
 	case StateInstalled:
 		if UsesRuntimeCommand(status.Command, binaryPath) {
+			if refreshEnabled {
+				ensureRefreshInterval(settings)
+				return writeSettings(home, settings, exists)
+			}
 			return nil
 		}
 		desired := RuntimeCommand(binaryPath)
@@ -56,6 +63,9 @@ func Install(home, binaryPath string) error {
 			}
 		}
 		setStatuslineCommand(settings, command)
+		if refreshEnabled {
+			ensureRefreshInterval(settings)
+		}
 		return writeSettings(home, settings, exists)
 	case StateManualReview:
 		return errors.New("statusline settings need manual review")
@@ -70,6 +80,9 @@ func Install(home, binaryPath string) error {
 		}
 	}
 	setStatuslineCommand(settings, command)
+	if refreshEnabled {
+		ensureRefreshInterval(settings)
+	}
 	return writeSettings(home, settings, exists)
 }
 
@@ -204,6 +217,16 @@ func setStatuslineCommand(settings map[string]any, command string) {
 	statusLine["type"] = "command"
 	statusLine["command"] = command
 	settings["statusLine"] = statusLine
+}
+
+func ensureRefreshInterval(settings map[string]any) {
+	statusLine, ok := settings["statusLine"].(map[string]any)
+	if !ok {
+		return
+	}
+	if _, exists := statusLine["refreshInterval"]; !exists {
+		statusLine["refreshInterval"] = 1
+	}
 }
 
 func settingsPath(home string) string {

@@ -48,7 +48,7 @@ func runStatusline(cmd Command, deps Dependencies, stdin io.Reader, stdout, stde
 
 	raw, _ := io.ReadAll(io.LimitReader(stdin, statuslineStdinCap))
 	display := effectiveStatuslineConfig(deps, cmd)
-	suffix := statuslineSuffix(deps, raw, display.Format)
+	values := statuslineValues(deps, raw, display)
 
 	var wrapped []byte
 	cleanExit := true
@@ -73,17 +73,7 @@ func runStatusline(cmd Command, deps Dependencies, stdin io.Reader, stdout, stde
 	}
 
 	trimmed := bytes.TrimSuffix(wrapped, []byte("\n"))
-	stdout.Write(trimmed)
-	if suffix != "" {
-		if len(trimmed) > 0 {
-			if display.Layout == config.StatuslineLayoutNewLine {
-				stdout.Write([]byte("\n"))
-			} else {
-				stdout.Write([]byte(" | "))
-			}
-		}
-		stdout.Write([]byte(suffix))
-	}
+	stdout.Write([]byte(statusline.Render(string(trimmed), display, values)))
 	return 0
 }
 
@@ -105,48 +95,62 @@ type statuslineReading struct {
 	ResetsAt time.Time
 }
 
-// statuslineSuffix parses the hook payload, updates persisted rate-limit
-// state, and returns the display segment to append -- or "" when
-// rate_limits wasn't present this turn. Any failure to load/save state or
-// resolve the session's cache tier degrades to showing the raw payload
-// numbers rather than failing the whole readout.
-func statuslineSuffix(deps Dependencies, raw []byte, format string) string {
+// statuslineValues parses the hook payload and produces independent values for
+// the configured usage, warning, and cache elements. Cache timing is allowed
+// to render even when a payload has no rate-limit readings.
+func statuslineValues(deps Dependencies, raw []byte, display config.StatuslineConfig) map[string]string {
+	values := map[string]string{}
 	var payload statuslinePayload
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return ""
+		return values
 	}
 	fiveHour, ok := parseStatuslineReading(payload.RateLimits.FiveHour)
-	if !ok {
-		return ""
-	}
 	sevenDay, hasSevenDay := parseStatuslineReading(payload.RateLimits.SevenDay)
+	if ok {
+		values[config.StatuslineElementUsage] = statuslineUsageText(fiveHour, sevenDay, hasSevenDay, 0, false, display.Usage.Format)
+	}
 
 	home, err := deps.HomeDir()
 	if err != nil {
-		return statuslineText(fiveHour, sevenDay, hasSevenDay, 0, false, false, format)
+		return values
 	}
 	state, err := ratelimit.Load(home)
 	if err != nil {
-		return statuslineText(fiveHour, sevenDay, hasSevenDay, 0, false, false, format)
+		return values
 	}
 
 	now := deps.Now()
-	state.AddReading(ratelimit.Reading{UsedPct: fiveHour.UsedPct, ResetsAt: fiveHour.ResetsAt})
+	if ok {
+		state.AddReading(ratelimit.Reading{UsedPct: fiveHour.UsedPct, ResetsAt: fiveHour.ResetsAt})
+	}
 	if hasSevenDay {
 		state.AddSevenDayReading(ratelimit.Reading{UsedPct: sevenDay.UsedPct, ResetsAt: sevenDay.ResetsAt})
 	}
-	ttlSeconds := statuslineTTLSeconds(deps, &state, payload.TranscriptPath)
+	snapshot := statuslineCacheSnapshot(deps, &state, payload.TranscriptPath)
 	_ = ratelimit.Save(home, state) // best-effort; a save failure must not break the statusline
 
-	pctPerMessage, momentumOK := ratelimit.Momentum(state.History)
-	projection, hasProjection := ratelimit.Project(fiveHour.UsedPct, pctPerMessage, momentumOK, fiveHour.ResetsAt.Sub(now).Seconds(), ttlSeconds)
-	atRisk := hasProjection && projection.AtRisk
-	if hasSevenDay {
-		weekPctPerMessage, weekMomentumOK := ratelimit.Momentum(state.SevenDayHistory)
-		weekProjection, ok := ratelimit.Project(sevenDay.UsedPct, weekPctPerMessage, weekMomentumOK, sevenDay.ResetsAt.Sub(now).Seconds(), ttlSeconds)
-		atRisk = atRisk || (ok && weekProjection.AtRisk)
+	if ok {
+		pctPerMessage, momentumOK := ratelimit.Momentum(state.History)
+		projection, hasProjection := ratelimit.Project(fiveHour.UsedPct, pctPerMessage, momentumOK, fiveHour.ResetsAt.Sub(now).Seconds(), snapshot.TTLSeconds)
+		messagesLeft := 0
+		if hasProjection {
+			messagesLeft = projection.MessagesLeft
+		}
+		atRisk := hasProjection && projection.AtRisk
+		if hasSevenDay {
+			weekPctPerMessage, weekMomentumOK := ratelimit.Momentum(state.SevenDayHistory)
+			weekProjection, weekOK := ratelimit.Project(sevenDay.UsedPct, weekPctPerMessage, weekMomentumOK, sevenDay.ResetsAt.Sub(now).Seconds(), snapshot.TTLSeconds)
+			atRisk = atRisk || (weekOK && weekProjection.AtRisk)
+		}
+		if display.Warning.Enabled && (display.Warning.Format == config.StatuslineWarningFormatVerbose || atRisk) {
+			values[config.StatuslineElementWarning] = statuslineWarningText(atRisk)
+		}
+		values[config.StatuslineElementUsage] = statuslineUsageText(fiveHour, sevenDay, hasSevenDay, messagesLeft, hasProjection && !atRisk, display.Usage.Format)
 	}
-	return statuslineText(fiveHour, sevenDay, hasSevenDay, projection.MessagesLeft, hasProjection, atRisk, format)
+	if display.Cache.Enabled {
+		values[config.StatuslineElementCache] = statuslineCacheText(snapshot, now, display.Cache.Format)
+	}
+	return values
 }
 
 func parseStatuslineReading(window statuslineLimitWindow) (statuslineReading, bool) {
@@ -159,14 +163,11 @@ func parseStatuslineReading(window statuslineLimitWindow) (statuslineReading, bo
 	}, true
 }
 
-func statuslineText(fiveHour, sevenDay statuslineReading, hasSevenDay bool, messagesLeft int, hasMessagesLeft, atRisk bool, format string) string {
+func statuslineUsageText(fiveHour, sevenDay statuslineReading, hasSevenDay bool, messagesLeft int, hasMessagesLeft bool, format string) string {
 	if format == config.StatuslineFormatCompact {
 		text := fmt.Sprintf("%.0f%%", fiveHour.UsedPct)
 		if hasSevenDay {
 			text += fmt.Sprintf("/%.0f%%", sevenDay.UsedPct)
-		}
-		if atRisk {
-			return colorAtRisk(text + " · ⚠ KA")
 		}
 		return text
 	}
@@ -175,14 +176,67 @@ func statuslineText(fiveHour, sevenDay statuslineReading, hasSevenDay bool, mess
 		text += fmt.Sprintf(" / %.0f%% (7d)", sevenDay.UsedPct)
 	}
 	text += " used"
-	if hasMessagesLeft && !atRisk {
+	if hasMessagesLeft {
 		text += fmt.Sprintf(" · ✉ ~%d msgs", messagesLeft)
 	}
-	if atRisk {
-		text += " · ⚠ KeepAlive at risk"
-		return colorAtRisk(text)
-	}
 	return text
+}
+
+func statuslineWarningText(atRisk bool) string {
+	if atRisk {
+		return colorAtRisk("⚠ KeepAlive at risk")
+	}
+	return "✓ KA OK"
+}
+
+func statuslineCacheText(snapshot ratelimit.CacheSnapshot, now time.Time, format string) string {
+	if !snapshot.Known || snapshot.CacheAnchorAt == nil || snapshot.TTLSeconds <= 0 {
+		return ""
+	}
+	expiresAt := snapshot.CacheAnchorAt.Add(time.Duration(snapshot.TTLSeconds) * time.Second)
+	if now.Before(expiresAt) {
+		remaining := ceilSeconds(expiresAt.Sub(now))
+		if format == config.StatuslineFormatCompact {
+			return formatStatuslineDuration(remaining)
+		}
+		return fmt.Sprintf("⌛ %s left · %s cache", formatStatuslineDuration(remaining), formatCacheTTL(snapshot.TTLSeconds))
+	}
+	expired := ceilSeconds(now.Sub(expiresAt))
+	if format == config.StatuslineFormatCompact {
+		return "expired " + formatStatuslineDuration(expired)
+	}
+	return fmt.Sprintf("⌛ expired %s · %s cache", formatStatuslineDuration(expired), formatCacheTTL(snapshot.TTLSeconds))
+}
+
+func ceilSeconds(duration time.Duration) int {
+	seconds := int(duration / time.Second)
+	if duration%time.Second != 0 {
+		seconds++
+	}
+	if seconds < 1 {
+		return 1
+	}
+	return seconds
+}
+
+func formatStatuslineDuration(seconds int) string {
+	if seconds >= 3600 {
+		return fmt.Sprintf("%dh%02dm%02ds", seconds/3600, (seconds%3600)/60, seconds%60)
+	}
+	if seconds >= 60 {
+		return fmt.Sprintf("%dm%02ds", seconds/60, seconds%60)
+	}
+	return fmt.Sprintf("%ds", seconds)
+}
+
+func formatCacheTTL(seconds int) string {
+	if seconds >= 3600 && seconds%3600 == 0 {
+		return fmt.Sprintf("%dh", seconds/3600)
+	}
+	if seconds >= 60 && seconds%60 == 0 {
+		return fmt.Sprintf("%dm", seconds/60)
+	}
+	return formatStatuslineDuration(seconds)
 }
 
 func effectiveStatuslineConfig(deps Dependencies, cmd Command) config.StatuslineConfig {
@@ -195,32 +249,42 @@ func effectiveStatuslineConfig(deps Dependencies, cmd Command) config.Statusline
 		}
 	}
 	if cmd.StatuslineLayout != "" {
-		result.Layout = cmd.StatuslineLayout
+		result.Usage.Layout = cmd.StatuslineLayout
 	}
 	if cmd.StatuslineFormat != "" {
-		result.Format = cmd.StatuslineFormat
+		result.Usage.Format = cmd.StatuslineFormat
 	}
-	return result
+	return config.NormalizeStatusline(result)
 }
 
-// statuslineTTLSeconds resolves the current session's cache-tier TTL,
-// caching it per transcript path so a per-turn hook invocation doesn't pay
-// the whole-file scan cost on every turn.
-func statuslineTTLSeconds(deps Dependencies, state *ratelimit.State, transcriptPath string) int {
+// statuslineCacheSnapshot resolves the current session's cache timing. The
+// parsed snapshot is reused while the transcript's mtime is unchanged, so a
+// one-second Claude refresh interval does not rescan JSONL every second.
+func statuslineCacheSnapshot(deps Dependencies, state *ratelimit.State, transcriptPath string) ratelimit.CacheSnapshot {
 	if transcriptPath == "" {
-		return statuslineFallbackTTL
+		return ratelimit.CacheSnapshot{TTLSeconds: statuslineFallbackTTL}
 	}
-	if cached, ok := state.TierCache[transcriptPath]; ok {
-		return cached
+	if state.CacheSnapshots == nil {
+		state.CacheSnapshots = map[string]ratelimit.CacheSnapshot{}
 	}
-	ttl := statuslineFallbackTTL
-	if parsed, err := deps.ParseFile(transcriptPath); err == nil {
-		ttl = parsed.CacheWindow.TTLSeconds
-		if parsed.CacheWindow.Known {
-			state.TierCache[transcriptPath] = ttl
+	if cached, ok := state.CacheSnapshots[transcriptPath]; ok {
+		if cached.Known && cached.CacheAnchorAt == nil {
+			delete(state.CacheSnapshots, transcriptPath)
+		} else if info, err := os.Stat(transcriptPath); err != nil || info.ModTime().Equal(cached.FileModifiedAt) {
+			return cached
 		}
 	}
-	return ttl
+	if parsed, err := deps.ParseFile(transcriptPath); err == nil {
+		snapshot := ratelimit.CacheSnapshot{
+			TTLSeconds:     parsed.CacheWindow.TTLSeconds,
+			Known:          parsed.CacheWindow.Known && parsed.CacheAnchorAt != nil,
+			CacheAnchorAt:  parsed.CacheAnchorAt,
+			FileModifiedAt: parsed.FileModifiedAt,
+		}
+		state.CacheSnapshots[transcriptPath] = snapshot
+		return snapshot
+	}
+	return ratelimit.CacheSnapshot{TTLSeconds: statuslineFallbackTTL}
 }
 
 func colorAtRisk(s string) string {

@@ -50,13 +50,14 @@ type Session struct {
 	FileModifiedAt  time.Time
 	CacheWindow     CacheWindow
 	DurationSeconds *int
-	LastMessageAt   *time.Time
-	Messages        Messages
-	RecentMessages  []MessageWindow
-	TokenStats      TokenStats
-	Gaps            []Gap
-	ResetCount      int
-	WarningCount    int
+	// CacheAnchorAt is the latest confirmed cache-refreshing response.
+	CacheAnchorAt  *time.Time
+	Messages       Messages
+	RecentMessages []MessageWindow
+	TokenStats     TokenStats
+	Gaps           []Gap
+	ResetCount     int
+	WarningCount   int
 }
 
 type StatusState string
@@ -69,7 +70,7 @@ const (
 
 type Status struct {
 	State            StatusState
-	LastMessageAt    *time.Time
+	CacheAnchorAt    *time.Time
 	RemainingSeconds *int
 	ExpiredSeconds   *int
 	PercentElapsed   *float64
@@ -78,23 +79,23 @@ type Status struct {
 func (s Session) StatusAt(now time.Time) Status {
 	status := Status{
 		State:         StatusUnknown,
-		LastMessageAt: s.LastMessageAt,
+		CacheAnchorAt: s.CacheAnchorAt,
 	}
-	if s.LastMessageAt == nil {
+	if s.CacheAnchorAt == nil {
 		return status
 	}
-	if !s.CacheWindow.Known {
+	if !s.CacheWindow.Known || s.CacheWindow.TTLSeconds <= 0 {
 		return status
 	}
 
-	elapsed := int(now.Sub(*s.LastMessageAt).Seconds())
+	elapsed := int(now.Sub(*s.CacheAnchorAt).Seconds())
 	percent := float64(elapsed) / float64(s.CacheWindow.TTLSeconds) * 100
 	if percent < 0 {
 		percent = 0
 	}
 	status.PercentElapsed = &percent
 
-	if elapsed > s.CacheWindow.TTLSeconds {
+	if elapsed >= s.CacheWindow.TTLSeconds {
 		expired := elapsed - s.CacheWindow.TTLSeconds
 		status.State = StatusExpired
 		status.ExpiredSeconds = &expired

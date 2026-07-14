@@ -184,9 +184,9 @@ func cloneSession(s session.Session) session.Session {
 		durationSeconds := *s.DurationSeconds
 		s.DurationSeconds = &durationSeconds
 	}
-	if s.LastMessageAt != nil {
-		lastMessageAt := *s.LastMessageAt
-		s.LastMessageAt = &lastMessageAt
+	if s.CacheAnchorAt != nil {
+		cacheAnchorAt := *s.CacheAnchorAt
+		s.CacheAnchorAt = &cacheAnchorAt
 	}
 	return s
 }

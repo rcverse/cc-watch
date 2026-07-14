@@ -67,7 +67,7 @@ func (m Model) keepAliveCard(s session.Session, state keepalive.SessionState) st
 			percent := float64(seconds) / float64(max(m.keepAliveConfig.CountdownSeconds, 1)) * 100
 			fmt.Fprintf(&b, "Next         Sending in %ds at %s\n", seconds, m.keepAliveSendTime(s))
 			fmt.Fprintf(&b, "Message      %s\n", messageText(fmt.Sprintf("%q", m.keepAliveConfig.Message)))
-			fmt.Fprintf(&b, "Countdown    %s %ds remaining\n", ProgressBar(percent, 12), seconds)
+			fmt.Fprintf(&b, "Countdown    %s %ds remaining\n", CountdownProgressBar(percent, 12), seconds)
 			fmt.Fprintf(&b, "Sends        %d / %d used\n", state.ScopeUsed, maxSends(state))
 		} else {
 			fmt.Fprintf(&b, "Next         Message will be sent at %s\n", m.keepAliveSendTime(s))
@@ -129,7 +129,7 @@ func (m Model) keepAliveSendTime(s session.Session) string {
 }
 
 func (m Model) keepAliveTimeAt(s session.Session, offsetSeconds int) string {
-	if s.LastMessageAt == nil {
+	if s.CacheAnchorAt == nil || !s.CacheWindow.Known || s.CacheWindow.TTLSeconds <= 0 {
 		return "unknown"
 	}
 	ttl := s.CacheWindow.TTLSeconds
@@ -141,7 +141,7 @@ func (m Model) keepAliveTimeAt(s session.Session, offsetSeconds int) string {
 	if ttlTrigger < trigger {
 		trigger = ttlTrigger
 	}
-	at := s.LastMessageAt.Add(time.Duration(ttl-trigger+offsetSeconds) * time.Second).Local().Format("15:04:05")
+	at := s.CacheAnchorAt.Add(time.Duration(ttl-trigger+offsetSeconds) * time.Second).Local().Format("15:04:05")
 	return DefaultStyles().Render(RoleInfo, at)
 }
 

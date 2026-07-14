@@ -26,7 +26,7 @@ func TestDisplayTickEvaluatesKeepAliveMonitoringSessions(t *testing.T) {
 			ShortID:       "workspace",
 			Project:       "workspace-api",
 			JSONLPath:     "/tmp/workspace.jsonl",
-			LastMessageAt: &last,
+			CacheAnchorAt: &last,
 			CacheWindow:   session.CacheWindow{Label: "1h", TTLSeconds: 3600, Known: true},
 		}},
 		KeepAliveManager: keepAliveManagerInState(keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateMonitoringIdle, TriggerArmed: true, MaxSends: 1}),
@@ -49,7 +49,7 @@ func TestExpiredSessionDoesNotEnableKeepAlive(t *testing.T) {
 	now := time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)
 	expiredLast := now.Add(-2 * time.Hour)
 	expired := workspaceSession(now)
-	expired.LastMessageAt = &expiredLast
+	expired.CacheAnchorAt = &expiredLast
 	expired.CacheWindow = session.CacheWindow{Tier: session.Tier1Hour, Label: "1h", TTLSeconds: 3600, Known: true}
 	model := NewModel(Options{
 		Now:        now,
@@ -75,7 +75,7 @@ func TestExpiredSessionDisablesExistingKeepAliveAndCannotSend(t *testing.T) {
 	now := time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)
 	expiredLast := now.Add(-2 * time.Hour)
 	expired := workspaceSession(now)
-	expired.LastMessageAt = &expiredLast
+	expired.CacheAnchorAt = &expiredLast
 	expired.CacheWindow = session.CacheWindow{Tier: session.Tier1Hour, Label: "1h", TTLSeconds: 3600, Known: true}
 	model := NewModel(Options{
 		Now:              now,

@@ -39,16 +39,45 @@ func Validate(cfg Config) error {
 	if cfg.KeepAlive.Scope.MaxSends <= 0 {
 		messages = append(messages, "scope.max_sends must be positive")
 	}
-	if cfg.Statusline.Layout != StatuslineLayoutSameLine && cfg.Statusline.Layout != StatuslineLayoutNewLine {
-		messages = append(messages, "statusline.layout must be same_line or new_line")
-	}
-	if cfg.Statusline.Format != StatuslineFormatFull && cfg.Statusline.Format != StatuslineFormatCompact {
-		messages = append(messages, "statusline.format must be full or compact")
+	validateStatuslineElement(&messages, "usage", cfg.Statusline.Usage, StatuslineFormatFull, StatuslineFormatCompact)
+	validateStatuslineElement(&messages, "warning", cfg.Statusline.Warning, StatuslineWarningFormatAlert, StatuslineWarningFormatVerbose)
+	validateStatuslineElement(&messages, "cache", cfg.Statusline.Cache, StatuslineFormatFull, StatuslineFormatCompact)
+	if !validStatuslineOrder(cfg.Statusline.Order) {
+		messages = append(messages, "statusline.order must contain usage, warning, and cache exactly once")
 	}
 	if len(messages) > 0 {
 		return ValidationError{Messages: messages}
 	}
 	return nil
+}
+
+func validateStatuslineElement(messages *[]string, name string, element StatuslineElementConfig, formats ...string) {
+	if element.Layout != StatuslineLayoutSameLine && element.Layout != StatuslineLayoutNewLine {
+		*messages = append(*messages, "statusline."+name+".layout must be same_line or new_line")
+	}
+	for _, format := range formats {
+		if element.Format == format {
+			return
+		}
+	}
+	*messages = append(*messages, "statusline."+name+".format is invalid")
+}
+
+func validStatuslineOrder(order []string) bool {
+	if len(order) != 3 {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, element := range order {
+		if element != StatuslineElementUsage && element != StatuslineElementWarning && element != StatuslineElementCache {
+			return false
+		}
+		if seen[element] {
+			return false
+		}
+		seen[element] = true
+	}
+	return len(seen) == 3
 }
 
 func EffectiveKeepAliveSummary(cfg Config) KeepAliveSummary {

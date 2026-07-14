@@ -7,15 +7,29 @@ type Config struct {
 }
 
 const (
-	StatuslineLayoutSameLine = "same_line"
-	StatuslineLayoutNewLine  = "new_line"
-	StatuslineFormatFull     = "full"
-	StatuslineFormatCompact  = "compact"
+	StatuslineLayoutSameLine       = "same_line"
+	StatuslineLayoutNewLine        = "new_line"
+	StatuslineFormatFull           = "full"
+	StatuslineFormatCompact        = "compact"
+	StatuslineWarningFormatAlert   = "alert_only"
+	StatuslineWarningFormatVerbose = "verbose"
+
+	StatuslineElementUsage   = "usage"
+	StatuslineElementWarning = "warning"
+	StatuslineElementCache   = "cache"
 )
 
+type StatuslineElementConfig struct {
+	Enabled bool   `json:"enabled"`
+	Layout  string `json:"layout"`
+	Format  string `json:"format"`
+}
+
 type StatuslineConfig struct {
-	Layout string `json:"layout"`
-	Format string `json:"format"`
+	Usage   StatuslineElementConfig `json:"usage"`
+	Warning StatuslineElementConfig `json:"warning"`
+	Cache   StatuslineElementConfig `json:"cache"`
+	Order   []string                `json:"order"`
 }
 
 type KeepAliveConfig struct {
@@ -40,9 +54,53 @@ func Default() Config {
 				MaxSends: 5,
 			},
 		},
-		Statusline: StatuslineConfig{
-			Layout: StatuslineLayoutSameLine,
-			Format: StatuslineFormatFull,
-		},
+		Statusline: DefaultStatusline(),
 	}
+}
+
+func DefaultStatusline() StatuslineConfig {
+	return StatuslineConfig{
+		Usage: StatuslineElementConfig{
+			Enabled: true,
+			Layout:  StatuslineLayoutSameLine,
+			Format:  StatuslineFormatFull,
+		},
+		Warning: StatuslineElementConfig{
+			Enabled: true,
+			Layout:  StatuslineLayoutSameLine,
+			Format:  StatuslineWarningFormatAlert,
+		},
+		Cache: StatuslineElementConfig{
+			Enabled: true,
+			Layout:  StatuslineLayoutNewLine,
+			Format:  StatuslineFormatFull,
+		},
+		Order: []string{StatuslineElementUsage, StatuslineElementWarning, StatuslineElementCache},
+	}
+}
+
+func NormalizeStatusline(cfg StatuslineConfig) StatuslineConfig {
+	defaults := DefaultStatusline()
+	if cfg.Usage.Layout == "" {
+		cfg.Usage.Layout = defaults.Usage.Layout
+	}
+	if cfg.Usage.Format == "" {
+		cfg.Usage.Format = defaults.Usage.Format
+	}
+	if cfg.Warning.Layout == "" {
+		cfg.Warning.Layout = defaults.Warning.Layout
+	}
+	if cfg.Warning.Format == "" {
+		cfg.Warning.Format = defaults.Warning.Format
+	}
+	if cfg.Cache.Layout == "" {
+		cfg.Cache.Layout = defaults.Cache.Layout
+	}
+	if cfg.Cache.Format == "" {
+		cfg.Cache.Format = defaults.Cache.Format
+	}
+	if len(cfg.Order) == 0 {
+		cfg.Order = append([]string(nil), defaults.Order...)
+	}
+	return cfg
 }

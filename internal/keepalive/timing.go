@@ -8,7 +8,6 @@ import (
 )
 
 const (
-	conservativeTTLSeconds = 300
 	// safetyMarginSeconds sizes the countdown: it aims to finish this far
 	// before expiry so the send has time to land.
 	safetyMarginSeconds = 30
@@ -17,7 +16,7 @@ const (
 	// is tick-counted, so it always takes a beat longer than its nominal
 	// duration; if the deadline used the full 30s margin it would coincide
 	// with the countdown's own end and any drift would silently pause sends for
-	// 5-minute and unknown-tier caches. The smaller floor absorbs normal drift
+	// 5-minute caches. The smaller floor absorbs normal drift
 	// while still refusing to send within seconds of expiry.
 	sendDeadlineMarginSeconds = 10
 )
@@ -29,11 +28,11 @@ type TimingDecision struct {
 }
 
 func EvaluateTiming(s session.Session, now time.Time, cfg config.KeepAliveConfig) TimingDecision {
-	ttl := effectiveTTL(s)
-	remaining := ttl
-	if s.LastMessageAt != nil {
-		remaining = ttl - int(now.Sub(*s.LastMessageAt).Seconds())
+	if s.CacheAnchorAt == nil || !s.CacheWindow.Known || s.CacheWindow.TTLSeconds <= 0 {
+		return TimingDecision{}
 	}
+	ttl := s.CacheWindow.TTLSeconds
+	remaining := ttl - int(now.Sub(*s.CacheAnchorAt).Seconds())
 	if remaining < 0 {
 		remaining = 0
 	}
@@ -54,13 +53,6 @@ func EvaluateTiming(s session.Session, now time.Time, cfg config.KeepAliveConfig
 		InsideTrigger:             insideTrigger,
 		SendAllowed:               !disabled,
 	}
-}
-
-func effectiveTTL(s session.Session) int {
-	if s.CacheWindow.Known && s.CacheWindow.TTLSeconds > 0 {
-		return s.CacheWindow.TTLSeconds
-	}
-	return conservativeTTLSeconds
 }
 
 func effectiveCountdown(configuredCountdown, sendWindow int) (int, bool) {

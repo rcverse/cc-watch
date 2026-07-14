@@ -26,7 +26,14 @@ type HistoryPoint struct {
 type State struct {
 	History         []HistoryPoint
 	SevenDayHistory []HistoryPoint
-	TierCache       map[string]int
+	CacheSnapshots  map[string]CacheSnapshot
+}
+
+type CacheSnapshot struct {
+	TTLSeconds     int        `json:"ttl_seconds"`
+	Known          bool       `json:"known"`
+	CacheAnchorAt  *time.Time `json:"cache_anchor_at,omitempty"`
+	FileModifiedAt time.Time  `json:"file_modified_at"`
 }
 
 func StatePath(home string) string {
@@ -49,8 +56,8 @@ func Load(home string) (State, error) {
 	if err := json.Unmarshal(data, &state); err != nil {
 		return freshState(), nil
 	}
-	if state.TierCache == nil {
-		state.TierCache = map[string]int{}
+	if state.CacheSnapshots == nil {
+		state.CacheSnapshots = map[string]CacheSnapshot{}
 	}
 	return state, nil
 }
@@ -69,7 +76,7 @@ func Save(home string, state State) error {
 }
 
 func freshState() State {
-	return State{TierCache: map[string]int{}}
+	return State{CacheSnapshots: map[string]CacheSnapshot{}}
 }
 
 // AddReading appends a new reading to the rolling history, keeping only the

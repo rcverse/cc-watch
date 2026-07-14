@@ -153,12 +153,12 @@ func (m demoModel) tick(next time.Time) (tea.Model, tea.Cmd) {
 
 func (m demoModel) keepAliveTriggerTime() time.Time {
 	s := demoWorkspaceSession(m.now)
-	return s.LastMessageAt.Add(time.Duration(s.CacheWindow.TTLSeconds-m.state.cfg.KeepAlive.TriggerBeforeExpiryMinutes*60) * time.Second)
+	return s.CacheAnchorAt.Add(time.Duration(s.CacheWindow.TTLSeconds-m.state.cfg.KeepAlive.TriggerBeforeExpiryMinutes*60) * time.Second)
 }
 
 func (m demoModel) cacheExpiryTime() time.Time {
 	s := demoWorkspaceSession(m.now)
-	return s.LastMessageAt.Add(time.Duration(s.CacheWindow.TTLSeconds) * time.Second)
+	return s.CacheAnchorAt.Add(time.Duration(s.CacheWindow.TTLSeconds) * time.Second)
 }
 
 type fakeRunner struct{}
@@ -175,14 +175,14 @@ func demoSessions(now time.Time) []session.Session {
 	fading.SessionID = "demo-fading-22222222"
 	fading.ShortID = "demo-fading"
 	last := now.Add(-58 * time.Minute)
-	fading.LastMessageAt = &last
+	fading.CacheAnchorAt = &last
 	fading.Project = "fading-cache"
 
 	expired := active
 	expired.SessionID = "demo-expired-33333333"
 	expired.ShortID = "demo-expired"
 	last = now.Add(-2 * time.Hour)
-	expired.LastMessageAt = &last
+	expired.CacheAnchorAt = &last
 	expired.Project = "expired-cache"
 
 	unknown := active
@@ -205,7 +205,7 @@ func demoWorkspaceSession(now time.Time) session.Session {
 		Project:         "demo-workspace",
 		JSONLPath:       "/demo/.claude/projects/demo-workspace/demo-workspace-11111111.jsonl",
 		FileModifiedAt:  now,
-		LastMessageAt:   &last,
+		CacheAnchorAt:   &last,
 		DurationSeconds: &duration,
 		Cwd:             "/demo/workspace",
 		CacheWindow: session.CacheWindow{

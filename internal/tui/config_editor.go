@@ -24,8 +24,10 @@ var configFocusActions = []string{
 }
 
 var statuslineFocusActions = []string{
-	"config_statusline_layout",
-	"config_statusline_format",
+	"config_statusline_usage",
+	"config_statusline_warning",
+	"config_statusline_cache",
+	"config_statusline_sequence",
 	"config_statusline_action",
 	"config_save",
 	"config_statusline_back",
@@ -70,7 +72,7 @@ func (m Model) configView() string {
 		var edit strings.Builder
 		fmt.Fprintf(&edit, "%s %s\n", styles.Render(RoleInfo, configFieldLabel(m.configEditingField)), styles.Render(RoleMuted, "is active"))
 		fmt.Fprintf(&edit, "%s  %s%s\n", styles.Render(RoleMuted, "Current input"), m.configInput, styles.Render(RoleIdentity, "▌"))
-		fmt.Fprintf(&edit, "%s\n", styles.Render(RoleMuted, "↵ save field  ⎋ cancel edit"))
+		fmt.Fprintf(&edit, "%s\n", styles.Render(RoleMuted, "Enter save field  Esc cancel edit"))
 		b.WriteString(m.renderConfigPanel("Editing", edit.String()))
 	}
 
@@ -87,7 +89,7 @@ func (m Model) configView() string {
 	if m.configResetConfirm {
 		status.WriteString("\n")
 		status.WriteString("Reset defaults? This will replace KeepAlive defaults.\n")
-		status.WriteString("Press d again to confirm, ⎋ to keep current settings.\n")
+		status.WriteString("Press d again to confirm, Esc to keep current settings.\n")
 	}
 	b.WriteString(m.renderConfigPanel("Status", status.String()))
 
@@ -99,7 +101,7 @@ func (m Model) configView() string {
 	if m.notice.Message != "" {
 		b.WriteString(m.renderConfigPanel("Notice", DefaultStyles().Render(m.notice.Role, m.notice.Message)))
 	}
-	b.WriteString(cueLine("↑↓ move  ↵ edit  space toggle  s save  d reset  ⎋ cancel"))
+	b.WriteString(cueLine("↑↓ move  Enter edit/act  s save  d reset  Esc cancel"))
 	return b.String()
 }
 
@@ -114,22 +116,18 @@ func (m Model) statuslineView() string {
 
 	state, detail, actionLabel, actionDetail := m.statuslineConfigCopy()
 	var statuslinePanel strings.Builder
-	fmt.Fprintf(&statuslinePanel, "  %s\n", styles.Render(RoleMuted, "Status"))
-	fmt.Fprintf(&statuslinePanel, "    %s\n", styles.Render(statuslineStateRole(state), "● "+state))
-	fmt.Fprintf(&statuslinePanel, "      %s\n", styles.Render(RoleMuted, detail))
-	fmt.Fprintf(&statuslinePanel, "%s\n", m.configRow("config_statusline_layout", "Layout", statuslineLayoutLabel(m.configDraft.Statusline.Layout), "how the segment is placed"))
-	if message := m.configFieldError("config_statusline_layout"); message != "" {
-		fmt.Fprintf(&statuslinePanel, "    %s\n", styles.Render(RoleDanger, "Error: "+message))
-	}
-	fmt.Fprintf(&statuslinePanel, "%s\n", m.configRow("config_statusline_format", "Format", statuslineFormatLabel(m.configDraft.Statusline.Format), "full details or compact"))
-	if message := m.configFieldError("config_statusline_format"); message != "" {
-		fmt.Fprintf(&statuslinePanel, "    %s\n", styles.Render(RoleDanger, "Error: "+message))
-	}
-	fmt.Fprintf(&statuslinePanel, "%s\n", m.configRow("config_statusline_action", actionLabel, "", actionDetail))
-	if m.configStatuslineConfirm {
-		fmt.Fprintf(&statuslinePanel, "    %s\n", styles.Render(RoleWarning, "Press Enter again to "+strings.ToLower(actionLabel)+"; Esc cancels"))
-	}
+	fmt.Fprintf(&statuslinePanel, " %s\n", styles.Render(statuslineStateRole(state), "● "+state))
+	fmt.Fprintf(&statuslinePanel, " %s\n", styles.Render(RoleMuted, detail))
 	b.WriteString(m.renderConfigPanel("Statusline", statuslinePanel.String()))
+
+	var elements strings.Builder
+	for _, element := range []string{config.StatuslineElementUsage, config.StatuslineElementWarning, config.StatuslineElementCache} {
+		cfg := statuslineElementConfig(m.configDraft.Statusline, element)
+		fmt.Fprintf(&elements, "%s\n", m.statuslineElementRow("config_statusline_"+element, statusline.ElementLabel(element), statuslineElementValue(*cfg), statuslineElementDetail(element, *cfg)))
+	}
+	b.WriteString(m.renderConfigPanel("Elements", elements.String()))
+	b.WriteString(m.renderConfigPanel("Sequence", m.configRow("config_statusline_sequence", "Order", statusline.OrderText(m.configDraft.Statusline.Order), "Enter to reorder elements")))
+	b.WriteString(m.renderConfigPanel("Preview", styles.Render(RoleMuted, statusline.Preview(m.configDraft.Statusline))))
 	if m.configChoiceField != "" {
 		b.WriteString(m.renderConfigPanel("Choose "+configFieldLabel(m.configChoiceField), m.statuslineChoiceView()))
 	}
@@ -138,20 +136,30 @@ func (m Model) statuslineView() string {
 		var edit strings.Builder
 		fmt.Fprintf(&edit, "%s %s\n", styles.Render(RoleInfo, configFieldLabel(m.configEditingField)), styles.Render(RoleMuted, "is active"))
 		fmt.Fprintf(&edit, "%s  %s%s\n", styles.Render(RoleMuted, "Current input"), m.configInput, styles.Render(RoleIdentity, "▌"))
-		fmt.Fprintf(&edit, "%s\n", styles.Render(RoleMuted, "↵ save field  ⎋ cancel edit"))
+		fmt.Fprintf(&edit, "%s\n", styles.Render(RoleMuted, "Enter save field  Esc cancel edit"))
 		b.WriteString(m.renderConfigPanel("Editing", edit.String()))
 	}
 
 	var actions strings.Builder
+	fmt.Fprintf(&actions, "%s\n", m.configRow("config_statusline_action", actionLabel, "", actionDetail))
+	if m.configStatuslineConfirm {
+		fmt.Fprintf(&actions, "    %s\n", styles.Render(RoleWarning, "Press Enter again to "+strings.ToLower(actionLabel)+"; Esc cancels"))
+	}
 	fmt.Fprintf(&actions, "%s\n", m.configRow("config_save", "Save", "", "write config"))
 	fmt.Fprintf(&actions, "%s\n", m.configRow("config_statusline_back", "Back", "", "return to Settings"))
 	b.WriteString(m.renderConfigPanel("Actions", actions.String()))
 	if m.notice.Message != "" {
 		b.WriteString(m.renderConfigPanel("Notice", styles.Render(m.notice.Role, m.notice.Message)))
 	}
-	cue := "↑↓ move  ↵ edit  s save  ⎋ back"
+	cue := "↑↓ move  Enter choose/act  s save  d reset  Esc back"
+	if statuslineElementName(m.FocusedAction()) != "" {
+		cue = "↑↓ move  Enter choose  Space toggle  s save  d reset  Esc back"
+	}
 	if m.configChoiceField != "" {
-		cue = "↑↓ choose  ↵ select  ⎋ cancel"
+		cue = "↑↓ choose  Enter select  Esc cancel"
+		if m.configChoiceField == "config_statusline_sequence" {
+			cue = "↑↓ select  ←→ move  Enter done  Esc cancel"
+		}
 	}
 	b.WriteString(cueLine(cue))
 	return b.String()
@@ -159,7 +167,7 @@ func (m Model) statuslineView() string {
 
 func (m Model) statuslineChoiceView() string {
 	styles := DefaultStyles()
-	values := statuslineChoiceValues(m.configChoiceField)
+	values := m.statuslineChoiceValues(m.configChoiceField)
 	var b strings.Builder
 	for index, value := range values {
 		marker := " "
@@ -168,7 +176,11 @@ func (m Model) statuslineChoiceView() string {
 			marker = styles.Render(RoleIdentity, "›")
 			role = RoleIdentity
 		}
-		fmt.Fprintf(&b, "  %s %s\n", marker, styles.Render(role, statuslineChoiceLabel(m.configChoiceField, value)))
+		label := statuslineChoiceLabel(m.configChoiceField, value)
+		if m.configChoiceField == "config_statusline_sequence" {
+			label = fmt.Sprintf("%d  %s", index+1, label)
+		}
+		fmt.Fprintf(&b, "  %s %s\n", marker, styles.Render(role, label))
 	}
 	return b.String()
 }
@@ -189,6 +201,21 @@ func (m Model) configRow(action string, label string, value string, detail strin
 	}
 	detailText := padANSI(truncateANSI(styles.Render(RoleMuted, detail), detailWidth), detailWidth)
 	return truncateANSI(fmt.Sprintf("  %s %-20s %s %s", marker, label, detailText, value), width)
+}
+
+func (m Model) statuslineElementRow(action string, label string, value string, detail string) string {
+	styles := DefaultStyles()
+	marker := " "
+	if m.FocusedAction() == action {
+		marker = styles.Render(RoleIdentity, "›")
+	}
+	const detailWidth = 22
+	const detailGap = 4
+	if m.configPanelBodyWidth() < 2+1+1+20+1+detailWidth+detailGap+visibleWidth(value) {
+		return m.configRow(action, label, value, detail)
+	}
+	detailText := padANSI(styles.Render(RoleMuted, detail), detailWidth)
+	return fmt.Sprintf("  %s %-20s %s    %s", marker, label, detailText, value)
 }
 
 func (m Model) renderConfigPanel(title string, body string) string {
@@ -229,22 +256,58 @@ func statuslineStateRole(state string) StyleRole {
 	}
 }
 
-func statuslineChoiceValues(field string) []string {
+func (m Model) statuslineChoiceValues(field string) []string {
 	switch field {
-	case "config_statusline_layout":
-		return []string{config.StatuslineLayoutSameLine, config.StatuslineLayoutNewLine}
-	case "config_statusline_format":
-		return []string{config.StatuslineFormatFull, config.StatuslineFormatCompact}
+	case "config_statusline_sequence":
+		return append([]string(nil), m.configDraft.Statusline.Order...)
+	case "config_statusline_usage_format", "config_statusline_warning_format", "config_statusline_cache_format":
+		return statuslineFormatChoiceValues(field)
 	default:
 		return nil
 	}
 }
 
-func statuslineChoiceLabel(field, value string) string {
-	if field == "config_statusline_layout" {
-		return statuslineLayoutLabel(value)
+func statuslineFormatChoiceValues(field string) []string {
+	formats := []string{config.StatuslineFormatFull, config.StatuslineFormatCompact}
+	if field == "config_statusline_warning_format" {
+		formats = []string{config.StatuslineWarningFormatAlert, config.StatuslineWarningFormatVerbose}
 	}
-	return statuslineFormatLabel(value)
+	values := make([]string, 0, len(formats)*2)
+	for _, layout := range []string{config.StatuslineLayoutSameLine, config.StatuslineLayoutNewLine} {
+		for _, format := range formats {
+			values = append(values, format+"|"+layout)
+		}
+	}
+	return values
+}
+
+func statuslineChoiceLabel(field, value string) string {
+	if field == "config_statusline_sequence" {
+		return statusline.ElementLabel(value)
+	}
+	if strings.HasSuffix(field, "_format") {
+		format, layout := splitStatuslineFormatChoice(value)
+		if strings.HasPrefix(field, "config_statusline_warning") {
+			if format == config.StatuslineWarningFormatVerbose {
+				return "Verbose · " + statuslineLayoutLabel(layout)
+			}
+			return "Alert only · " + statuslineLayoutLabel(layout)
+		}
+		return statuslineFormatLabel(format) + " · " + statuslineLayoutLabel(layout)
+	}
+	return value
+}
+
+func splitStatuslineFormatChoice(value string) (string, string) {
+	parts := strings.SplitN(value, "|", 2)
+	if len(parts) != 2 {
+		return value, config.StatuslineLayoutSameLine
+	}
+	return parts[0], parts[1]
+}
+
+func statuslineElementChoiceValue(element config.StatuslineElementConfig) string {
+	return element.Format + "|" + element.Layout
 }
 
 func statuslineLayoutLabel(value string) string {
@@ -259,6 +322,68 @@ func statuslineFormatLabel(value string) string {
 		return "Compact"
 	}
 	return "Full"
+}
+
+func statuslineElementConfig(cfg config.StatuslineConfig, name string) *config.StatuslineElementConfig {
+	switch name {
+	case config.StatuslineElementUsage:
+		return &cfg.Usage
+	case config.StatuslineElementWarning:
+		return &cfg.Warning
+	case config.StatuslineElementCache:
+		return &cfg.Cache
+	default:
+		return &config.StatuslineElementConfig{}
+	}
+}
+
+func statuslineElementValue(element config.StatuslineElementConfig) string {
+	return onOffText(element.Enabled, false)
+}
+
+func statuslineElementDetail(name string, element config.StatuslineElementConfig) string {
+	format := statuslineFormatLabel(element.Format)
+	if name == config.StatuslineElementWarning {
+		if element.Format == config.StatuslineWarningFormatVerbose {
+			format = "Verbose"
+		} else {
+			format = "Alert only"
+		}
+	}
+	return statuslineLayoutLabel(element.Layout) + " · " + format
+}
+
+func statuslineElementName(action string) string {
+	for _, name := range []string{config.StatuslineElementUsage, config.StatuslineElementWarning, config.StatuslineElementCache} {
+		if action == "config_statusline_"+name {
+			return name
+		}
+	}
+	return ""
+}
+
+func (m *Model) toggleStatuslineElement(name string) {
+	switch name {
+	case config.StatuslineElementUsage:
+		m.configDraft.Statusline.Usage.Enabled = !m.configDraft.Statusline.Usage.Enabled
+	case config.StatuslineElementWarning:
+		m.configDraft.Statusline.Warning.Enabled = !m.configDraft.Statusline.Warning.Enabled
+	case config.StatuslineElementCache:
+		m.configDraft.Statusline.Cache.Enabled = !m.configDraft.Statusline.Cache.Enabled
+	}
+}
+
+func statuslineElementConfigForDraft(cfg *config.StatuslineConfig, name string) *config.StatuslineElementConfig {
+	switch name {
+	case config.StatuslineElementUsage:
+		return &cfg.Usage
+	case config.StatuslineElementWarning:
+		return &cfg.Warning
+	case config.StatuslineElementCache:
+		return &cfg.Cache
+	default:
+		return nil
+	}
 }
 
 func (m Model) activateStatuslineConfigAction() (tea.Model, tea.Cmd) {
@@ -282,7 +407,11 @@ func (m Model) activateStatuslineConfigAction() (tea.Model, tea.Cmd) {
 		m.setNotice("✓ Statusline uninstalled from Claude Code", RoleSuccess, 3*time.Second)
 		return m, nil
 	}
-	if err := m.deps.InstallStatusline(); err != nil {
+	if m.deps.InstallStatusline == nil {
+		m.setNotice("✕ Statusline install is unavailable", RoleDanger, 3*time.Second)
+		return m, nil
+	}
+	if err := m.deps.InstallStatusline(m.configDraft); err != nil {
 		m.setNotice("✕ Could not install statusline", RoleDanger, 3*time.Second)
 		return m, nil
 	}
@@ -357,9 +486,13 @@ func (m *Model) startConfigEdit(field string) {
 }
 
 func (m *Model) startConfigChoice(field string) {
-	values := statuslineChoiceValues(field)
+	values := m.statuslineChoiceValues(field)
 	m.configChoiceField = field
 	m.configChoiceIndex = 0
+	m.configChoiceOrder = nil
+	if field == "config_statusline_sequence" {
+		m.configChoiceOrder = append([]string(nil), m.configDraft.Statusline.Order...)
+	}
 	for index, value := range values {
 		if value == m.configFieldValue(field) {
 			m.configChoiceIndex = index
@@ -376,31 +509,74 @@ func (m *Model) startConfigChoice(field string) {
 }
 
 func (m Model) updateConfigChoice(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	values := statuslineChoiceValues(m.configChoiceField)
+	values := m.statuslineChoiceValues(m.configChoiceField)
 	if len(values) == 0 {
 		m.configChoiceField = ""
 		m.configChoiceIndex = 0
+		m.configChoiceOrder = nil
 		return m, nil
 	}
 	switch msg.String() {
-	case "up", "left":
-		m.configChoiceIndex = (m.configChoiceIndex + len(values) - 1) % len(values)
-	case "down", "right":
-		m.configChoiceIndex = (m.configChoiceIndex + 1) % len(values)
-	case "enter":
-		if m.configChoiceField == "config_statusline_layout" {
-			m.configDraft.Statusline.Layout = values[m.configChoiceIndex]
+	case "up":
+		if m.configChoiceField == "config_statusline_sequence" {
+			if m.configChoiceIndex > 0 {
+				m.configChoiceIndex--
+			}
 		} else {
-			m.configDraft.Statusline.Format = values[m.configChoiceIndex]
+			m.configChoiceIndex = (m.configChoiceIndex + len(values) - 1) % len(values)
+		}
+	case "down":
+		if m.configChoiceField == "config_statusline_sequence" {
+			if m.configChoiceIndex < len(values)-1 {
+				m.configChoiceIndex++
+			}
+		} else {
+			m.configChoiceIndex = (m.configChoiceIndex + 1) % len(values)
+		}
+	case "left":
+		if m.configChoiceField == "config_statusline_sequence" {
+			if m.configChoiceIndex > 0 {
+				m.configDraft.Statusline.Order[m.configChoiceIndex], m.configDraft.Statusline.Order[m.configChoiceIndex-1] = m.configDraft.Statusline.Order[m.configChoiceIndex-1], m.configDraft.Statusline.Order[m.configChoiceIndex]
+				m.configChoiceIndex--
+			}
+		} else {
+			m.configChoiceIndex = (m.configChoiceIndex + len(values) - 1) % len(values)
+		}
+	case "right":
+		if m.configChoiceField == "config_statusline_sequence" {
+			if m.configChoiceIndex < len(values)-1 {
+				m.configDraft.Statusline.Order[m.configChoiceIndex], m.configDraft.Statusline.Order[m.configChoiceIndex+1] = m.configDraft.Statusline.Order[m.configChoiceIndex+1], m.configDraft.Statusline.Order[m.configChoiceIndex]
+				m.configChoiceIndex++
+			}
+		} else {
+			m.configChoiceIndex = (m.configChoiceIndex + 1) % len(values)
+		}
+	case "enter":
+		if name := statuslineFormatElementName(m.configChoiceField); name != "" {
+			if element := statuslineElementConfigForDraft(&m.configDraft.Statusline, name); element != nil {
+				element.Format, element.Layout = splitStatuslineFormatChoice(values[m.configChoiceIndex])
+			}
 		}
 		m.clearConfigFieldError(m.configChoiceField)
 		m.configChoiceField = ""
 		m.configChoiceIndex = 0
+		m.configChoiceOrder = nil
 	case "esc":
+		if m.configChoiceField == "config_statusline_sequence" && m.configChoiceOrder != nil {
+			m.configDraft.Statusline.Order = append([]string(nil), m.configChoiceOrder...)
+		}
 		m.configChoiceField = ""
 		m.configChoiceIndex = 0
+		m.configChoiceOrder = nil
 	}
 	return m, nil
+}
+
+func statuslineFormatElementName(field string) string {
+	if !strings.HasPrefix(field, "config_statusline_") || !strings.HasSuffix(field, "_format") {
+		return ""
+	}
+	return strings.TrimSuffix(strings.TrimPrefix(field, "config_statusline_"), "_format")
 }
 
 func (m Model) configFieldValue(field string) string {
@@ -415,10 +591,14 @@ func (m Model) configFieldValue(field string) string {
 		return m.configDraft.KeepAlive.Message
 	case "config_max_sends":
 		return strconv.Itoa(m.configDraft.KeepAlive.Scope.MaxSends)
-	case "config_statusline_layout":
-		return m.configDraft.Statusline.Layout
-	case "config_statusline_format":
-		return m.configDraft.Statusline.Format
+	case "config_statusline_usage_format":
+		return statuslineElementChoiceValue(m.configDraft.Statusline.Usage)
+	case "config_statusline_warning_format":
+		return statuslineElementChoiceValue(m.configDraft.Statusline.Warning)
+	case "config_statusline_cache_format":
+		return statuslineElementChoiceValue(m.configDraft.Statusline.Cache)
+	case "config_statusline_sequence":
+		return strings.Join(m.configDraft.Statusline.Order, ",")
 	default:
 		return ""
 	}
@@ -436,10 +616,14 @@ func configFieldLabel(field string) string {
 		return "Message"
 	case "config_max_sends":
 		return "Max sends"
-	case "config_statusline_layout":
-		return "Layout"
-	case "config_statusline_format":
-		return "Format"
+	case "config_statusline_usage_format":
+		return "Usage format"
+	case "config_statusline_warning_format":
+		return "KA warning format"
+	case "config_statusline_cache_format":
+		return "Cache timing format"
+	case "config_statusline_sequence":
+		return "Sequence"
 	default:
 		return field
 	}
@@ -486,20 +670,6 @@ func (m *Model) commitConfigInput() {
 		} else {
 			m.configDraft.KeepAlive.Scope.MaxSends = value
 			m.clearConfigFieldError("config_max_sends")
-		}
-	case "config_statusline_layout":
-		if input != config.StatuslineLayoutSameLine && input != config.StatuslineLayoutNewLine {
-			m.setConfigFieldError("config_statusline_layout", "layout must be same_line or new_line.")
-		} else {
-			m.configDraft.Statusline.Layout = input
-			m.clearConfigFieldError("config_statusline_layout")
-		}
-	case "config_statusline_format":
-		if input != config.StatuslineFormatFull && input != config.StatuslineFormatCompact {
-			m.setConfigFieldError("config_statusline_format", "format must be full or compact.")
-		} else {
-			m.configDraft.Statusline.Format = input
-			m.clearConfigFieldError("config_statusline_format")
 		}
 	}
 	m.configEditing = false
@@ -550,6 +720,7 @@ func (m Model) resetConfigDefaults() (tea.Model, tea.Cmd) {
 	m.configInputFresh = false
 	m.configChoiceField = ""
 	m.configChoiceIndex = 0
+	m.configChoiceOrder = nil
 	m.setNotice("✓ Saved", RoleSuccess, 3*time.Second)
 	return m, nil
 }
@@ -562,6 +733,7 @@ func (m Model) cancelConfig() (tea.Model, tea.Cmd) {
 	m.configInputFresh = false
 	m.configChoiceField = ""
 	m.configChoiceIndex = 0
+	m.configChoiceOrder = nil
 	m.configFieldErrors = map[string]string{}
 	m.configResetConfirm = false
 	m.configStatuslineConfirm = false
@@ -666,12 +838,17 @@ func (m Model) configFieldError(field string) string {
 		if cfg.KeepAlive.Scope.MaxSends <= 0 {
 			return "max sends must be positive."
 		}
-	case "config_statusline_layout":
-		if cfg.Statusline.Layout != config.StatuslineLayoutSameLine && cfg.Statusline.Layout != config.StatuslineLayoutNewLine {
-			return "layout must be same_line or new_line."
+	case "config_statusline_usage_format", "config_statusline_warning_format", "config_statusline_cache_format":
+		name := strings.TrimSuffix(strings.TrimPrefix(field, "config_statusline_"), "_format")
+		element := statuslineElementConfigForDraft(&cfg.Statusline, name)
+		if element == nil {
+			return "unknown statusline element."
 		}
-	case "config_statusline_format":
-		if cfg.Statusline.Format != config.StatuslineFormatFull && cfg.Statusline.Format != config.StatuslineFormatCompact {
+		if name == config.StatuslineElementWarning {
+			if element.Format != config.StatuslineWarningFormatAlert && element.Format != config.StatuslineWarningFormatVerbose {
+				return "format must be alert_only or verbose."
+			}
+		} else if element.Format != config.StatuslineFormatFull && element.Format != config.StatuslineFormatCompact {
 			return "format must be full or compact."
 		}
 	}

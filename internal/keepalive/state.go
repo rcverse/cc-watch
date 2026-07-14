@@ -201,9 +201,9 @@ func (m *Manager) markFailure(sessionID string, token int64, failedState State, 
 }
 
 func latestSafeSendAt(s session.Session) time.Time {
-	if s.LastMessageAt == nil {
+	if s.CacheAnchorAt == nil || !s.CacheWindow.Known || s.CacheWindow.TTLSeconds <= 0 {
 		return time.Time{}
 	}
-	ttl := effectiveTTL(s)
-	return s.LastMessageAt.Add(time.Duration(ttl-sendDeadlineMarginSeconds) * time.Second)
+	ttl := s.CacheWindow.TTLSeconds
+	return s.CacheAnchorAt.Add(time.Duration(ttl-sendDeadlineMarginSeconds) * time.Second)
 }

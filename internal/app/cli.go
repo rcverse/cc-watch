@@ -157,7 +157,7 @@ func WriteHelp(w io.Writer) {
 TUI:
   cc-watch                  Open recent Claude Code sessions.
   cc-watch --n 10           Load 10 recent sessions.
-  cc-watch --id d4b247b7    Open the matching session.
+  cc-watch --id <partial-id>  Open a matching session.
   cc-watch config           Edit Reminder, KeepAlive, and Statusline settings.
 
 Statusline:
@@ -170,7 +170,7 @@ Safety:
 
 Examples:
   cc-watch
-  cc-watch --id d4b247b7
+  cc-watch --id <partial-id>
   cc-watch config
   cc-watch statusline --check
   cc-watch statusline -- ~/.claude/statusline.sh
@@ -189,14 +189,15 @@ Modes:
       for example: ⏱ 34% (5h) / 41% (7d) used.
 
   --layout=same-line|new-line
-      Override where cc-watch appends its segment.
+      Legacy one-invocation override for the Usage element's placement.
 
   --format=full|compact
-      Override the cc-watch segment format. Compact looks like: 95%/91% · ⚠ KA.
+      Legacy one-invocation override for the Usage element's format. Compact
+      looks like: 95%/91%.
 
   cc-watch statusline -- <command> [args...]
       Run an existing statusline command, then append cc-watch using the
-      configured layout.
+      configured element order and placements.
 
   cc-watch statusline --check
       Read ~/.claude/settings.json and print install/uninstall guidance.

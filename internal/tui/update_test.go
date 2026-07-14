@@ -29,7 +29,7 @@ func TestDisplayTickRecomputesTimeOnly(t *testing.T) {
 			SessionID:     "11111111-1111-1111-1111-111111111111",
 			ShortID:       "11111111",
 			Project:       "tmp",
-			LastMessageAt: &last,
+			CacheAnchorAt: &last,
 			CacheWindow: session.CacheWindow{
 				Tier:       session.Tier1Hour,
 				Label:      "1h",
@@ -75,7 +75,7 @@ func TestDisplayTickFiresReminderNotificationThreshold(t *testing.T) {
 		Sessions: []session.Session{{
 			SessionID:     "reminder-id",
 			ShortID:       "reminder",
-			LastMessageAt: &last,
+			CacheAnchorAt: &last,
 			CacheWindow: session.CacheWindow{
 				Label:      "1h",
 				TTLSeconds: 3600,
@@ -148,25 +148,40 @@ func TestSessionGapsAreDeepCopiedAcrossModelBoundaries(t *testing.T) {
 
 }
 
-func TestQuestionMarkIsInertAndQuitKeys(t *testing.T) {
+func TestQuitKey(t *testing.T) {
 	model := NewModel(Options{})
 
-	updated, cmd := model.Update(keyRunes("?"))
-	model = updated.(Model)
-	if cmd != nil {
-		t.Fatalf("? returned command, want nil")
-	}
-	if strings.Contains(model.View(), "\nHelp\n") || strings.Contains(model.View(), "toggle help") {
-		t.Fatalf("removed help overlay rendered:\n%s", model.View())
-	}
-
-	updated, cmd = model.Update(keyRunes("q"))
+	updated, cmd := model.Update(keyRunes("q"))
 	model = updated.(Model)
 	if cmd == nil {
 		t.Fatal("q returned nil command, want tea.Quit command")
 	}
 	if msg := cmd(); msg != (tea.QuitMsg{}) {
 		t.Fatalf("q command returned %#v, want tea.QuitMsg", msg)
+	}
+}
+
+func TestQuitKeyIsTopLevelOnlyAndCtrlCIsGlobal(t *testing.T) {
+	for _, model := range []Model{
+		NewModel(Options{StartMode: StartConfig}),
+		openStatuslineSettings(t, NewModel(Options{StartMode: StartConfig})),
+	} {
+		updated, cmd := model.Update(keyRunes("q"))
+		if cmd != nil {
+			t.Fatalf("q on %s returned quit command", model.route)
+		}
+		if updated.(Model).route != model.route {
+			t.Fatalf("q on %s changed route to %s", model.route, updated.(Model).route)
+		}
+
+		updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+		if cmd == nil {
+			t.Fatalf("ctrl-c on %s returned nil command", model.route)
+		}
+		if msg := cmd(); msg != (tea.QuitMsg{}) {
+			t.Fatalf("ctrl-c on %s returned %#v, want tea.QuitMsg", model.route, msg)
+		}
+		_ = updated
 	}
 }
 
@@ -400,12 +415,6 @@ func TestListDirectKeysToggleAndActivate(t *testing.T) {
 		t.Fatalf("u returned nil command, want manual refresh command")
 	}
 
-	updated, cmd = model.Update(keyRunes("?"))
-	model = updated.(Model)
-	if cmd != nil {
-		t.Fatalf("? returned command, want nil")
-	}
-
 	updated, cmd = model.Update(keyRunes("q"))
 	model = updated.(Model)
 	if cmd == nil {
@@ -465,7 +474,7 @@ func TestDirectKeepAliveShortcutStartsCountdownWithoutNotification(t *testing.T)
 	cfg := config.Default().KeepAlive
 	s := workspaceSession(now)
 	last := now.Add(-56 * time.Minute)
-	s.LastMessageAt = &last
+	s.CacheAnchorAt = &last
 	model := NewModel(Options{
 		Now:             now,
 		Sessions:        []session.Session{s},
@@ -510,7 +519,7 @@ func TestWorkspaceFocusOrderAndFocusedActions(t *testing.T) {
 			t.Fatalf("workspace focus action %q was not reachable; saw %#v", want, seen)
 		}
 	}
-	for _, hidden := range []string{"copy_id", "evidence", "refresh", "help", "quit"} {
+	for _, hidden := range []string{"copy_id", "evidence", "refresh", "quit"} {
 		if seen[hidden] {
 			t.Fatalf("workspace focus reached hidden action %q; saw %#v", hidden, seen)
 		}
@@ -548,6 +557,18 @@ func TestWorkspaceEnterAndSpaceToggleFocusedControls(t *testing.T) {
 	}
 	if model.FocusedAction() != "keepalive" {
 		t.Fatalf("KeepAlive toggle moved focus to %q, want keepalive", model.FocusedAction())
+	}
+
+	backModel := NewModel(Options{
+		Now:        now,
+		Width:      120,
+		SelectedID: "workspace-id",
+		Sessions:   []session.Session{workspaceSession(now)},
+	})
+	backModel = moveWorkspaceFocusTo(t, backModel, "back")
+	updated, cmd = backModel.Update(tea.KeyMsg{Type: tea.KeySpace})
+	if cmd != nil || updated.(Model).route != RouteList {
+		t.Fatalf("space on Back = route %q, command %v; want list with no command", updated.(Model).route, cmd)
 	}
 
 }
@@ -639,7 +660,7 @@ func TestTransientNoticesClearAfterDisplayTick(t *testing.T) {
 	now := time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)
 	expiredLast := now.Add(-2 * time.Hour)
 	expired := workspaceSession(now)
-	expired.LastMessageAt = &expiredLast
+	expired.CacheAnchorAt = &expiredLast
 	expired.CacheWindow = session.CacheWindow{Tier: session.Tier1Hour, Label: "1h", TTLSeconds: 3600, Known: true}
 	model := NewModel(Options{
 		Now:        now,
@@ -670,7 +691,7 @@ func TestExpiredWorkspaceReminderIsNAAndCannotToggle(t *testing.T) {
 	now := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
 	expiredLast := now.Add(-2 * time.Hour)
 	expired := workspaceSession(now)
-	expired.LastMessageAt = &expiredLast
+	expired.CacheAnchorAt = &expiredLast
 	expired.CacheWindow = session.CacheWindow{Tier: session.Tier1Hour, Label: "1h", TTLSeconds: 3600, Known: true}
 	model := NewModel(Options{
 		Now:             now,
@@ -801,6 +822,46 @@ func TestWorkspaceDetailsDisclosureDoesNotBecomeFocusRow(t *testing.T) {
 	}
 	if overflow.FocusedAction() != "details_scroll" || strings.Contains(overflow.View(), "› Session Info · details") {
 		t.Fatalf("details scroll boundary moved focus out of details:\n%s", overflow.View())
+	}
+}
+
+func TestWorkspaceFooterNamesBackAndActionKeys(t *testing.T) {
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	for _, width := range []int{80, 120} {
+		model := NewModel(Options{
+			Now:        now,
+			Width:      width,
+			SelectedID: "workspace-id",
+			Sessions:   []session.Session{workspaceSession(now)},
+		})
+		view := stripANSI(model.View())
+		for _, want := range []string{"Enter/Space act", "Esc back", "q quit"} {
+			if !strings.Contains(view, want) {
+				t.Fatalf("width %d workspace footer missing %q:\n%s", width, want, view)
+			}
+		}
+		if strings.Contains(view, "⎋") || strings.Contains(view, "b/") {
+			t.Fatalf("width %d workspace footer contains an unclear back cue:\n%s", width, view)
+		}
+	}
+
+	failure := NewModel(Options{
+		Now:        now,
+		Width:      120,
+		SelectedID: "workspace-id",
+		Sessions:   []session.Session{workspaceSession(now)},
+		KeepAliveManager: keepAliveManagerInState(keepalive.SessionState{
+			SessionID: "workspace-id",
+			State:     keepalive.StateErrorSubprocess,
+			ScopeUsed: 1,
+			MaxSends:  5,
+		}),
+	})
+	view := stripANSI(failure.View())
+	for _, want := range []string{"s send now", "x cancel"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("failure workspace footer missing %q:\n%s", want, view)
+		}
 	}
 }
 
@@ -935,7 +996,7 @@ func activeSessionForTUITest(id string, now time.Time, ttl, remaining time.Durat
 	last := now.Add(-(ttl - remaining))
 	return session.Session{
 		SessionID:     id,
-		LastMessageAt: &last,
+		CacheAnchorAt: &last,
 		CacheWindow: session.CacheWindow{
 			TTLSeconds: int(ttl.Seconds()),
 			Known:      true,

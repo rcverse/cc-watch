@@ -64,14 +64,11 @@ func TestParseAllFeaturesFixture(t *testing.T) {
 	}
 
 	status := s.StatusAt(time.Date(2026, 6, 3, 1, 42, 40, 0, time.UTC))
-	if status.State != StatusActive {
-		t.Fatalf("status.State = %q, want active", status.State)
+	if status.State != StatusExpired {
+		t.Fatalf("status.State = %q, want expired from the last confirmed cache event", status.State)
 	}
-	if status.RemainingSeconds == nil || *status.RemainingSeconds != 1800 {
-		t.Fatalf("RemainingSeconds = %v, want 1800", status.RemainingSeconds)
-	}
-	if status.ExpiredSeconds != nil {
-		t.Fatalf("ExpiredSeconds = %v, want nil", status.ExpiredSeconds)
+	if status.ExpiredSeconds == nil || *status.ExpiredSeconds != 2410 {
+		t.Fatalf("ExpiredSeconds = %v, want 2410", status.ExpiredSeconds)
 	}
 }
 
@@ -105,8 +102,8 @@ func TestParseTimestamplessFile(t *testing.T) {
 		t.Fatalf("ParseFile returned error: %v", err)
 	}
 
-	if s.LastMessageAt != nil {
-		t.Fatalf("LastMessageAt = %v, want nil", s.LastMessageAt)
+	if s.CacheAnchorAt != nil {
+		t.Fatalf("CacheAnchorAt = %v, want nil", s.CacheAnchorAt)
 	}
 	status := s.StatusAt(time.Date(2026, 6, 3, 1, 0, 0, 0, time.UTC))
 	if status.State != StatusUnknown {
@@ -174,8 +171,90 @@ func TestParseLongJSONLLine(t *testing.T) {
 	if len(s.Messages.FirstUserExcerpt) != 70000 {
 		t.Fatalf("long excerpt length = %d, want 70000", len(s.Messages.FirstUserExcerpt))
 	}
-	if s.CacheWindow.Tier != Tier5Minute {
-		t.Fatalf("Tier = %q, want 5m", s.CacheWindow.Tier)
+	if s.CacheWindow.Known {
+		t.Fatalf("CacheWindow = %+v, want unknown without a confirmed assistant cache event", s.CacheWindow)
+	}
+}
+
+func TestParseCacheAnchorIgnoresUnsuccessfulAndLocalTimestamps(t *testing.T) {
+	input := strings.NewReader(strings.Join([]string{
+		`{"timestamp":"2026-06-03T00:00:00Z","message":{"role":"user","content":"prompt"},"usage":{"ephemeral_5m_input_tokens":1}}`,
+		`{"timestamp":"2026-06-03T00:01:00Z","message":{"role":"assistant","content":"answer","usage":{"input_token_details":{"cache_creation_input_tokens":10,"ephemeral_1h_input_tokens":1},"output_tokens":4}}}`,
+		`{"timestamp":"2026-06-03T00:02:00Z","message":{"role":"user","content":"failed prompt"}}`,
+		`{"timestamp":"2026-06-03T00:03:00Z","is_error":true,"message":{"role":"assistant","usage":{"cache_read_input_tokens":20,"output_tokens":4}}}`,
+	}, "\n"))
+
+	s, err := ParseReader(input, "cache-anchor.jsonl", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2026, 6, 3, 0, 1, 0, 0, time.UTC)
+	if s.CacheAnchorAt == nil || !s.CacheAnchorAt.Equal(want) {
+		t.Fatalf("CacheAnchorAt = %v, want %v", s.CacheAnchorAt, want)
+	}
+	if s.CacheWindow.Tier != Tier1Hour {
+		t.Fatalf("Tier = %q, want 1h from the confirmed response", s.CacheWindow.Tier)
+	}
+}
+
+func TestParseCacheInvalidationClearsAnchor(t *testing.T) {
+	input := strings.NewReader(strings.Join([]string{
+		`{"timestamp":"2026-06-03T00:01:00Z","message":{"role":"assistant","usage":{"cache_creation_input_tokens":10,"ephemeral_1h_input_tokens":1,"output_tokens":4}}}`,
+		`{"timestamp":"2026-06-03T00:02:00Z","message":{"role":"user","content":"<command-name>/compact</command-name>"}}`,
+		`{"timestamp":"2026-06-03T00:03:00Z","message":{"role":"assistant","usage":{"cache_read_input_tokens":20,"output_tokens":4}}}`,
+	}, "\n"))
+
+	s, err := ParseReader(input, "cache-invalidation.jsonl", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.CacheAnchorAt != nil || s.CacheWindow.Known {
+		t.Fatalf("cache timing = anchor %v, window %+v; want unknown after compact", s.CacheAnchorAt, s.CacheWindow)
+	}
+}
+
+func TestParseClearDoesNotClearAnchor(t *testing.T) {
+	input := strings.NewReader(strings.Join([]string{
+		`{"timestamp":"2026-06-03T00:01:00Z","message":{"role":"assistant","usage":{"cache_creation_input_tokens":10,"ephemeral_1h_input_tokens":1,"output_tokens":4}}}`,
+		`{"timestamp":"2026-06-03T00:02:00Z","message":{"role":"user","content":"<command-name>/clear</command-name>"}}`,
+	}, "\n"))
+
+	s, err := ParseReader(input, "clear-cache.jsonl", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2026, 6, 3, 0, 1, 0, 0, time.UTC)
+	if s.CacheAnchorAt == nil || !s.CacheAnchorAt.Equal(want) {
+		t.Fatalf("CacheAnchorAt = %v, want the confirmed response timestamp", s.CacheAnchorAt)
+	}
+	if !s.CacheWindow.Known {
+		t.Fatalf("CacheWindow = %+v, want existing timing after /clear", s.CacheWindow)
+	}
+}
+
+func TestParseEffortClearsAnchor(t *testing.T) {
+	input := strings.NewReader(strings.Join([]string{
+		`{"timestamp":"2026-06-03T00:01:00Z","message":{"role":"assistant","usage":{"cache_creation_input_tokens":10,"ephemeral_1h_input_tokens":1,"output_tokens":4}}}`,
+		`{"timestamp":"2026-06-03T00:02:00Z","message":{"role":"user","content":"<command-name>/effort</command-name>"}}`,
+	}, "\n"))
+
+	s, err := ParseReader(input, "effort-cache.jsonl", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.CacheAnchorAt != nil || s.CacheWindow.Known {
+		t.Fatalf("cache timing = anchor %v, window %+v; want unknown after /effort", s.CacheAnchorAt, s.CacheWindow)
+	}
+}
+
+func TestStatusAtExpiresAtExactBoundary(t *testing.T) {
+	anchor := time.Date(2026, 6, 3, 0, 0, 0, 0, time.UTC)
+	s := Session{
+		CacheAnchorAt: &anchor,
+		CacheWindow:   CacheWindow{TTLSeconds: 3600, Known: true},
+	}
+	if got := s.StatusAt(anchor.Add(time.Hour)).State; got != StatusExpired {
+		t.Fatalf("StatusAt(exact expiry) = %q, want expired", got)
 	}
 }
 
@@ -228,8 +307,8 @@ func TestParseMalformedTimestampWarningDoesNotDropUsage(t *testing.T) {
 	if s.TokenStats.CacheReads != 9 {
 		t.Fatalf("CacheReads = %d, want 9", s.TokenStats.CacheReads)
 	}
-	if s.LastMessageAt != nil {
-		t.Fatalf("LastMessageAt = %v, want nil", s.LastMessageAt)
+	if s.CacheAnchorAt != nil {
+		t.Fatalf("CacheAnchorAt = %v, want nil", s.CacheAnchorAt)
 	}
 	if s.WarningCount != 1 {
 		t.Fatalf("WarningCount = %d, want 1", s.WarningCount)

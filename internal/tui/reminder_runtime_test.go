@@ -50,7 +50,7 @@ func reminderRuntimeSession(id string, lastMessageAt time.Time, ttlSeconds int) 
 		SessionID:     id,
 		ShortID:       id,
 		Project:       "tmp",
-		LastMessageAt: &lastMessageAt,
+		CacheAnchorAt: &lastMessageAt,
 		CacheWindow: session.CacheWindow{
 			Tier:       session.Tier1Hour,
 			Label:      "1h",

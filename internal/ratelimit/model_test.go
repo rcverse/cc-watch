@@ -14,8 +14,8 @@ func TestLoadMissingFileReturnsFreshState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
-	if state.TierCache == nil {
-		t.Fatal("TierCache = nil, want initialized empty map")
+	if state.CacheSnapshots == nil {
+		t.Fatal("CacheSnapshots = nil, want initialized empty map")
 	}
 	if len(state.History) != 0 {
 		t.Fatalf("History = %#v, want empty", state.History)
@@ -36,8 +36,8 @@ func TestLoadInvalidJSONReturnsFreshStateNotError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v, want self-healing nil", err)
 	}
-	if state.TierCache == nil {
-		t.Fatal("TierCache = nil, want initialized empty map")
+	if state.CacheSnapshots == nil {
+		t.Fatal("CacheSnapshots = nil, want initialized empty map")
 	}
 }
 
@@ -46,7 +46,7 @@ func TestSaveThenLoadRoundTrips(t *testing.T) {
 	resetsAt := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
 	state := freshState()
 	state.AddReading(Reading{UsedPct: 10, ResetsAt: resetsAt})
-	state.TierCache["/tmp/session.jsonl"] = 3600
+	state.CacheSnapshots["/tmp/session.jsonl"] = CacheSnapshot{TTLSeconds: 3600, Known: true}
 
 	if err := Save(home, state); err != nil {
 		t.Fatalf("Save returned error: %v", err)
@@ -58,8 +58,8 @@ func TestSaveThenLoadRoundTrips(t *testing.T) {
 	if len(loaded.History) != 1 || loaded.History[0].UsedPct != 10 {
 		t.Fatalf("History = %#v, want one reading with UsedPct 10", loaded.History)
 	}
-	if loaded.TierCache["/tmp/session.jsonl"] != 3600 {
-		t.Fatalf("TierCache = %#v, want TTLSeconds 3600", loaded.TierCache)
+	if loaded.CacheSnapshots["/tmp/session.jsonl"].TTLSeconds != 3600 {
+		t.Fatalf("CacheSnapshots = %#v, want TTLSeconds 3600", loaded.CacheSnapshots)
 	}
 }
 

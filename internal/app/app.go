@@ -227,8 +227,8 @@ func tuiDependencies(cmd Command, deps Dependencies, home string) tui.Dependenci
 		InspectStatusline: func() (statusline.Status, error) {
 			return statusline.Inspect(home)
 		},
-		InstallStatusline: func() error {
-			return statusline.Install(home, ccWatchCommand())
+		InstallStatusline: func(cfg config.Config) error {
+			return statusline.InstallWithRefresh(home, ccWatchCommand(), cfg.Statusline.Cache.Enabled)
 		},
 		UninstallStatusline: func() error {
 			return statusline.Uninstall(home)

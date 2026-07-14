@@ -35,7 +35,7 @@ func TestHelpExitsSuccessfully(t *testing.T) {
 	if strings.Contains(stdout.String(), "--remind") {
 		t.Fatalf("help output still advertises obsolete --remind:\n%s", stdout.String())
 	}
-	for _, want := range []string{"TUI:", "Statusline:", "Safety:", "Examples:", "cc-watch --id d4b247b7", "See: cc-watch statusline --help"} {
+	for _, want := range []string{"TUI:", "Statusline:", "Safety:", "Examples:", "cc-watch --id <partial-id>", "See: cc-watch statusline --help"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("help output missing %q:\n%s", want, stdout.String())
 		}
@@ -71,7 +71,7 @@ func TestVersionExitsSuccessfully(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Run(--version) exit code = %d, want 0", code)
 	}
-	if !strings.Contains(stdout.String(), "cc-watch 1.0.0-beta.2") {
+	if !strings.Contains(stdout.String(), "cc-watch 1.0.0-beta.3") {
 		t.Fatalf("version output = %q, want beta version", stdout.String())
 	}
 	if stderr.Len() != 0 {

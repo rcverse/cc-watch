@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -22,7 +23,7 @@ func (m Model) workspaceView() string {
 	selected := m.selectedSession()
 	if selected == nil {
 		var b strings.Builder
-		b.WriteString("cc-watch workspace\nNo selected session.\nb/esc back  q quit\n")
+		b.WriteString("cc-watch workspace\nNo selected session.\nEsc back  q quit\n")
 		return b.String()
 	}
 
@@ -186,9 +187,10 @@ func formatRewindWindowRow(row rewindWindowRow, width int) string {
 		chip = "× EXPIRED"
 		status = "expired " + formatStatusDuration(row.seconds)
 	}
-	prefixWidth := len("× EXPIRED") + 2 + len("15:04:05") + 2 + 13 + 2
+	chip = padANSI(styles.Render(role, chip), visibleWidth("× EXPIRED"))
+	prefixWidth := visibleWidth("× EXPIRED") + 2 + len("15:04:05") + 2 + 13 + 2
 	excerpt := truncateEnd(displayExcerpt(row.message.Excerpt), max(width-prefixWidth, 8))
-	return fmt.Sprintf("%s  %s  %-13s  %s", styles.Render(role, chip), row.message.At.Local().Format("15:04:05"), status, messageText(excerpt))
+	return fmt.Sprintf("%s  %s  %-13s  %s", chip, row.message.At.Local().Format("15:04:05"), status, messageText(excerpt))
 }
 
 func (m Model) renderWorkspacePanel(title string, body string) string {
@@ -297,7 +299,21 @@ func gapSummary(s session.Session) string {
 			latest = gap
 		}
 	}
-	return fmt.Sprintf("%d gaps · %d resets · longest %.0fs · latest %.0fs", len(s.Gaps), s.ResetCount, longest.Seconds, latest.Seconds)
+	return fmt.Sprintf("%d gaps · %d resets · longest %s · latest %s", len(s.Gaps), s.ResetCount, formatGapDuration(longest.Seconds), formatGapDuration(latest.Seconds))
+}
+
+func formatGapDuration(seconds float64) string {
+	total := int(math.Round(seconds))
+	if total < 0 {
+		total = 0
+	}
+	hours := total / 3600
+	minutes := total % 3600 / 60
+	remainingSeconds := total % 60
+	if hours > 0 {
+		return fmt.Sprintf("%dh%02dm%02ds", hours, minutes, remainingSeconds)
+	}
+	return fmt.Sprintf("%dm%02ds", minutes, remainingSeconds)
 }
 
 func (m Model) gapSortLabel() string {
@@ -422,7 +438,7 @@ func formatGapLine(gap session.Gap, s session.Session, newest bool) string {
 			tag = "   latest"
 		}
 	}
-	return fmt.Sprintf("%s %5.0fs    %s -> %s%s", styles.Render(role, fmt.Sprintf("%s %-5s", prefix, label)), gap.Seconds, gap.From.Local().Format("15:04:05"), gap.To.Local().Format("15:04:05"), tag)
+	return fmt.Sprintf("%s %9s    %s -> %s%s", styles.Render(role, fmt.Sprintf("%s %-5s", prefix, label)), formatGapDuration(gap.Seconds), gap.From.Local().Format("15:04:05"), gap.To.Local().Format("15:04:05"), tag)
 }
 
 func (m Model) workspaceControls(s session.Session) string {
@@ -513,7 +529,7 @@ func onText(risky bool) string {
 }
 
 func offText() string {
-	return DefaultStyles().Render(RoleMuted, "off")
+	return DefaultStyles().Render(RoleNeutral, "OFF")
 }
 
 func onOffText(enabled bool, risky bool) string {
@@ -527,36 +543,43 @@ func (m Model) workspaceFooter() string {
 	if m.sessionInfoExpanded {
 		if m.FocusedAction() == "details_scroll" {
 			if m.width <= 90 {
-				return cueLine("↑↓ scroll  v collapse  s sort  b/⎋ back  q quit")
+				return cueLine("↑↓ scroll  v collapse  r remind  k KeepAlive  s sort  u update  Esc back  q quit")
 			}
-			return cueLine("↑↓ scroll details  v collapse  s sort gaps  u update  b/⎋ back  q quit")
+			return cueLine("↑↓ scroll details  v collapse  r remind  k KeepAlive  s sort gaps  u update  Esc back  q quit")
 		}
 		if m.width <= 90 {
-			return cueLine("v collapse  s sort  u update  b/⎋ back  q quit")
+			return cueLine("v collapse  r remind  k KeepAlive  s sort  u update  Esc back  q quit")
 		}
-		return cueLine("v collapse  s sort gaps  u update  b/⎋ back  q quit")
+		return cueLine("v collapse  r remind  k KeepAlive  s sort gaps  u update  Esc back  q quit")
 	}
 	switch m.activeKeepAliveState().State {
 	case keepalive.StateCountdown:
 		if m.width <= 90 {
-			return cueLine("↑↓ choose  ↵ act  s send now  x cancel  b/⎋ back  q quit")
+			return cueLine("↑↓ choose  Enter/Space act  s send now  x cancel  Esc back  q quit")
 		}
-		return cueLine("↑↓ choose action  ↵ act  s send now  x cancel instance  b/⎋ back  q quit")
+		return cueLine("↑↓ choose action  Enter/Space act  s send now  x cancel instance  Esc back  q quit")
 	case keepalive.StateSending:
 		if m.width <= 90 {
-			return cueLine("↑↓ choose  ↵ act  x stop  b/⎋ back  q quit")
+			return cueLine("↑↓ choose  Enter/Space act  x stop  Esc back  q quit")
 		}
-		return cueLine("↑↓ choose action  ↵ act  x stop waiting  b/⎋ back  q quit")
+		return cueLine("↑↓ choose action  Enter/Space act  x stop waiting  Esc back  q quit")
 	case keepalive.StateConfirming:
 		if m.width <= 90 {
-			return cueLine("↑↓ choose  ↵ act  x stop  b/⎋ back  q quit")
+			return cueLine("↑↓ choose  Enter/Space act  x stop  Esc back  q quit")
 		}
-		return cueLine("↑↓ choose action  ↵ act  x stop check  b/⎋ back  q quit")
+		return cueLine("↑↓ choose action  Enter/Space act  x stop check  Esc back  q quit")
 	default:
 		if m.width <= 90 {
-			return cueLine("↑↓ focus  ↵ act  r remind  k KeepAlive  v details  u update  q quit")
+			if m.workspaceCanSendKeepAlive() || m.workspaceCanCancelKeepAlive() {
+				return cueLine("↑↓ focus  Enter/Space act  k warm  s send  x cancel  Esc back  q quit")
+			}
+			return cueLine("↑↓ focus  Enter/Space act  r remind  k warm  v info  u update  Esc back  q quit")
 		}
-		return cueLine("↑↓ focus  ↵/space act  r remind  k KeepAlive  v details  u update  b/⎋ back  q quit")
+		failureActions := ""
+		if m.workspaceCanSendKeepAlive() || m.workspaceCanCancelKeepAlive() {
+			failureActions = "  s send now  x cancel"
+		}
+		return cueLine("↑↓ focus  Enter/Space act  r remind  k KeepAlive  v details  u update" + failureActions + "  Esc back  q quit")
 	}
 }
 

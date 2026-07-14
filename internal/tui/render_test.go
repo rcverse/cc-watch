@@ -92,7 +92,29 @@ func TestVisualPrimitivesRenderPanelsAndProgressBars(t *testing.T) {
 	if visibleWidth(stripANSI(bar)) != 12 {
 		t.Fatalf("progress bar visible width = %d, want 12: %q", visibleWidth(stripANSI(bar)), bar)
 	}
+	if countdownPercentRole(100) != RoleSuccess || countdownPercentRole(0) != RoleDanger {
+		t.Fatalf("countdown percent roles are not long-good/short-danger")
+	}
 
+}
+
+func TestStatuslineElementRowsUseSharedToggleStylesAndCompactStateColumn(t *testing.T) {
+	if got := statuslineElementValue(config.StatuslineElementConfig{Enabled: true}); got != DefaultStyles().Render(RoleSuccess, "ON") {
+		t.Fatalf("enabled statusline value = %q, want green ON", got)
+	}
+	if got := statuslineElementValue(config.StatuslineElementConfig{Enabled: false}); got != DefaultStyles().Render(RoleNeutral, "OFF") {
+		t.Fatalf("disabled statusline value = %q, want white OFF", got)
+	}
+
+	row := stripANSI(NewModel(Options{Width: 120}).statuslineElementRow(
+		"config_statusline_usage",
+		"Usage",
+		"ON",
+		"Same line · Full",
+	))
+	if !strings.Contains(row, "Usage                Same line · Full          ON") {
+		t.Fatalf("statusline row does not keep state beside its detail column: %q", row)
+	}
 }
 
 func TestViewIncludesRouteAndFocusLabels(t *testing.T) {
@@ -121,7 +143,7 @@ func TestListViewUsesPolishedVisualHierarchy(t *testing.T) {
 			ShortID:        "11111111",
 			Project:        "visual-project",
 			FileModifiedAt: now,
-			LastMessageAt:  &last,
+			CacheAnchorAt:  &last,
 			CacheWindow:    session.CacheWindow{Tier: session.Tier1Hour, Label: "1h", TTLSeconds: 3600, Known: true},
 			TokenStats:     session.TokenStats{HitRate: 88},
 			Messages:       session.Messages{LastUserExcerpt: "last visual message"},
@@ -153,7 +175,7 @@ func TestAdaptiveListViewFitsEightyColumnsAndCapsExpiredProgress(t *testing.T) {
 			ShortID:        "1463d331",
 			Project:        "Users-richardchen-workspace",
 			FileModifiedAt: now,
-			LastMessageAt:  &last,
+			CacheAnchorAt:  &last,
 			CacheWindow:    session.CacheWindow{Tier: session.Tier1Hour, Label: "1h", TTLSeconds: 3600, Known: true},
 			TokenStats:     session.TokenStats{HitRate: 95},
 			Messages: session.Messages{
@@ -235,6 +257,21 @@ func TestStatusTimesDropLowValueUnitsAsTheyGrow(t *testing.T) {
 	} {
 		if got := formatStatusDuration(tc.seconds); got != tc.want {
 			t.Fatalf("formatStatusDuration(%d) = %q, want %q", tc.seconds, got, tc.want)
+		}
+	}
+}
+
+func TestGapDurationsUseHoursMinutesAndSeconds(t *testing.T) {
+	for _, tc := range []struct {
+		seconds float64
+		want    string
+	}{
+		{64, "1m04s"},
+		{184, "3m04s"},
+		{3600 + 5*60, "1h05m00s"},
+	} {
+		if got := formatGapDuration(tc.seconds); got != tc.want {
+			t.Fatalf("formatGapDuration(%v) = %q, want %q", tc.seconds, got, tc.want)
 		}
 	}
 }
@@ -334,7 +371,7 @@ func TestListKeepsEveryVisibleRowExcerptAndAddsTitleBreathingRoom(t *testing.T) 
 			ShortID:        fmt.Sprintf("5ac2bc0%d", i),
 			Project:        "Users-richardchen-course-custom-skills",
 			FileModifiedAt: now,
-			LastMessageAt:  &last,
+			CacheAnchorAt:  &last,
 			CacheWindow:    session.CacheWindow{Tier: session.Tier1Hour, Label: "1h", TTLSeconds: 3600, Known: true},
 			TokenStats:     session.TokenStats{HitRate: 92},
 			Messages: session.Messages{
@@ -388,7 +425,7 @@ func TestWorkspaceAndConfigUseAdaptiveTerminalLayout(t *testing.T) {
 	workspaceView := workspace.View()
 	assertMaxLineWidth(t, workspaceView, 80)
 	assertMaxLines(t, workspaceView, 24)
-	for _, want := range []string{"Claude Code Watch / workspace-api / workspace", "Cache Status", "Session Info", "Messages", "Tokens", "Controls", "› Reminder", "KeepAlive", "off", "█", "░"} {
+	for _, want := range []string{"Claude Code Watch / workspace-api / workspace", "Cache Status", "Session Info", "Messages", "Tokens", "Controls", "› Reminder", "KeepAlive", "OFF", "█", "░"} {
 		if !strings.Contains(workspaceView, want) {
 			t.Fatalf("workspace view missing %q:\n%s", want, workspaceView)
 		}
@@ -422,7 +459,7 @@ func TestWorkspacePolishRemovesDuplicateSessionRowAndUsesMessageChips(t *testing
 	now := time.Date(2026, 6, 3, 12, 0, 0, 0, time.UTC)
 	s := workspaceSession(now)
 	last := now.Add(-20 * time.Minute)
-	s.LastMessageAt = &last
+	s.CacheAnchorAt = &last
 	view := NewModel(Options{
 		Now:        now,
 		Width:      132,
@@ -496,7 +533,7 @@ func TestConfigEditingUsesSeparatePromptPanel(t *testing.T) {
 	model := updated.(Model)
 	view := model.View()
 
-	for _, want := range []string{"╭─ Settings", "╭─ Editing", "KeepAlive trigger", "Current input", "3", "▌", "↵ save field", "⎋ cancel edit"} {
+	for _, want := range []string{"╭─ Settings", "╭─ Editing", "KeepAlive trigger", "Current input", "3", "▌", "Enter save field", "Esc cancel edit"} {
 		if !strings.Contains(stripANSI(view), want) {
 			t.Fatalf("config edit view missing %q:\n%s", want, view)
 		}
@@ -592,7 +629,7 @@ func TestListViewResponsivePriorityFields(t *testing.T) {
 			Known:      true,
 		}, longExcerpt, "last message")},
 	}).View()
-	for _, want := range []string{"narrow-id", "ops", "1-hour cache", "● Active", "56m00s left", "↵ open", "r remind", "k KeepAlive"} {
+	for _, want := range []string{"narrow-id", "ops", "1-hour cache", "● Active", "56m00s left", "Enter open", "r remind", "k KeepAlive"} {
 		if !strings.Contains(narrow, want) {
 			t.Fatalf("narrow view missing %q:\n%s", want, narrow)
 		}
@@ -671,18 +708,15 @@ func TestListEmptyStatesOnlyAdvertiseValidActions(t *testing.T) {
 		Refresh: RefreshViewState{ProjectsDir: "/tmp/home/.claude/projects", EmptyState: EmptyNoSessions},
 	}).View()
 
-	for _, disallowed := range []string{"↵ open", "r remind", "k KeepAlive"} {
+	for _, disallowed := range []string{"Enter open", "r remind", "k KeepAlive"} {
 		if strings.Contains(view, disallowed) {
 			t.Fatalf("empty state advertised invalid action %q:\n%s", disallowed, view)
 		}
 	}
-	for _, want := range []string{"Refresh", "q quit"} {
+	for _, want := range []string{"Refresh", "c config", "q quit"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("empty state missing valid action %q:\n%s", want, view)
 		}
-	}
-	if strings.Contains(view, "Help") || strings.Contains(view, "? help") {
-		t.Fatalf("empty state still advertises removed help page:\n%s", view)
 	}
 }
 
@@ -782,7 +816,7 @@ func TestConfigEditorRendersFieldsSummaryWarningsAndStatus(t *testing.T) {
 		"Status",
 		"✕ Validation failed:",
 		"countdown may not fit the 5m cache trigger window",
-		"↑↓ move  ↵ edit  space toggle  s save  d reset  ⎋ cancel",
+		"↑↓ move  Enter edit/act  s save  d reset  Esc cancel",
 	} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("config view missing %q:\n%s", want, view)
@@ -938,7 +972,7 @@ func TestWorkspaceRendersCanonicalInfoAndControlsSeparately(t *testing.T) {
 		"Gaps",
 		"Controls",
 		"› Reminder",
-		"off",
+		"OFF",
 		"notify at 20%, 10%",
 		"KeepAlive",
 		"5m before expiry · 5 sends",
@@ -977,7 +1011,7 @@ func TestExpiredWorkspaceUsesNeutralUnavailableNA(t *testing.T) {
 	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
 	expiredLast := now.Add(-2 * time.Hour)
 	expired := workspaceSession(now)
-	expired.LastMessageAt = &expiredLast
+	expired.CacheAnchorAt = &expiredLast
 	expired.CacheWindow = session.CacheWindow{Tier: session.Tier1Hour, Label: "1h", TTLSeconds: 3600, Known: true}
 	view := NewModel(Options{
 		Now:        now,
@@ -1005,7 +1039,7 @@ func TestExpiredWorkspaceUsesNeutralUnavailableNA(t *testing.T) {
 func TestUnknownStatusUsesUnicodeMarkerWithText(t *testing.T) {
 	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
 	unknown := listViewSession("unknown-id", "unknown", now, time.Time{}, session.CacheWindow{Label: "TTL ?", Known: false}, "", "")
-	unknown.LastMessageAt = nil
+	unknown.CacheAnchorAt = nil
 	list := NewModel(Options{
 		Now:      now,
 		Width:    120,
@@ -1078,13 +1112,13 @@ func TestWorkspaceRendersCanonicalCacheStatusAndSessionInfoCards(t *testing.T) {
 	activeLast := now.Add(-108 * time.Second)
 	expiredLast := now.Add(-2 * time.Hour)
 	active := workspaceSession(now)
-	active.LastMessageAt = &activeLast
+	active.CacheAnchorAt = &activeLast
 	active.CacheWindow = session.CacheWindow{Tier: session.Tier1Hour, Label: "1h", TTLSeconds: 3600, Known: true}
 	active.TokenStats.HitRate = 95
 	expired := active
 	expired.SessionID = "expired-id"
 	expired.ShortID = "expired"
-	expired.LastMessageAt = &expiredLast
+	expired.CacheAnchorAt = &expiredLast
 
 	model := NewModel(Options{
 		Now:        now,
@@ -1103,6 +1137,9 @@ func TestWorkspaceRendersCanonicalCacheStatusAndSessionInfoCards(t *testing.T) {
 	}
 	if ttlPercentRole(3) != RoleSuccess || ttlPercentRole(100) != RoleDanger {
 		t.Fatalf("TTL percent roles are not low-good/high-danger")
+	}
+	if countdownPercentRole(100) != RoleSuccess || countdownPercentRole(3) != RoleDanger {
+		t.Fatalf("countdown percent roles are not long-good/short-danger")
 	}
 	if hitRatePercentRole(95) != RoleSuccess || hitRatePercentRole(10) != RoleDanger {
 		t.Fatalf("hit-rate percent roles are not high-good/low-danger")
@@ -1149,7 +1186,7 @@ func TestSessionInfoDetailsDisclosureAndGapSorting(t *testing.T) {
 		t.Fatalf("v changed focus from %q to %q, want details_scroll", initialFocus, model.FocusedAction())
 	}
 	details := model.View()
-	for _, want := range []string{"Session Info · details", "JSONL", "Updated", "Token Stats", "Mid-session Gaps >1min · ↕ longest", "! RESET", "184s", "b/⎋ back"} {
+	for _, want := range []string{"Session Info · details", "JSONL", "Updated", "Token Stats", "Mid-session Gaps >1min · ↕ longest", "! RESET", "3m04s", "Esc back"} {
 		if !strings.Contains(details, want) {
 			t.Fatalf("details view missing %q:\n%s", want, details)
 		}
@@ -1176,7 +1213,7 @@ func TestSessionInfoDetailsDisclosureAndGapSorting(t *testing.T) {
 			t.Fatalf("newest details missing %q:\n%s", want, newest)
 		}
 	}
-	if !strings.Contains(newest, "64s") || !strings.Contains(newest, "↓ 3 more gap(s) below; use ↑↓ scroll") {
+	if !strings.Contains(newest, "1m04s") || !strings.Contains(newest, "↓ 3 more gap(s) below; use ↑↓ scroll") {
 		t.Fatalf("newest details missing visible newest gap or scroll affordance:\n%s", newest)
 	}
 }
@@ -1254,6 +1291,29 @@ func TestWorkspaceDetailsShowsRewindWindowsWithExpiredCutoff(t *testing.T) {
 		t.Fatalf("styled active chip count = %d, want at least 2:\n%s", count, view)
 	}
 	assertMaxLineWidth(t, view, 100)
+}
+
+func TestRewindWindowRowsAlignStatusColumns(t *testing.T) {
+	now := time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)
+	active := formatRewindWindowRow(rewindWindowRow{
+		message: session.MessageWindow{At: now, Excerpt: "active message"},
+		status:  session.StatusActive,
+		seconds: 50 * 60,
+	}, 100)
+	expired := formatRewindWindowRow(rewindWindowRow{
+		message: session.MessageWindow{At: now.Add(-time.Hour), Excerpt: "expired message"},
+		status:  session.StatusExpired,
+		seconds: 10 * 60,
+	}, 100)
+	active = stripANSI(active)
+	expired = stripANSI(expired)
+
+	if strings.Index(active, "12:00:00") != strings.Index(expired, "11:00:00") {
+		t.Fatalf("rewind rows do not align time columns:\nactive:  %q\nexpired: %q", active, expired)
+	}
+	if strings.Index(active, "active message") != strings.Index(expired, "expired message") {
+		t.Fatalf("rewind rows do not align excerpt columns:\nactive:  %q\nexpired: %q", active, expired)
+	}
 }
 
 func TestMessageChipsAreSharedAcrossListAndWorkspace(t *testing.T) {
@@ -1430,7 +1490,7 @@ func TestWorkspaceKeepAliveCardIsAdditiveAndControlsOwnFocus(t *testing.T) {
 			t.Fatalf("paused KeepAlive focus reached hidden action %q; saw %#v", hidden, seen)
 		}
 	}
-	for _, hidden := range []string{"copy_id", "evidence", "refresh", "help", "quit"} {
+	for _, hidden := range []string{"copy_id", "evidence", "refresh", "quit"} {
 		if seen[hidden] {
 			t.Fatalf("KeepAlive focus reached hidden action %q; saw %#v", hidden, seen)
 		}
@@ -1553,7 +1613,7 @@ func workspaceSession(now time.Time) session.Session {
 		Project:         "workspace-api",
 		JSONLPath:       "/tmp/home/.claude/projects/workspace-api/workspace-id.jsonl",
 		FileModifiedAt:  now,
-		LastMessageAt:   &last,
+		CacheAnchorAt:   &last,
 		DurationSeconds: &duration,
 		CacheWindow: session.CacheWindow{
 			Tier:       session.Tier1Hour,
@@ -1638,7 +1698,7 @@ func listViewSession(id string, project string, modified time.Time, last time.Ti
 		ShortID:        id,
 		Project:        project,
 		FileModifiedAt: modified,
-		LastMessageAt:  &last,
+		CacheAnchorAt:  &last,
 		CacheWindow:    cache,
 		Messages: session.Messages{
 			FirstUserExcerpt: first,
