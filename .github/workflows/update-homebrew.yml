@@ -46,6 +46,9 @@ jobs:
           mv "$GITHUB_WORKSPACE/homebrew-cc-watch" "$tap_dir"
           echo "TAP_DIR=$tap_dir" >> "$GITHUB_ENV"
 
+      - name: Trust tap for validation
+        run: brew trust --tap rcverse/cc-watch
+
       - name: Download checksums and update formula
         env:
           GH_TOKEN: ${{ github.token }}
