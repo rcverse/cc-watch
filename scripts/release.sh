@@ -10,7 +10,7 @@ die() {
 }
 
 if [[ $# -ne 1 ]]; then
-  die "usage: scripts/release.sh v1.0.0-beta.4"
+  die "usage: scripts/release.sh v1.0.0-beta.5"
 fi
 
 TAG="$1"
@@ -35,6 +35,17 @@ if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; the
 fi
 
 VERSION="${TAG#v}"
+NOTES_FILE="docs/releases/$TAG.md"
+if [[ ! -s "$NOTES_FILE" ]]; then
+  die "missing release notes: $NOTES_FILE"
+fi
+if ! grep -Fq "$TAG" "$NOTES_FILE"; then
+  die "release notes must mention $TAG: $NOTES_FILE"
+fi
+if ! grep -Fq "$TAG" README.md; then
+  die "README.md must mention $TAG"
+fi
+
 EXPECTED="cc-watch $VERSION"
 ACTUAL="$(go run ./cmd/cc-watch --version)"
 if [[ "$ACTUAL" != "$EXPECTED" ]]; then

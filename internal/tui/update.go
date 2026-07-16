@@ -135,9 +135,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.keepAliveManager.MarkSuccess(typed.SessionID, typed.InstanceToken)
 		state := m.KeepAliveState(typed.SessionID)
 		m.setNotice("✓ KeepAlive sent and confirmed", RoleSuccess, 3*time.Second)
+		updated, refreshCmd := m.scheduleRefresh()
+		m = updated.(Model)
 		commands := []tea.Cmd{
 			m.keepAliveSuccessNotification(typed.SessionID),
 		}
+		commands = append(commands, refreshCmd)
 		if state.State == keepalive.StateScopeComplete {
 			commands = append(commands, m.keepAliveLifecycleNotification(typed.SessionID, state))
 		}

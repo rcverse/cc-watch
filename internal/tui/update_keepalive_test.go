@@ -157,19 +157,35 @@ func TestWorkspaceKeepAliveActionsProduceRunnerAndConfirmationCommands(t *testin
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 	runner := fakeKeepAliveRunner{startedAt: now.Add(time.Second)}
 	confirmCalls := 0
+	refreshCalls := 0
+	confirmedAt := now.Add(2 * time.Second)
 	model := NewModel(Options{
 		Now:              now,
 		SelectedID:       "workspace-id",
 		Sessions:         []session.Session{workspaceSession(now)},
 		KeepAliveManager: keepAliveManagerInState(keepalive.SessionState{SessionID: "workspace-id", State: keepalive.StateCountdown, InstanceToken: 21, MaxSends: 1}),
 		Dependencies: Dependencies{
+			RefreshSnapshot: func(selected *session.Session) RefreshSnapshot {
+				refreshCalls++
+				if selected == nil || selected.SessionID != "workspace-id" {
+					t.Fatalf("refresh selected session = %#v, want workspace-id", selected)
+				}
+				refreshed := workspaceSession(now)
+				refreshed.CacheAnchorAt = &confirmedAt
+				return RefreshSnapshot{
+					Sessions:     []session.Session{refreshed},
+					HasRefresh:   true,
+					SelectedOnly: true,
+					SelectedID:   selected.SessionID,
+				}
+			},
 			KeepAliveRunner: runner,
 			ConfirmKeepAlive: func(ctx context.Context, target keepalive.ConfirmationTarget) (keepalive.ConfirmationResult, error) {
 				confirmCalls++
 				if target.Path == "" {
 					t.Fatalf("confirmation target path is empty")
 				}
-				return keepalive.ConfirmationResult{Confirmed: true, ConfirmedAt: now.Add(2 * time.Second)}, nil
+				return keepalive.ConfirmationResult{Confirmed: true, ConfirmedAt: confirmedAt}, nil
 			},
 		},
 	})
@@ -195,10 +211,25 @@ func TestWorkspaceKeepAliveActionsProduceRunnerAndConfirmationCommands(t *testin
 	if confirmCalls != 1 {
 		t.Fatalf("confirmation calls = %d, want 1", confirmCalls)
 	}
-	updated, _ = model.Update(confirmMsg)
+	updated, cmd = model.Update(confirmMsg)
 	model = updated.(Model)
 	if got := model.KeepAliveState("workspace-id").State; got != keepalive.StateScopeComplete {
 		t.Fatalf("state = %q, want limit reached", got)
+	}
+	if cmd == nil {
+		t.Fatal("confirmation returned nil refresh command")
+	}
+	refreshResult, ok := cmd().(RefreshResultMsg)
+	if !ok || !refreshResult.SelectedOnly {
+		t.Fatalf("confirmation refresh command returned %#v, want selected refresh result", refreshResult)
+	}
+	if refreshCalls != 1 {
+		t.Fatalf("refresh calls = %d, want 1", refreshCalls)
+	}
+	updated, _ = model.Update(refreshResult)
+	model = updated.(Model)
+	if got := model.selectedSession().CacheAnchorAt; got == nil || !got.Equal(confirmedAt) {
+		t.Fatalf("cache anchor after KeepAlive = %v, want %v", got, confirmedAt)
 	}
 	if !strings.Contains(model.View(), "✓ KeepAlive sent and confirmed") {
 		t.Fatalf("view missing success notice:\n%s", model.View())

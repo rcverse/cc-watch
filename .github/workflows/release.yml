@@ -34,6 +34,8 @@ jobs:
           [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
           test "$(git rev-parse "$TAG^{}")" = "$(git rev-parse HEAD)"
           test "$(go run ./cmd/cc-watch --version)" = "cc-watch ${TAG#v}"
+          test -s "docs/releases/$TAG.md"
+          grep -Fq "$TAG" "docs/releases/$TAG.md"
 
       - name: Run release checks
         run: |
@@ -76,5 +78,5 @@ jobs:
             --draft \
             --prerelease \
             --verify-tag \
-            --generate-notes \
+            --notes-file "docs/releases/$TAG.md" \
             --fail-on-no-commits

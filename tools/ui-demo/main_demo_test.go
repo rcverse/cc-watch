@@ -5,9 +5,41 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/rcverse/cc-watch/internal/session"
 )
+
+func TestDemoSessionsShowDistinctCacheStates(t *testing.T) {
+	now := time.Date(2026, 7, 8, 12, 0, 0, 0, time.Local)
+	sessions := demoSessions(now)
+
+	if got := sessions[1].StatusAt(now).State; got != session.StatusActive {
+		t.Fatalf("fading demo session state = %q, want active", got)
+	}
+	if got := sessions[2].StatusAt(now).State; got != session.StatusExpired {
+		t.Fatalf("expired demo session state = %q, want expired", got)
+	}
+}
+
+func TestDemoWorkspaceIncludesCacheHistory(t *testing.T) {
+	now := time.Date(2026, 7, 8, 12, 0, 0, 0, time.Local)
+	demo := demoWorkspaceSession(now)
+
+	if got := len(demo.RecentMessages); got != 3 {
+		t.Fatalf("demo recent messages = %d, want 3", got)
+	}
+	if got := len(demo.Gaps); got != 2 {
+		t.Fatalf("demo gaps = %d, want 2", got)
+	}
+	if demo.ResetCount != 1 {
+		t.Fatalf("demo reset count = %d, want 1", demo.ResetCount)
+	}
+	if !demo.Gaps[0].Reset {
+		t.Fatal("demo longest gap should demonstrate a cache reset")
+	}
+}
 
 func TestDemoModelRendersRealRoutes(t *testing.T) {
 	model := newDemoModel()
@@ -39,6 +71,20 @@ func TestDemoModelTimeTravelCanReachKeepAliveCountdown(t *testing.T) {
 
 	if view := model.View(); !strings.Contains(view, "KeepAlive · ✓ Armed") || !strings.Contains(view, "Sending in") {
 		t.Fatalf("jump to KA trigger did not render countdown:\n%s", view)
+	}
+}
+
+func TestDemoModelFiveSecondStepMovesKeepAliveCountdown(t *testing.T) {
+	model := newDemoModel()
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")})
+	model = updated.(demoModel)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	model = updated.(demoModel)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(".")})
+	model = updated.(demoModel)
+
+	if !strings.Contains(model.View(), "Sending in 25s") {
+		t.Fatalf("five-second demo step did not move countdown:\n%s", model.View())
 	}
 }
 

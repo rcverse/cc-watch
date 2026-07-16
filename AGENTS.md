@@ -40,6 +40,8 @@ pitch.
   history.
 - `docs/decisions.md` is for durable rationale and invariants that future
   code changes must respect. It is not a changelog.
+- `docs/releases/<tag>.md` is the versioned source for the exact GitHub
+  Release body. Create one for every release; do not rely on generated notes.
 - `docs/superpowers/plans/` contains execution artifacts for agents. Plans
   may mention old implementation states; do not treat them as current product
   docs or count them as codebase simplification.
@@ -58,57 +60,73 @@ go test -tags demo ./... # include build-tagged UI demo tests
 scripts/test-install.sh # exercises install.sh against a temp HOME, safe to run
 ```
 
-## Tagged release protocol
+## Update and tagged release protocol
 
-Use `scripts/release.sh` for every `v*` release tag. The script checks the
-clean, versioned `main` branch, runs the release checks, creates an annotated
-tag, and pushes it. The tag triggers `.github/workflows/release.yml`, which
-builds the archives and creates a draft prerelease. Publishing the GitHub
-Release still requires explicit user approval.
+Treat “update to …” as a gated release request. The target tag is the release
+contract; do not edit a published tag.
 
-1. Update `internal/app/version.go`, `README.md`, and version assertions
-   together. Commit and push those changes to `main`, then run:
+1. **Propose and validate the version.** If the user did not provide a tag,
+   propose one before editing: increment the beta suffix for continued beta
+   work, use a patch for compatible fixes, a minor version for a compatible
+   feature, and a major version for a breaking change. State the current
+   version, target, rationale, and whether the target tag already exists. If a
+   requested target conflicts with that classification, surface it for approval.
+
+2. **Formalize the changelog.** Summarize the scoped work in
+   `docs/releases/<tag>.md`, including the tag in the heading. This file is
+   reviewed as the release body and is the only source used by the release
+   workflow. Get approval for the version and notes before the release is
+   prepared.
+
+3. **Prepare and validate.** Update `internal/app/version.go`, `README.md`,
+   and version assertions together. Run the local checks, and confirm the
+   worktree is a clean `main`, the binary reports the target version, README
+   contains the target tag, and the release-notes file exists and names it.
+
+4. **Create the draft.** Commit and push the prepared changes, then run:
 
    ```bash
-   scripts/release.sh v1.0.0-beta.4
+   scripts/release.sh v1.0.0-beta.5
    ```
 
-   The script refuses a dirty worktree, mismatched version, or existing tag. It
-   runs the local release checks before pushing the tag.
+   The script enforces the preflight gates, creates an annotated tag, and
+   pushes it. `.github/workflows/release.yml` repeats the checks, builds the
+   macOS archives and `SHA256SUMS`, and creates a draft prerelease using the
+   versioned notes file.
 
-2. The tag workflow checks out the tagged commit, runs the same checks again,
-   builds `darwin/arm64` and `darwin/amd64` archives with `CGO_ENABLED=0`,
-   writes `SHA256SUMS`, and creates a draft prerelease with generated notes.
-
-3. Review the draft and its assets:
+5. **Review and publish.** Inspect the draft body, assets, checksums, and
+   workflow result:
 
    ```bash
-   TAG=v1.0.0-beta.4
+   TAG=v1.0.0-beta.5
    gh release view "$TAG" --repo rcverse/cc-watch
    ```
 
-4. Publish only after review:
+   Publishing is a separate explicit gate:
 
    ```bash
    gh release edit "$TAG" --repo rcverse/cc-watch --draft=false
    ```
 
-5. After the release is public, `.github/workflows/update-homebrew.yml`
-   downloads `SHA256SUMS`, updates the separate
-   `rcverse/homebrew-cc-watch` tap, runs the formula checks, and commits the
-   formula update to the tap's `main` branch.
+6. **Verify distribution.** Publication triggers
+   `.github/workflows/update-homebrew.yml`, which updates the separate
+   `rcverse/homebrew-cc-watch` tap. The workflow registers the checkout as a
+   Homebrew tap, trusts it, runs the formula checks, and commits the formula
+   update to the tap's `main` branch. If the post-publish run needs recovery,
+   dispatch it with the exact tag; do not create another release:
 
-   Before using this workflow, create a fine-grained GitHub token scoped only to
-   `rcverse/homebrew-cc-watch` with **Contents: Read and write**, then save it
-   in `rcverse/cc-watch` as the Actions secret `HOMEBREW_TAP_TOKEN`.
-   The workflow runs when the draft prerelease is published, including beta
-   releases. Test the resulting user path with
-   `brew install rcverse/cc-watch/cc-watch`, `cc-watch --version`, and
-   `brew test cc-watch`.
+   ```bash
+   gh workflow run update-homebrew.yml --ref main -f tag="$TAG"
+   ```
 
-Never force-move a published tag. Use the next beta or patch version for
-subsequent changes. Keep `dist/releases/` untracked and remove it after the
-release if local disk space matters.
+   Before the first run, `HOMEBREW_TAP_TOKEN` must be a fine-grained token
+   scoped only to `rcverse/homebrew-cc-watch` with **Contents: Read and write**.
+   Verify the user path with `brew install rcverse/cc-watch/cc-watch`,
+   `cc-watch --version`, and `brew test cc-watch`.
+
+Never force-move a published tag. If an unpublished tag must be deleted and
+recreated, obtain explicit approval first. Keep `dist/releases/` untracked and
+remove it after a release if local disk space matters.
 
 ## Glossary
 
