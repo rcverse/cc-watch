@@ -80,6 +80,8 @@ func Build(req Request, loaders Loaders) (Result, error) {
 	discoveryLimit := result.Config.RecentSessions
 	if req.ID != "" {
 		discoveryLimit = 0
+	} else if len(result.Config.PinnedSessions) > 0 || len(result.Config.ReminderSessions) > 0 {
+		discoveryLimit = 0
 	}
 	discovery, err := loaders.DiscoverHome(req.Home, discoveryLimit)
 	if err != nil {
@@ -92,7 +94,11 @@ func Build(req Request, loaders Loaders) (Result, error) {
 	if req.ID != "" {
 		return buildSelected(req, loaders, result, discovery.Sessions)
 	}
-	for _, file := range discovery.Sessions {
+	files := discovery.Sessions
+	if discoveryLimit == 0 {
+		files = recentAndWatched(files, result.Config.RecentSessions, result.Config.PinnedSessions, result.Config.ReminderSessions)
+	}
+	for _, file := range files {
 		parsed, err := loaders.ParseFile(file.Path)
 		if err != nil {
 			return Result{}, &BuildError{Stage: StageParse, Code: "parse_error", Err: err}
@@ -171,11 +177,30 @@ func sessionFilesToCandidates(files []session.SessionFile) []session.Session {
 
 func cloneConfig(cfg config.Config) config.Config {
 	cfg.ReminderThresholds = append([]int(nil), cfg.ReminderThresholds...)
+	cfg.PinnedSessions = append([]string(nil), cfg.PinnedSessions...)
+	cfg.ReminderSessions = append([]string(nil), cfg.ReminderSessions...)
 	return cfg
+}
+
+func recentAndWatched(files []session.SessionFile, recent int, watchedLists ...[]string) []session.SessionFile {
+	watched := map[string]bool{}
+	for _, ids := range watchedLists {
+		for _, id := range ids {
+			watched[id] = true
+		}
+	}
+	selected := make([]session.SessionFile, 0, min(len(files), recent+len(watched)))
+	for i, file := range files {
+		if i < recent || watched[file.SessionID] {
+			selected = append(selected, file)
+		}
+	}
+	return selected
 }
 
 func cloneSession(s session.Session) session.Session {
 	s.Gaps = append([]session.Gap(nil), s.Gaps...)
+	s.ModelsUsed = append([]string(nil), s.ModelsUsed...)
 	if s.DurationSeconds != nil {
 		durationSeconds := *s.DurationSeconds
 		s.DurationSeconds = &durationSeconds

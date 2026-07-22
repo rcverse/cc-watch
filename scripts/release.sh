@@ -15,7 +15,7 @@ fi
 
 TAG="$1"
 if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-  die "tag must look like v1.0.0 or v1.0.0-beta.4"
+	die "tag must look like v1.0.0 or v1.0.0-beta.5"
 fi
 
 if [[ "$(git branch --show-current)" != "main" ]]; then

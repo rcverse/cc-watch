@@ -3,11 +3,22 @@ package session
 import "time"
 
 type CacheTier string
+type CacheUnknownReason string
 
 const (
 	Tier1Hour   CacheTier = "1h"
 	Tier5Minute CacheTier = "5m"
 	TierUnknown CacheTier = "unknown"
+)
+
+const (
+	CacheUnknownNoEvidence    CacheUnknownReason = "no_cache_evidence"
+	CacheUnknownResponseError CacheUnknownReason = "response_error"
+	CacheUnknownAmbiguousTier CacheUnknownReason = "ambiguous_tier"
+	CacheUnknownAfterCompact  CacheUnknownReason = "after_compact"
+	CacheUnknownAfterModel    CacheUnknownReason = "after_model"
+	CacheUnknownAfterPlugins  CacheUnknownReason = "after_reload_plugins"
+	CacheUnknownAfterEffort   CacheUnknownReason = "after_effort"
 )
 
 type CacheWindow struct {
@@ -42,14 +53,18 @@ type Gap struct {
 }
 
 type Session struct {
-	SessionID       string
-	ShortID         string
-	Project         string
-	Cwd             string
-	JSONLPath       string
-	FileModifiedAt  time.Time
-	CacheWindow     CacheWindow
-	DurationSeconds *int
+	SessionID            string
+	ShortID              string
+	Project              string
+	Cwd                  string
+	CurrentModel         string
+	ModelsUsed           []string
+	CurrentContextTokens int
+	JSONLPath            string
+	FileModifiedAt       time.Time
+	CacheWindow          CacheWindow
+	CacheUnknownReason   CacheUnknownReason
+	DurationSeconds      *int
 	// CacheAnchorAt is the latest confirmed cache-refreshing response.
 	CacheAnchorAt  *time.Time
 	Messages       Messages

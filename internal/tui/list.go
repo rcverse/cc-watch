@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -53,7 +54,11 @@ func (m Model) listView() string {
 func (m Model) listHeader() string {
 	styles := DefaultStyles()
 	width := m.listWidth()
-	title := truncateANSI(styles.Render(RoleIdentity, "Claude Code Watch"), width)
+	titleText := "Claude Code Watch"
+	if m.listSortAttention {
+		titleText += " / attention"
+	}
+	title := truncateANSI(styles.Render(RoleIdentity, titleText), width)
 	return "\n" + title + "\n" + styles.Render(RoleSeparator, strings.Repeat("─", max(min(width, 68)-2, 12))) + "\n"
 }
 
@@ -194,7 +199,7 @@ func (m Model) renderListRow(index int, s session.Session) string {
 		padANSI(project, projectWidth),
 		padANSI(cacheDisplay(s), 12),
 	)
-	identity = appendChips(identity, []string{keepAliveChip(m, s), reminderChip(m, s)}, width)
+	identity = appendChips(identity, []string{pinChip(m, s), keepAliveChip(m, s), reminderChip(m, s)}, width)
 	b.WriteString(truncateANSI(identity, width))
 	b.WriteString("\n")
 
@@ -203,6 +208,11 @@ func (m Model) renderListRow(index int, s session.Session) string {
 		progressSummary(status),
 		s.TokenStats.HitRate,
 	)
+	if status.State == session.StatusUnknown {
+		if reason := cacheUnknownListText(s); reason != "" {
+			statusLine += "  " + reason
+		}
+	}
 	if width >= 120 {
 		if s.DurationSeconds != nil {
 			statusLine += "  duration " + formatDuration(*s.DurationSeconds)
@@ -231,6 +241,27 @@ func (m Model) renderListRow(index int, s session.Session) string {
 	}
 	b.WriteString("\n")
 	return b.String()
+}
+
+func cacheUnknownListText(s session.Session) string {
+	switch s.CacheUnknownReason {
+	case session.CacheUnknownAfterCompact:
+		return "after /compact"
+	case session.CacheUnknownAfterModel:
+		return "after /model"
+	case session.CacheUnknownAfterPlugins:
+		return "after /reload-plugins"
+	case session.CacheUnknownAfterEffort:
+		return "after /effort"
+	case session.CacheUnknownResponseError:
+		return "latest response failed"
+	case session.CacheUnknownAmbiguousTier:
+		return "ambiguous cache tier"
+	case session.CacheUnknownNoEvidence:
+		return "no cache evidence"
+	default:
+		return ""
+	}
 }
 
 func (m Model) listVisibleRange() (int, int) {
@@ -336,6 +367,13 @@ func reminderChip(m Model, s session.Session) string {
 	return styles.Render(RoleReminder, "remind") + " " + offText()
 }
 
+func pinChip(m Model, s session.Session) string {
+	if !m.pinnedSessions[s.SessionID] {
+		return ""
+	}
+	return DefaultStyles().Render(RoleIdentity, "pinned")
+}
+
 func keepAliveChip(m Model, s session.Session) string {
 	styles := DefaultStyles()
 	if s.StatusAt(m.now).State == session.StatusExpired {
@@ -396,7 +434,17 @@ func (m Model) listFooter() string {
 	if len(m.sessions) > listPageSize {
 		pageCue = "  ←/→ page"
 	}
-	return cueLine("↑↓ select" + pageCue + "  Enter open  r remind  k KeepAlive  u update  c config  q quit")
+	if m.width <= 72 {
+		return cueLine("↑↓ select  Enter open  r remind  p pin  s sort  k KeepAlive  q quit")
+	}
+	if m.width <= 90 {
+		return cueLine("↑↓ select  Enter open  r remind  p pin  s sort  k KeepAlive\nu update  c config  q quit")
+	}
+	sortCue := "s attention"
+	if m.listSortAttention {
+		sortCue = "s recent"
+	}
+	return cueLine("↑↓ select" + pageCue + "  Enter open  r remind  p pin  " + sortCue + "  u update  c config  q quit")
 }
 
 func cueLine(text string) string {
@@ -502,11 +550,92 @@ func (m *Model) toggleReminderForSelected() {
 		return
 	}
 	if selected.StatusAt(m.now).State == session.StatusExpired {
-		m.reminderEnabled[selected.SessionID] = false
+		if m.reminderEnabled[selected.SessionID] {
+			m.reminderEnabled[selected.SessionID] = false
+			m.persistSessionPreferences()
+		}
 		m.setNotice("Reminder N/A after expiry", RoleMuted, 3*time.Second)
 		return
 	}
 	m.reminderEnabled[selected.SessionID] = !m.reminderEnabled[selected.SessionID]
+	m.persistSessionPreferences()
+}
+
+func (m *Model) togglePinForSelected() {
+	selected := m.selectedSession()
+	if selected == nil {
+		return
+	}
+	m.pinnedSessions[selected.SessionID] = !m.pinnedSessions[selected.SessionID]
+	m.persistSessionPreferences()
+}
+
+func (m *Model) persistSessionPreferences() {
+	previousPins := sessionIDsToBoolMap(m.configOriginal.PinnedSessions)
+	previousReminders := sessionIDsToBoolMap(m.configOriginal.ReminderSessions)
+	m.configDraft.PinnedSessions = enabledSessionIDs(m.pinnedSessions)
+	m.configDraft.ReminderSessions = enabledSessionIDs(m.reminderEnabled)
+	if m.deps.SaveConfig != nil {
+		if err := m.deps.SaveConfig(m.configDraft); err != nil {
+			m.pinnedSessions = previousPins
+			m.reminderEnabled = previousReminders
+			m.configDraft = normalizeConfig(m.configOriginal)
+			m.setNotice("Cannot save watchlist: "+err.Error(), RoleDanger, 3*time.Second)
+			return
+		}
+	}
+	m.configOriginal = normalizeConfig(m.configDraft)
+}
+
+func (m *Model) toggleListSort() {
+	selectedID := m.SelectedSessionID()
+	m.listSortAttention = !m.listSortAttention
+	if m.listSortAttention {
+		sortSessionsByAttention(m.sessions, m.now)
+	} else {
+		sort.SliceStable(m.sessions, func(i, j int) bool {
+			return m.sessions[i].FileModifiedAt.After(m.sessions[j].FileModifiedAt)
+		})
+	}
+	if index, ok := findSessionIndex(m.sessions, selectedID); ok {
+		m.selectedIndex = index
+		m.focusIndex = index
+		m.selectedID = selectedID
+	}
+}
+
+func sortSessionsByAttention(sessions []session.Session, now time.Time) {
+	sort.SliceStable(sessions, func(i, j int) bool {
+		left := sessions[i].StatusAt(now)
+		right := sessions[j].StatusAt(now)
+		leftRank := attentionRank(left.State)
+		rightRank := attentionRank(right.State)
+		if leftRank != rightRank {
+			return leftRank < rightRank
+		}
+		switch left.State {
+		case session.StatusActive:
+			if left.RemainingSeconds != nil && right.RemainingSeconds != nil && *left.RemainingSeconds != *right.RemainingSeconds {
+				return *left.RemainingSeconds < *right.RemainingSeconds
+			}
+		case session.StatusExpired:
+			if left.ExpiredSeconds != nil && right.ExpiredSeconds != nil && *left.ExpiredSeconds != *right.ExpiredSeconds {
+				return *left.ExpiredSeconds < *right.ExpiredSeconds
+			}
+		}
+		return sessions[i].FileModifiedAt.After(sessions[j].FileModifiedAt)
+	})
+}
+
+func attentionRank(state session.StatusState) int {
+	switch state {
+	case session.StatusActive:
+		return 0
+	case session.StatusUnknown:
+		return 1
+	default:
+		return 2
+	}
 }
 
 func (m *Model) toggleKeepAliveForSelected() tea.Cmd {

@@ -211,6 +211,49 @@ func TestParseCacheInvalidationClearsAnchor(t *testing.T) {
 	if s.CacheAnchorAt != nil || s.CacheWindow.Known {
 		t.Fatalf("cache timing = anchor %v, window %+v; want unknown after compact", s.CacheAnchorAt, s.CacheWindow)
 	}
+	if s.CacheUnknownReason != CacheUnknownAfterCompact {
+		t.Fatalf("CacheUnknownReason = %q, want after compact", s.CacheUnknownReason)
+	}
+}
+
+func TestParseExplainsUnknownCacheEvidence(t *testing.T) {
+	s, err := ParseReader(strings.NewReader(`{"timestamp":"2026-06-03T00:00:00Z","message":{"role":"assistant","usage":{"output_tokens":4}}}`+"\n"), "unknown.jsonl", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.CacheUnknownReason != CacheUnknownNoEvidence {
+		t.Fatalf("CacheUnknownReason = %q, want no cache evidence", s.CacheUnknownReason)
+	}
+}
+
+func TestParseExplainsFailedResponseAndAmbiguousTier(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		want CacheUnknownReason
+	}{
+		{
+			name: "failed response",
+			line: `{"timestamp":"2026-06-03T00:00:00Z","is_error":true,"message":{"role":"assistant","usage":{"cache_read_input_tokens":10,"output_tokens":4}}}`,
+			want: CacheUnknownResponseError,
+		},
+		{
+			name: "ambiguous tier",
+			line: `{"timestamp":"2026-06-03T00:00:00Z","message":{"role":"assistant","usage":{"ephemeral_1h_input_tokens":1,"ephemeral_5m_input_tokens":1,"output_tokens":4}}}`,
+			want: CacheUnknownAmbiguousTier,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s, err := ParseReader(strings.NewReader(tc.line+"\n"), "unknown.jsonl", time.Time{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if s.CacheUnknownReason != tc.want {
+				t.Fatalf("CacheUnknownReason = %q, want %q", s.CacheUnknownReason, tc.want)
+			}
+		})
+	}
 }
 
 func TestParseClearDoesNotClearAnchor(t *testing.T) {
@@ -325,6 +368,27 @@ func TestParseCapturesLastNonEmptyCwd(t *testing.T) {
 	}
 	if s.Cwd != "/Users/x/proj/sub" {
 		t.Fatalf("Cwd = %q, want /Users/x/proj/sub", s.Cwd)
+	}
+}
+
+func TestParseCapturesCurrentModelHistoryAndContextUsage(t *testing.T) {
+	lines := strings.Join([]string{
+		`{"message":{"role":"assistant","model":"claude-opus","usage":{"input_tokens":3,"cache_creation_input_tokens":100,"cache_read_input_tokens":900,"output_tokens":20}}}`,
+		`{"message":{"role":"assistant","model":"claude-sonnet","usage":{"input_tokens":2,"cache_creation_input_tokens":50,"cache_read_input_tokens":1200,"output_tokens":10}}}`,
+		`{"message":{"role":"assistant","model":"claude-sonnet"}}`,
+	}, "\n")
+	s, err := ParseReader(strings.NewReader(lines), "models.jsonl", time.Time{})
+	if err != nil {
+		t.Fatalf("ParseReader returned error: %v", err)
+	}
+	if s.CurrentModel != "claude-sonnet" {
+		t.Fatalf("CurrentModel = %q, want claude-sonnet", s.CurrentModel)
+	}
+	if got := strings.Join(s.ModelsUsed, ","); got != "claude-opus,claude-sonnet" {
+		t.Fatalf("ModelsUsed = %q, want distinct models in first-used order", got)
+	}
+	if s.CurrentContextTokens != 1252 {
+		t.Fatalf("CurrentContextTokens = %d, want latest input context 1252", s.CurrentContextTokens)
 	}
 }
 

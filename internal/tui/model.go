@@ -95,6 +95,7 @@ type Options struct {
 	Sessions           []session.Session
 	Countdowns         map[string]int
 	ReminderEnabled    map[string]bool
+	PinnedSessions     map[string]bool
 	ReminderThresholds []int
 	KeepAliveConfig    config.KeepAliveConfig
 	KeepAliveManager   *keepalive.Manager
@@ -120,6 +121,7 @@ type Model struct {
 	sessions                []session.Session
 	countdowns              map[string]int
 	reminderEnabled         map[string]bool
+	pinnedSessions          map[string]bool
 	reminderThresholds      []int
 	reminderFired           map[string]map[int]bool
 	keepAliveConfig         config.KeepAliveConfig
@@ -139,6 +141,7 @@ type Model struct {
 	detailsOffset           int
 	sessionInfoExpanded     bool
 	gapSortNewest           bool
+	listSortAttention       bool
 	startDisplayTicker      bool
 	startRefreshTicker      bool
 	configReturnRoute       Route
@@ -171,13 +174,22 @@ func NewModel(options Options) Model {
 	for sessionID, seconds := range options.Countdowns {
 		countdowns[sessionID] = seconds
 	}
+	configDraft := normalizeConfig(options.Config)
 	reminders := cloneBoolMap(options.ReminderEnabled)
+	if options.ReminderEnabled == nil {
+		reminders = sessionIDsToBoolMap(configDraft.ReminderSessions)
+	}
+	pinnedSessions := cloneBoolMap(options.PinnedSessions)
+	if options.PinnedSessions == nil {
+		pinnedSessions = sessionIDsToBoolMap(configDraft.PinnedSessions)
+	}
 	thresholds := append([]int(nil), options.ReminderThresholds...)
 	if len(thresholds) == 0 {
 		thresholds = []int{20, 10}
 	}
 	keepAliveConfig := normalizeKeepAliveConfig(options.KeepAliveConfig)
-	configDraft := normalizeConfig(options.Config)
+	configDraft.PinnedSessions = enabledSessionIDs(pinnedSessions)
+	configDraft.ReminderSessions = enabledSessionIDs(reminders)
 	keepAliveManager := options.KeepAliveManager
 	if keepAliveManager == nil {
 		keepAliveManager = keepalive.NewManager(keepAliveConfig)
@@ -218,6 +230,7 @@ func NewModel(options Options) Model {
 		sessions:           sessions,
 		countdowns:         countdowns,
 		reminderEnabled:    reminders,
+		pinnedSessions:     pinnedSessions,
 		reminderThresholds: thresholds,
 		reminderFired:      map[string]map[int]bool{},
 		keepAliveConfig:    keepAliveConfig,
@@ -334,6 +347,8 @@ func normalizeConfig(cfg config.Config) config.Config {
 	} else {
 		cfg.ReminderThresholds = append([]int(nil), cfg.ReminderThresholds...)
 	}
+	cfg.PinnedSessions = append([]string(nil), cfg.PinnedSessions...)
+	cfg.ReminderSessions = append([]string(nil), cfg.ReminderSessions...)
 	if cfg.RecentSessions <= 0 {
 		cfg.RecentSessions = defaults.RecentSessions
 	}
@@ -360,6 +375,17 @@ func cloneBoolMap(values map[string]bool) map[string]bool {
 		cloned[key] = value
 	}
 	return cloned
+}
+
+func enabledSessionIDs(values map[string]bool) []string {
+	ids := make([]string, 0, len(values))
+	for id, enabled := range values {
+		if enabled {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func selectedIndexFor(sessions []session.Session, selectedID string) int {

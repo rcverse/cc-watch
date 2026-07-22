@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,75 @@ import (
 	"github.com/rcverse/cc-watch/internal/notify"
 	"github.com/rcverse/cc-watch/internal/session"
 )
+
+func TestListAttentionSortPreservesSelectionAndTogglesBackToRecent(t *testing.T) {
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	window := session.CacheWindow{Tier: session.Tier1Hour, Label: "1h", TTLSeconds: 3600, Known: true}
+	urgent := listViewSession("urgent", "urgent", now.Add(-3*time.Hour), now.Add(-59*time.Minute), window, "", "")
+	safe := listViewSession("safe", "safe", now, now.Add(-10*time.Minute), window, "", "")
+	unknown := session.Session{SessionID: "unknown", ShortID: "unknown", Project: "unknown", FileModifiedAt: now.Add(-time.Hour), CacheUnknownReason: session.CacheUnknownNoEvidence}
+	expired := listViewSession("expired", "expired", now.Add(-2*time.Hour), now.Add(-2*time.Hour), window, "", "")
+	model := NewModel(Options{Now: now, Sessions: []session.Session{urgent, safe, unknown, expired}})
+
+	updated, _ := model.Update(keyRunes("s"))
+	model = updated.(Model)
+	if got := []string{model.sessions[0].SessionID, model.sessions[1].SessionID, model.sessions[2].SessionID, model.sessions[3].SessionID}; strings.Join(got, ",") != "urgent,safe,unknown,expired" {
+		t.Fatalf("attention order = %v", got)
+	}
+	if model.SelectedSessionID() != "safe" || !strings.Contains(model.View(), "Claude Code Watch / attention") {
+		t.Fatalf("attention sort lost selection or mode label:\n%s", model.View())
+	}
+	updated, _ = model.Update(RefreshResultMsg{Generation: model.refreshGeneration, Sessions: []session.Session{expired, unknown, safe, urgent}, HasRefresh: true})
+	model = updated.(Model)
+	if model.sessions[0].SessionID != "urgent" || model.SelectedSessionID() != "safe" {
+		t.Fatalf("refresh lost attention order or selection: %#v", model.sessions)
+	}
+
+	updated, _ = model.Update(keyRunes("s"))
+	model = updated.(Model)
+	if model.sessions[0].SessionID != "safe" || model.SelectedSessionID() != "safe" {
+		t.Fatalf("recent sort did not restore mtime order and selection: %#v", model.sessions)
+	}
+}
+
+func TestPinAndReminderTogglesPersistAndRollbackOnFailure(t *testing.T) {
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	s := workspaceSession(now)
+	var saved config.Config
+	model := NewModel(Options{
+		Now:      now,
+		Sessions: []session.Session{s},
+		Config:   config.Default(),
+		Dependencies: Dependencies{SaveConfig: func(next config.Config) error {
+			saved = next
+			return nil
+		}},
+	})
+	updated, _ := model.Update(keyRunes("p"))
+	model = updated.(Model)
+	updated, _ = model.Update(keyRunes("r"))
+	model = updated.(Model)
+	if !model.pinnedSessions[s.SessionID] || !model.reminderEnabled[s.SessionID] || strings.Join(saved.PinnedSessions, ",") != s.SessionID || strings.Join(saved.ReminderSessions, ",") != s.SessionID {
+		t.Fatalf("persisted state = pins %#v reminders %#v config %#v", model.pinnedSessions, model.reminderEnabled, saved)
+	}
+	if !strings.Contains(model.View(), "pinned") {
+		t.Fatalf("pinned session missing list chip:\n%s", model.View())
+	}
+
+	failing := NewModel(Options{
+		Now:      now,
+		Sessions: []session.Session{s},
+		Config:   config.Default(),
+		Dependencies: Dependencies{SaveConfig: func(config.Config) error {
+			return errors.New("disk full")
+		}},
+	})
+	updated, _ = failing.Update(keyRunes("p"))
+	failing = updated.(Model)
+	if failing.pinnedSessions[s.SessionID] || !strings.Contains(failing.View(), "Cannot save watchlist: disk full") {
+		t.Fatalf("failed save did not roll back pin:\n%s", failing.View())
+	}
+}
 
 func TestDisplayTickRecomputesTimeOnly(t *testing.T) {
 	now := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)

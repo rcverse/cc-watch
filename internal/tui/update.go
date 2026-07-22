@@ -76,6 +76,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.sessions = cloneSessions(typed.Sessions)
 		}
+		if m.listSortAttention {
+			sortSessionsByAttention(m.sessions, m.now)
+		}
 		if typed.HasRefresh {
 			m.refresh = defaultRefresh(typed.Refresh)
 		} else if m.refresh.EmptyState != EmptyNone && len(m.sessions) > 0 {
@@ -358,6 +361,11 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.toggleReminderForSelected()
 		}
 		return m, nil
+	case "p":
+		if m.route == RouteList || m.route == RouteWorkspace {
+			m.togglePinForSelected()
+		}
+		return m, nil
 	case "k":
 		if m.route == RouteList || m.route == RouteWorkspace {
 			return m, m.toggleKeepAliveForSelected()
@@ -397,6 +405,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "s":
 		switch {
+		case m.route == RouteList:
+			m.toggleListSort()
+			return m, nil
 		case m.route == RouteConfig || m.route == RouteStatusline:
 			return m.saveConfig()
 		case m.route == RouteWorkspace && m.sessionInfoExpanded:

@@ -20,7 +20,7 @@ reports **Unknown** and disables features that depend on cache timing.
 > your local `claude` command, and it is visible, cancellable, confirmed from
 > the session file, and capped per session.
 
-> **Beta:** `v1.0.0-beta.4`. Claude Code's transcript format and statusline
+> **Beta:** `v1.0.0-beta.5`. Claude Code's transcript format and statusline
 > hook may change. KeepAlive and the statusline integration are beta features.
 
 On launch, `cc-watch` lists recent sessions and their cache state. Open a
@@ -31,17 +31,19 @@ and mid-session gaps.
 
 ## What it does
 
-- **Session list.** Recent projects, short IDs, message excerpts, cache state,
+- **Browse sessions.** See recent projects, short IDs, message excerpts, cache state,
   cache tier, hit rate, and Reminder or KeepAlive state. The list refreshes
-  when Claude Code changes its session files.
-- **Session details.** Active, expired, or unknown cache timing, recent message
-  cache status, token statistics, and gaps longer than one minute. Full cache
-  resets are separated from ordinary pauses.
-- **Reminder.** A native macOS notification as the selected session approaches
+  when Claude Code changes its session files. Pin sessions to keep them in the
+  list, or switch to attention order to see the nearest active expiry first.
+- **Inspect details.** See active, expired, or unknown cache timing, recent message
+  cache status, the current model and context use, token statistics, and gaps
+  longer than one minute. Unknown timing includes the reason and the next safe
+  action. Full cache resets are separated from ordinary pauses.
+- **Get reminders.** Receive a native macOS notification as the selected session approaches
   its configured threshold. It never sends a Claude message.
-- **KeepAlive.** An optional, bounded process for keeping one selected session
+- **Keep sessions warm.** Run an optional, bounded process for keeping one selected session
   warm while you are away.
-- **Claude Code statusline.** Usage, cache timing, and KeepAlive warnings
+- **Add statusline data.** Show usage, cache timing, and KeepAlive warnings
   alongside the statusline you already use.
 
 ## Install
@@ -86,6 +88,19 @@ available in the local transcript:
 When the transcript cannot support a safe timing claim, Reminder and KeepAlive
 stay off until a later Claude Code response provides fresh evidence.
 
+## Watchlist and attention order
+
+Press `p` to pin a session. Pinned sessions remain in the list even when they
+fall outside the recent-session limit. Reminder selections are also restored
+after restarting cc-watch, and reminded sessions remain loaded so their
+thresholds can still be checked while the TUI is running.
+
+Press `s` in the session list to switch between recent and attention order.
+Attention order shows active sessions by nearest expiry, then sessions with
+unknown timing, then expired sessions. The selected session stays selected
+when the order changes. Pins and reminders do not create a daemon; monitoring
+still stops when cc-watch exits.
+
 For the server-side background, see [Claude Code's prompt caching
 documentation](https://code.claude.com/docs/en/prompt-caching).
 
@@ -100,6 +115,8 @@ the session, or keep a background daemon running. It only runs while the
 session has known, unexpired timing.
 
 ## KeepAlive
+
+*🎵 Ah, ha, ha, ha, stayin' alive, stayin' alive.*
 
 KeepAlive keeps one selected session warm while you are away. It handles one
 session at a time, uses one configured message, shows a countdown, and enforces
@@ -171,6 +188,8 @@ The TUI shows its current actions in the footer. Common actions are:
 | ------- | ------------------------------- |
 | `Enter` | Open the selected session.      |
 | `r`     | Toggle Reminder.                |
+| `p`     | Pin or unpin the session.        |
+| `s`     | Toggle recent/attention order.   |
 | `k`     | Arm or disarm KeepAlive.        |
 | `u`     | Refresh the local session view. |
 | `v`     | Expand session details.         |
@@ -187,6 +206,7 @@ Run `cc-watch config` or open Config from the TUI. Settings are stored at
 | ------------------- | -----------: | ------------------------------------------ |
 | Recent sessions     |         `10` | How many sessions appear in the list.      |
 | Reminder thresholds | `20%`, `10%` | When macOS notifications appear.           |
+| Watched sessions     |       none | Pinned sessions and restored Reminders.      |
 | KeepAlive trigger   |      `5 min` | How early the workflow prepares a send.    |
 | Countdown           |     `30 sec` | The visible wait before an automatic send. |
 | KeepAlive message   |    See above | The text sent through `claude`.            |
@@ -200,7 +220,7 @@ transcript.
 | Path                                | Access                                                                            |
 | ----------------------------------- | --------------------------------------------------------------------------------- |
 | `~/.claude/projects/**/*.jsonl`     | Read-only session history.                                                        |
-| `~/.config/cc-watch/config.json`    | Reminder, KeepAlive, and statusline preferences.                                  |
+| `~/.config/cc-watch/config.json`    | Watchlist, Reminder, KeepAlive, and statusline preferences.                       |
 | `~/.config/cc-watch/keepalive.log`  | Local record of KeepAlive sends and confirmations.                                |
 | `~/.config/cc-watch/ratelimit.json` | Local state for statusline account-limit estimates.                               |
 | `~/.claude/settings.json`           | Changed only when you explicitly install or uninstall the statusline integration. |

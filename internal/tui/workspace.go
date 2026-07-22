@@ -70,7 +70,31 @@ func (m Model) cacheStatusCard(s session.Session) string {
 		ttlLine = fmt.Sprintf("%s %s  %.0f%%  %s  %s", padANSI(styles.Render(statusRole(status), state), 10), ProgressBar(percent, 20), percent, cacheStatusTime(status), cacheTierText(s))
 	}
 	fmt.Fprintf(&b, "%s\n", truncateANSI(ttlLine, max(m.width-4, 20)))
+	if reason := cacheUnknownReasonText(s); reason != "" {
+		fmt.Fprintf(&b, "%s\n", truncateANSI(styles.Render(RoleMuted, reason), max(m.width-4, 20)))
+	}
 	return m.renderWorkspacePanel("Cache Status", b.String())
+}
+
+func cacheUnknownReasonText(s session.Session) string {
+	switch s.CacheUnknownReason {
+	case session.CacheUnknownAfterCompact:
+		return "After /compact. Send one normal turn."
+	case session.CacheUnknownAfterModel:
+		return "After /model. Send one normal turn."
+	case session.CacheUnknownAfterPlugins:
+		return "After /reload-plugins. Send one normal turn."
+	case session.CacheUnknownAfterEffort:
+		return "After /effort. Send one normal turn."
+	case session.CacheUnknownResponseError:
+		return "Latest response failed. Send one normal turn."
+	case session.CacheUnknownAmbiguousTier:
+		return "Cache tier is ambiguous. Send one normal turn."
+	case session.CacheUnknownNoEvidence:
+		return "No cache-token evidence yet. Send one normal turn."
+	default:
+		return ""
+	}
 }
 
 func (m Model) sessionInfoCard(s session.Session) string {
@@ -83,6 +107,12 @@ func (m Model) sessionInfoCard(s session.Session) string {
 	var b strings.Builder
 	styles := DefaultStyles()
 	fmt.Fprintf(&b, "%s   %s\n", styles.Render(RoleMuted, "Session ID"), truncateMiddle(s.SessionID, max(m.width-18, 24)))
+	if s.CurrentModel != "" {
+		fmt.Fprintf(&b, "%s        %s\n", styles.Render(RoleMuted, "Model"), s.CurrentModel)
+	}
+	if s.CurrentContextTokens > 0 {
+		fmt.Fprintf(&b, "%s      %d tokens used\n", styles.Render(RoleMuted, "Context"), s.CurrentContextTokens)
+	}
 	fmt.Fprintf(&b, "%s\n", workspaceMessageLine(styles.Render(RoleMuted, "Messages")+"     ", "first", s.Messages.FirstUserExcerpt, m.workspacePanelWidth()))
 	fmt.Fprintf(&b, "%s\n", workspaceMessageLine("             ", "last", s.Messages.LastUserExcerpt, m.workspacePanelWidth()))
 	fmt.Fprintf(&b, "%s       writes %d  reads %d  hit %s %.0f%%\n", styles.Render(RoleMuted, "Tokens"), s.TokenStats.CacheWrites, s.TokenStats.CacheReads, HitRateProgressBar(s.TokenStats.HitRate, 8), s.TokenStats.HitRate)
@@ -109,7 +139,21 @@ func (m Model) sessionInfoDetailsCard(s session.Session) string {
 	styles := DefaultStyles()
 	fmt.Fprintf(&b, "%s   %s\n", styles.Render(RoleMuted, "Session ID"), truncateMiddle(s.SessionID, max(m.width-18, 24)))
 	fmt.Fprintf(&b, "%s       %s\n", styles.Render(RoleMuted, "JSONL"), truncateMiddle(s.JSONLPath, max(m.width-18, 24)))
-	fmt.Fprintf(&b, "%s      parsed %s · file modified %s\n", styles.Render(RoleMuted, "Updated"), m.now.Local().Format("15:04:05"), s.FileModifiedAt.Local().Format("15:04:05"))
+	if s.CurrentModel != "" {
+		fmt.Fprintf(&b, "%s        %s\n", styles.Render(RoleMuted, "Model"), s.CurrentModel)
+	}
+	if len(s.ModelsUsed) > 1 {
+		earlier := make([]string, 0, len(s.ModelsUsed)-1)
+		for _, model := range s.ModelsUsed {
+			if model != s.CurrentModel {
+				earlier = append(earlier, model)
+			}
+		}
+		fmt.Fprintf(&b, "%s %s\n", styles.Render(RoleMuted, "Earlier Models"), strings.Join(earlier, " · "))
+	}
+	if s.CurrentContextTokens > 0 {
+		fmt.Fprintf(&b, "%s      %d tokens used\n", styles.Render(RoleMuted, "Context"), s.CurrentContextTokens)
+	}
 	fmt.Fprintf(&b, "%s\n", workspaceMessageLine(styles.Render(RoleMuted, "Messages")+"     ", "first", s.Messages.FirstUserExcerpt, m.workspacePanelWidth()))
 	fmt.Fprintf(&b, "%s\n", workspaceMessageLine("             ", "last", s.Messages.LastUserExcerpt, m.workspacePanelWidth()))
 	fmt.Fprintf(&b, "%s  writes %d · reads %d · hit %s %.0f%% · output %d\n", styles.Render(RoleMuted, "Token Stats"), s.TokenStats.CacheWrites, s.TokenStats.CacheReads, HitRateProgressBar(s.TokenStats.HitRate, 10), s.TokenStats.HitRate, s.TokenStats.OutputTokens)
@@ -576,13 +620,13 @@ func (m Model) workspaceFooter() string {
 			if m.workspaceCanSendKeepAlive() || m.workspaceCanCancelKeepAlive() {
 				return cueLine("↑↓ focus  Enter/Space act  k warm  s send  x cancel  Esc back  q quit")
 			}
-			return cueLine("↑↓ focus  Enter/Space act  r remind  k warm  v info  u update  Esc back  q quit")
+			return cueLine("↑↓ focus  Enter/Space act  r remind  p pin  k warm  v info  Esc back  q quit")
 		}
 		failureActions := ""
 		if m.workspaceCanSendKeepAlive() || m.workspaceCanCancelKeepAlive() {
 			failureActions = "  s send now  x cancel"
 		}
-		return cueLine("↑↓ focus  Enter/Space act  r remind  k KeepAlive  v details  u update" + failureActions + "  Esc back  q quit")
+		return cueLine("↑↓ focus  Enter/Space act  r remind  p pin  k KeepAlive  v details  u update" + failureActions + "  Esc back  q quit")
 	}
 }
 

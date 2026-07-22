@@ -80,6 +80,17 @@ func TestOptionsFromSnapshotMapsConfigModeWithoutRefreshTicker(t *testing.T) {
 	}
 }
 
+func TestOptionsFromSnapshotRestoresWatchlistState(t *testing.T) {
+	cfg := config.Default()
+	cfg.PinnedSessions = []string{"pinned-id"}
+	cfg.ReminderSessions = []string{"reminded-id"}
+	options := OptionsFromSnapshot(SnapshotOptionsInput{Result: snapshot.Result{Config: cfg}})
+
+	if !options.PinnedSessions["pinned-id"] || !options.ReminderEnabled["reminded-id"] {
+		t.Fatalf("watchlist state = pins %#v reminders %#v", options.PinnedSessions, options.ReminderEnabled)
+	}
+}
+
 func TestRefreshSnapshotFromSnapshotResultMapsNoMatchEmptyState(t *testing.T) {
 	refresh := RefreshSnapshotFromSnapshotResult(snapshot.Result{
 		ProjectsDir: "/tmp/home/.claude/projects",

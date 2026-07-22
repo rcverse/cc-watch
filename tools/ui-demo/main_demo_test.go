@@ -21,6 +21,9 @@ func TestDemoSessionsShowDistinctCacheStates(t *testing.T) {
 	if got := sessions[2].StatusAt(now).State; got != session.StatusExpired {
 		t.Fatalf("expired demo session state = %q, want expired", got)
 	}
+	if sessions[3].CacheUnknownReason != session.CacheUnknownAfterModel {
+		t.Fatalf("unknown demo reason = %q, want after model", sessions[3].CacheUnknownReason)
+	}
 }
 
 func TestDemoWorkspaceIncludesCacheHistory(t *testing.T) {
@@ -38,6 +41,9 @@ func TestDemoWorkspaceIncludesCacheHistory(t *testing.T) {
 	}
 	if !demo.Gaps[0].Reset {
 		t.Fatal("demo longest gap should demonstrate a cache reset")
+	}
+	if demo.CurrentModel == "" || demo.CurrentContextTokens == 0 || len(demo.ModelsUsed) != 2 {
+		t.Fatalf("demo model/context metadata is incomplete: %#v", demo)
 	}
 }
 

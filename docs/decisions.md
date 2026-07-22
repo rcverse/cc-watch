@@ -82,6 +82,21 @@ while still refusing to send within seconds of expiry.
 - Watcher failures are a degraded state, not a crash — safety refresh keeps
   working even if fsnotify setup partially fails.
 
+## Watchlist and list ordering
+
+- Pinned session IDs and enabled Reminder session IDs persist in
+  `~/.config/cc-watch/config.json`. Reminder execution remains foreground-only;
+  persistence restores intent but does not create a daemon.
+- List snapshots parse the configured number of recent sessions plus any older
+  pinned or reminded sessions. Discovery already walks session metadata before
+  applying its limit, so this does not add a second filesystem traversal.
+- Recent order remains file-modification order. Attention order is an in-memory
+  view: active sessions by least time remaining, unknown sessions, then expired
+  sessions. Sorting runs when the mode changes or sessions refresh, not every
+  display tick, and selection is restored by session ID.
+- Missing watched-session files are ignored. cc-watch does not rewrite or
+  automatically prune watchlist entries when a transcript disappears.
+
 ## UI demo harness
 
 - Rare TUI states are exercised through `tools/ui-demo`, gated behind the

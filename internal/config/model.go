@@ -3,6 +3,8 @@ package config
 type Config struct {
 	RecentSessions     int              `json:"recent_sessions"`
 	ReminderThresholds []int            `json:"reminder_thresholds"`
+	PinnedSessions     []string         `json:"pinned_sessions,omitempty"`
+	ReminderSessions   []string         `json:"reminder_sessions,omitempty"`
 	KeepAlive          KeepAliveConfig  `json:"keep_alive"`
 	Statusline         StatuslineConfig `json:"statusline"`
 }

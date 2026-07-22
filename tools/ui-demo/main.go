@@ -235,6 +235,7 @@ func demoSessions(now time.Time) []session.Session {
 	unknown.ShortID = "demo-unknown"
 	unknown.Project = "unknown-cache"
 	unknown.CacheWindow = session.CacheWindow{Known: false, Label: "unknown"}
+	unknown.CacheUnknownReason = session.CacheUnknownAfterModel
 
 	return []session.Session{active, fading, expired, unknown}
 }
@@ -245,14 +246,17 @@ func demoWorkspaceSession(now time.Time) session.Session {
 	end := now
 	duration := int(end.Sub(start).Seconds())
 	return session.Session{
-		SessionID:       demoSessionID,
-		ShortID:         "demo-workspace",
-		Project:         "demo-workspace",
-		JSONLPath:       "/demo/.claude/projects/demo-workspace/demo-workspace-11111111.jsonl",
-		FileModifiedAt:  now,
-		CacheAnchorAt:   &last,
-		DurationSeconds: &duration,
-		Cwd:             "/demo/workspace",
+		SessionID:            demoSessionID,
+		ShortID:              "demo-workspace",
+		Project:              "demo-workspace",
+		JSONLPath:            "/demo/.claude/projects/demo-workspace/demo-workspace-11111111.jsonl",
+		FileModifiedAt:       now,
+		CacheAnchorAt:        &last,
+		DurationSeconds:      &duration,
+		Cwd:                  "/demo/workspace",
+		CurrentModel:         "claude-fable-5",
+		ModelsUsed:           []string{"claude-opus-4-6", "claude-fable-5"},
+		CurrentContextTokens: 197054,
 		CacheWindow: session.CacheWindow{
 			Tier:       session.Tier1Hour,
 			Label:      "1h",

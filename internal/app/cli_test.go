@@ -71,7 +71,7 @@ func TestVersionExitsSuccessfully(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Run(--version) exit code = %d, want 0", code)
 	}
-	if !strings.Contains(stdout.String(), "cc-watch 1.0.0-beta.4") {
+	if !strings.Contains(stdout.String(), "cc-watch 1.0.0-beta.5") {
 		t.Fatalf("version output = %q, want beta version", stdout.String())
 	}
 	if stderr.Len() != 0 {

@@ -138,6 +138,8 @@ func TestSaveWritesOnlyValidConfig(t *testing.T) {
 	home := t.TempDir()
 	valid := Default()
 	valid.KeepAlive.Scope.MaxSends = 2
+	valid.PinnedSessions = []string{"pinned-id"}
+	valid.ReminderSessions = []string{"reminded-id"}
 
 	if err := Save(home, valid); err != nil {
 		t.Fatalf("Save valid config returned error: %v", err)
@@ -148,6 +150,9 @@ func TestSaveWritesOnlyValidConfig(t *testing.T) {
 	}
 	if loaded.KeepAlive.Scope.MaxSends != 2 {
 		t.Fatalf("saved MaxSends = %d, want 2", loaded.KeepAlive.Scope.MaxSends)
+	}
+	if !reflect.DeepEqual(loaded.PinnedSessions, valid.PinnedSessions) || !reflect.DeepEqual(loaded.ReminderSessions, valid.ReminderSessions) {
+		t.Fatalf("saved watchlist = pins %#v reminders %#v", loaded.PinnedSessions, loaded.ReminderSessions)
 	}
 
 	invalid := valid

@@ -90,7 +90,32 @@ func (p *lineParser) parseLine(raw string) {
 	p.parseCacheEvent(obj, ts, hasTimestamp)
 	p.parseMessageWindow(obj, ts, hasTimestamp)
 	p.parseUserMessage(obj)
+	p.parseAssistantInfo(obj)
 	p.parseCwd(obj)
+}
+
+func (p *lineParser) parseAssistantInfo(obj map[string]any) {
+	message := mapValue(obj["message"])
+	if message == nil || message["role"] != "assistant" {
+		return
+	}
+	if model, ok := message["model"].(string); ok && model != "" {
+		p.session.CurrentModel = model
+		seen := false
+		for _, used := range p.session.ModelsUsed {
+			if used == model {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			p.session.ModelsUsed = append(p.session.ModelsUsed, model)
+		}
+	}
+	usage := usageValues(obj)
+	if len(usage) > 0 {
+		p.session.CurrentContextTokens = usage["input_tokens"] + usage["cache_creation_input_tokens"] + usage["cache_read_input_tokens"]
+	}
 }
 
 // parseCwd records the absolute working directory the session runs in, carried
@@ -151,7 +176,13 @@ func (p *lineParser) parseCacheEvent(obj map[string]any, ts time.Time, hasTimest
 		return
 	}
 	message := mapValue(obj["message"])
-	if message == nil || message["role"] != "assistant" || cacheEventHasError(obj, message) {
+	if message == nil || message["role"] != "assistant" {
+		return
+	}
+	if cacheEventHasError(obj, message) {
+		if p.cacheAnchorAt == nil && p.session.CacheUnknownReason == "" {
+			p.session.CacheUnknownReason = CacheUnknownResponseError
+		}
 		return
 	}
 	usage := usageValues(obj)
@@ -160,6 +191,9 @@ func (p *lineParser) parseCacheEvent(obj map[string]any, ts time.Time, hasTimest
 	}
 	if window := cacheWindowForUsage(usage); window.Known {
 		p.cacheWindow = window
+		p.session.CacheUnknownReason = ""
+	} else if !p.cacheWindow.Known && p.session.CacheUnknownReason == "" {
+		p.session.CacheUnknownReason = CacheUnknownAmbiguousTier
 	}
 	if !p.cacheWindow.Known {
 		return
@@ -173,10 +207,17 @@ func (p *lineParser) parseCacheInvalidation(obj map[string]any) {
 		return
 	}
 	text := contentText(message["content"])
+	reasons := map[string]CacheUnknownReason{
+		"/compact":        CacheUnknownAfterCompact,
+		"/model":          CacheUnknownAfterModel,
+		"/reload-plugins": CacheUnknownAfterPlugins,
+		"/effort":         CacheUnknownAfterEffort,
+	}
 	for _, command := range []string{"/compact", "/model", "/reload-plugins", "/effort"} {
 		if strings.Contains(text, "<command-name>"+command+"</command-name>") {
 			p.cacheWindow = unknownCacheWindow()
 			p.cacheAnchorAt = nil
+			p.session.CacheUnknownReason = reasons[command]
 			return
 		}
 	}
@@ -267,6 +308,9 @@ func (p *lineParser) finish() {
 
 	if p.cacheWindow.Tier == "" {
 		p.cacheWindow = unknownCacheWindow()
+	}
+	if !p.cacheWindow.Known && p.session.CacheUnknownReason == "" {
+		p.session.CacheUnknownReason = CacheUnknownNoEvidence
 	}
 	p.session.CacheWindow = p.cacheWindow
 	p.session.CacheAnchorAt = p.cacheAnchorAt

@@ -36,6 +36,34 @@ func TestBuildListSnapshotLoadsConfigDiscoversAndParsesSessions(t *testing.T) {
 	}
 }
 
+func TestBuildListSnapshotIncludesPinnedAndRemindedSessionsBeyondRecentLimit(t *testing.T) {
+	now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
+	loaders := fakeLoaders(t)
+	loaders.cfg.RecentSessions = 1
+	loaders.cfg.PinnedSessions = []string{"pinned-id"}
+	loaders.cfg.ReminderSessions = []string{"reminded-id"}
+	loaders.files = []session.SessionFile{
+		{SessionID: "recent-id", Path: "/tmp/recent.jsonl", ModTime: now},
+		{SessionID: "ignored-id", Path: "/tmp/ignored.jsonl", ModTime: now.Add(-time.Hour)},
+		{SessionID: "pinned-id", Path: "/tmp/pinned.jsonl", ModTime: now.Add(-2 * time.Hour)},
+		{SessionID: "reminded-id", Path: "/tmp/reminded.jsonl", ModTime: now.Add(-3 * time.Hour)},
+	}
+
+	result, err := Build(Request{Home: "/home/me", Now: now}, loaders.Loaders())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaders.discoveryLimit != 0 {
+		t.Fatalf("discovery limit = %d, want all metadata for watched sessions", loaders.discoveryLimit)
+	}
+	if got := len(result.Sessions); got != 3 {
+		t.Fatalf("session count = %d, want recent plus two watched", got)
+	}
+	if got := loaders.parsedPaths; len(got) != 3 || got[0] != "/tmp/recent.jsonl" || got[1] != "/tmp/pinned.jsonl" || got[2] != "/tmp/reminded.jsonl" {
+		t.Fatalf("parsed paths = %#v, want recent, pinned, reminded", got)
+	}
+}
+
 func TestBuildSelectedSnapshotResolvesPartialIDAndParsesOnlySelected(t *testing.T) {
 	now := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 	loaders := fakeLoaders(t)

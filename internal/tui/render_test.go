@@ -953,12 +953,16 @@ func TestNotificationDeliverySuccessRecordsStatusWithoutDegradedBanner(t *testin
 
 func TestWorkspaceRendersCanonicalInfoAndControlsSeparately(t *testing.T) {
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	s := workspaceSession(now)
+	s.CurrentModel = "claude-sonnet"
+	s.ModelsUsed = []string{"claude-opus", "claude-sonnet"}
+	s.CurrentContextTokens = 1252
 	model := NewModel(Options{
 		Now:                now,
 		Width:              120,
 		SelectedID:         "workspace-id",
 		ReminderThresholds: []int{20, 10},
-		Sessions:           []session.Session{workspaceSession(now)},
+		Sessions:           []session.Session{s},
 	})
 
 	view := model.View()
@@ -967,6 +971,10 @@ func TestWorkspaceRendersCanonicalInfoAndControlsSeparately(t *testing.T) {
 		"Cache Status",
 		"Session Info",
 		"Session ID",
+		"Model",
+		"claude-sonnet",
+		"Context",
+		"1252 tokens used",
 		"Messages",
 		"Tokens",
 		"Gaps",
@@ -1005,6 +1013,12 @@ func TestWorkspaceRendersCanonicalInfoAndControlsSeparately(t *testing.T) {
 	}
 
 	assertOrder(t, view, "Cache Status", "Session Info", "Messages", "Tokens", "Gaps", "Controls")
+
+	updated, _ := model.Update(keyRunes("v"))
+	details := updated.(Model).View()
+	if !strings.Contains(details, "Earlier Models") || !strings.Contains(details, "claude-opus") {
+		t.Fatalf("workspace details missing earlier model history:\n%s", details)
+	}
 }
 
 func TestExpiredWorkspaceUsesNeutralUnavailableNA(t *testing.T) {
@@ -1158,6 +1172,19 @@ func TestWorkspaceRendersCanonicalCacheStatusAndSessionInfoCards(t *testing.T) {
 	}
 }
 
+func TestWorkspaceExplainsUnknownCacheState(t *testing.T) {
+	now := time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)
+	s := workspaceSession(now)
+	s.CacheAnchorAt = nil
+	s.CacheWindow = session.CacheWindow{Tier: session.TierUnknown, Label: "TTL ?", TTLSeconds: 300}
+	s.CacheUnknownReason = session.CacheUnknownAfterModel
+	view := NewModel(Options{Now: now, Width: 120, SelectedID: s.SessionID, Sessions: []session.Session{s}}).View()
+
+	if !strings.Contains(view, "After /model. Send one normal turn.") {
+		t.Fatalf("unknown workspace missing actionable reason:\n%s", view)
+	}
+}
+
 func TestSessionInfoDetailsDisclosureAndGapSorting(t *testing.T) {
 	now := time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)
 	s := workspaceSession(now)
@@ -1186,10 +1213,13 @@ func TestSessionInfoDetailsDisclosureAndGapSorting(t *testing.T) {
 		t.Fatalf("v changed focus from %q to %q, want details_scroll", initialFocus, model.FocusedAction())
 	}
 	details := model.View()
-	for _, want := range []string{"Session Info · details", "JSONL", "Updated", "Token Stats", "Mid-session Gaps >1min · ↕ longest", "! RESET", "3m04s", "Esc back"} {
+	for _, want := range []string{"Session Info · details", "JSONL", "Token Stats", "Mid-session Gaps >1min · ↕ longest", "! RESET", "3m04s", "Esc back"} {
 		if !strings.Contains(details, want) {
 			t.Fatalf("details view missing %q:\n%s", want, details)
 		}
+	}
+	if strings.Contains(details, "Updated") || strings.Contains(details, "file modified") {
+		t.Fatalf("details view contains internal update timing:\n%s", details)
 	}
 	if strings.Contains(details, "Mid-session Gaps >1min                                  ↕") {
 		t.Fatalf("details sort label is visually detached:\n%s", details)

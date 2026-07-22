@@ -30,10 +30,13 @@ Type `cc-watch`
 Enter
 Sleep 4s
 
-# Show the full list, then choose a live session and inspect it.
+# Show the full list, switch to attention order, pin the selected session,
+# then inspect its model and context details.
 Sleep 500ms
-Down
-Sleep 500ms
+Type "s"
+Sleep 3s
+Type "p"
+Sleep 2s
 Enter
 Sleep 2s
 Type "v"

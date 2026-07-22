@@ -44,6 +44,8 @@ func OptionsFromSnapshot(input SnapshotOptionsInput) Options {
 		Sessions:           sessions,
 		SelectedID:         selectedID,
 		AmbiguousID:        ambiguousID,
+		ReminderEnabled:    sessionIDsToBoolMap(result.Config.ReminderSessions),
+		PinnedSessions:     sessionIDsToBoolMap(result.Config.PinnedSessions),
 		ReminderThresholds: result.Config.ReminderThresholds,
 		KeepAliveConfig:    result.Config.KeepAlive,
 		Refresh:            refreshState,
@@ -52,6 +54,14 @@ func OptionsFromSnapshot(input SnapshotOptionsInput) Options {
 		StartRefreshTicker: input.StartMode != StartConfig,
 		Config:             result.Config,
 	}
+}
+
+func sessionIDsToBoolMap(ids []string) map[string]bool {
+	values := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		values[id] = true
+	}
+	return values
 }
 
 func RefreshSnapshotFromSnapshotResult(result snapshot.Result) RefreshSnapshot {
